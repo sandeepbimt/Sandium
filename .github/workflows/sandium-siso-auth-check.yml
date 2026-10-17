@@ -33,7 +33,7 @@ jobs:
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
           export PATH="$RUNNER_TEMP/depot_tools:$PATH"
           mkdir -p "$RUNNER_TEMP/siso"
-          cipd install infra/tools/siso/linux-amd64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d -root "$RUNNER_TEMP/siso"
+          cipd install build/siso/linux-amd64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d -root "$RUNNER_TEMP/siso"
           test -x "$RUNNER_TEMP/siso/siso"
           "$RUNNER_TEMP/siso/siso" version
       - name: Configure and run authentication-only check
