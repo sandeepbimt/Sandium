@@ -37,11 +37,11 @@ commands:
           name: Validate restored Chromium source cache or record cold start
           command: |
             set -euo pipefail
-            if [[ -f src/chrome/VERSION ]]; then
+            if [[ -f src/brave/src/chrome/VERSION ]]; then
               python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            text = Path("src/chrome/VERSION").read_text()
+            text = Path("src/brave/src/chrome/VERSION").read_text()
             fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             print("RESTORED_CHROMIUM_VERSION=" + actual)
@@ -51,7 +51,7 @@ commands:
             if not manifest_path.is_file():
                 raise SystemExit("Source cache manifest missing; refusing to build.")
             manifest = json.loads(manifest_path.read_text())
-            chromium_sha = subprocess.check_output(["git", "-C", "src", "rev-parse", "HEAD"], text=True).strip()
+            chromium_sha = subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip()
             brave_sha = subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip()
             if manifest.get("chromium_commit") != chromium_sha:
                 raise SystemExit("Cached Chromium commit does not match manifest.")
@@ -128,11 +128,11 @@ jobs:
             python3 ci/siso/write_buildbuddy_env.py
             pnpm run sync --target_os=android --target_arch=arm64 --no-history
             cd "$HOME/project"
-            sudo ./src/build/install-build-deps.sh --android
+            sudo ./src/brave/src/build/install-build-deps.sh --android
             python3 - <<'PY'
             import re, shutil
             from pathlib import Path
-            text = Path("src/chrome/VERSION").read_text()
+            text = Path("src/brave/src/chrome/VERSION").read_text()
             fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             if actual != "156.0.8078.39":
@@ -143,15 +143,15 @@ jobs:
                 raise SystemExit("Less than 20 GiB free after source sync")
             PY
             mkdir -p build-diagnostics
-            git -C src rev-parse HEAD > build-diagnostics/chromium-commit.txt
+            git -C src/brave/src rev-parse HEAD > build-diagnostics/chromium-commit.txt
             python3 - <<'PY'
             import hashlib, json
             from pathlib import Path
-            p = Path("src/chrome/VERSION")
+            p = Path("src/brave/src/chrome/VERSION")
             manifest = {
               "schema": 1,
               "brave_core_commit": __import__("subprocess").check_output(["git","-C","src/brave","rev-parse","HEAD"], text=True).strip(),
-              "chromium_commit": __import__("subprocess").check_output(["git","-C","src","rev-parse","HEAD"], text=True).strip(),
+              "chromium_commit": __import__("subprocess").check_output(["git","-C","src/brave/src","rev-parse","HEAD"], text=True).strip(),
               "chromium_version": "156.0.8078.39",
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
               "target": "android-arm64-debug-apk"
@@ -159,26 +159,25 @@ jobs:
             Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
             PY
       - run:
-          name: Exclude fresh Brave checkout from reusable Chromium cache
+          name: Verify Chromium-only cache boundary
           command: |
             set -euo pipefail
-            mv src/brave "$HOME/brave-core-fresh"
-            test ! -e src/brave
+            test -f src/brave/package.json
+            test -f src/brave/src/chrome/VERSION
+            test "$(git -C src/brave/src rev-parse HEAD)" = "$(cat build-diagnostics/chromium-commit.txt)"
+            echo "CACHE_ROOT=src/brave/src"
+            echo "FRESH_BRAVE_CORE_CHECKOUT_EXCLUDED=true"
       - save_cache:
-          key: sandium-src-v1-chromium-156.0.8078.39-{{ .BuildNum }}
+          key: sandium-src-v2-chromium-156.0.8078.39-{{ .BuildNum }}
           paths:
-            - src
-            - .gclient
-            - .brave_latest_successful_sync.json
+            - src/brave/src
             - .sandium-source-cache-manifest.json
       - run:
-          name: Restore fresh Brave checkout and verify cache-save boundary
+          name: Confirm source-cache save request
           command: |
             set -euo pipefail
-            mkdir -p src
-            mv "$HOME/brave-core-fresh" src/brave
             test -f src/brave/package.json
-            test -f src/chrome/VERSION
+            test -f src/brave/src/chrome/VERSION
             echo "SOURCE_CACHE_SAVE_REQUESTED=true"
             echo "CACHE_SAVE_IS_NOT_YET_PROVEN_UNTIL_NEXT_RUN_RESTORES_IT=true"
       - store_artifacts:
@@ -205,13 +204,13 @@ jobs:
             python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/chrome/VERSION").read_text()
+            p=Path("src/brave/src/chrome/VERSION").read_text()
             fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
             v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
             if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
             Path("build-diagnostics/fingerprint.json").write_text(json.dumps({
               "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
-              "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
+              "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
             },indent=2)+"\n")
@@ -248,13 +247,13 @@ jobs:
             python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/chrome/VERSION").read_text()
+            p=Path("src/brave/src/chrome/VERSION").read_text()
             fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
             v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
             if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
             expected={
               "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
-              "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
+              "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
             }
@@ -294,13 +293,13 @@ jobs:
             python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/chrome/VERSION").read_text()
+            p=Path("src/brave/src/chrome/VERSION").read_text()
             fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
             v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
             if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
             expected={
               "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
-              "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
+              "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
             }
@@ -319,10 +318,10 @@ jobs:
               exit "$status"
             fi
             cd "$HOME/project"
-            mapfile -t apks < <(find src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
+            mapfile -t apks < <(find src/brave/src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
             if [[ "${#apks[@]}" -ne 1 ]]; then
               echo "Expected exactly one Bravearm64.apk, found ${#apks[@]}"
-              find src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\n' || true
+              find src/brave/src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\n' || true
               exit 3
             fi
             cp "${apks[0]}" sandium-output/Brave-debug-arm64.apk
