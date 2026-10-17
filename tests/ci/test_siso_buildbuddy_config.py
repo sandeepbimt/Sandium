@@ -161,8 +161,8 @@ class BackendConfigTests(unittest.TestCase):
         self.assertIn("OSFamily", content)
         self.assertIn("docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a", content)
         self.assertEqual(content.count('"container-image"'), 2)
-        self.assertNotIn("label:action_default", content)
-        self.assertNotIn("label:action_large", content)
+        self.assertNotIn('"label:action_default"', content)
+        self.assertNotIn('"label:action_large"', content)
 
 
 if __name__ == "__main__":

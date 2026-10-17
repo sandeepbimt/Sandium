@@ -5,7 +5,7 @@
 # example. The image is digest-pinned. BuildBuddy pullability and action
 # compatibility have not yet been tested.
 #
-# Do not copy Google's label:action_default / label:action_large labels here.
+# Keep the backend platform properties minimal; do not copy upstream Google worker-pool settings.
 
 load("@builtin//struct.star", "module")
 
