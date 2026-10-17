@@ -84,6 +84,8 @@ export class Config {
   readonly cacheDir: string | undefined
   gitCachePath: string | undefined
   rbeService: string
+  // Keep Chromium's Google-RBE-specific Siso config opt-in for other backends.
+  useGoogleChromeSisoConfig: boolean
   rbeTlsClientAuthCert: string | undefined
   rbeTlsClientAuthKey: string | undefined
   ignore_compile_failure: boolean
@@ -225,6 +227,10 @@ export class Config {
       || this.resolveCacheDir('git')
       || process.env.GIT_CACHE_PATH
     this.rbeService = envConfig.getString(['rbe_service'], '')
+    this.useGoogleChromeSisoConfig = envConfig.getBoolean(
+      ['siso_use_googlechrome_config'],
+      false,
+    )
     this.rbeTlsClientAuthCert = envConfig.getPath(['rbe_tls_client_auth_cert'])
     this.rbeTlsClientAuthKey = envConfig.getPath(['rbe_tls_client_auth_key'])
     this.ignore_compile_failure = false
