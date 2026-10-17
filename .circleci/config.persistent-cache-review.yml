@@ -78,7 +78,10 @@ commands:
             export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
             cd src/brave
             python3 ci/siso/write_buildbuddy_env.py
-            ! grep -Fq "$BUILDBUDDY_API_KEY" .env
+            if grep -Fq "$BUILDBUDDY_API_KEY" .env; then
+              echo "BuildBuddy API key unexpectedly appears in generated .env"
+              exit 1
+            fi
             git check-ignore -q .env
             cd "$HOME/project"
             grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
