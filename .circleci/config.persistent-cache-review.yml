@@ -1,0 +1,342 @@
+# REVIEW ONLY: this file is not the active CircleCI config.
+# It deliberately lives at a non-default path and does not trigger CI.
+# Review the workflow and run the offline validation before copying into config.yml.
+
+version: 2.1
+
+parameters:
+  run_sandium_android_apk_build:
+    type: boolean
+    default: false
+
+commands:
+  install-sandium-node:
+    steps:
+      - run:
+          name: Install pinned Node and pnpm
+          command: |
+            set -euo pipefail
+            sudo apt-get update
+            sudo apt-get install -y build-essential ca-certificates curl python-is-python3 python3-setuptools xz-utils
+            NODE_VERSION=24.16.0
+            curl --fail --location --silent --show-error "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz
+            sudo mkdir -p /opt/sandium-node
+            sudo tar -xJf /tmp/node.tar.xz -C /opt/sandium-node --strip-components=1
+            echo 'export PATH=/opt/sandium-node/bin:$PATH' >> "$BASH_ENV"
+            export PATH="/opt/sandium-node/bin:$PATH"
+            node --version
+            npm install --global pnpm@11.11.0
+            pnpm --version
+
+  restore-sandium-source:
+    steps:
+      - restore_cache:
+          keys:
+            - sandium-src-v1-chromium-156.0.8078.39-
+      - run:
+          name: Validate restored Chromium source cache or record cold start
+          command: |
+            set -euo pipefail
+            if [[ -f src/chrome/VERSION ]]; then
+              python3 - <<'PY'
+            import re
+            from pathlib import Path
+            text = Path("src/chrome/VERSION").read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            print("RESTORED_CHROMIUM_VERSION=" + actual)
+            if actual != "156.0.8078.39":
+                raise SystemExit("Source cache pin mismatch; refusing to build from it.")
+            PY
+            else
+              echo "SOURCE_CACHE=COLD_MISS"
+            fi
+
+  configure-sandium-remote-cache:
+    steps:
+      - run:
+          name: Configure SANDIUM-only BuildBuddy backend
+          command: |
+            set -euo pipefail
+            : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
+            cd src/brave
+            python3 ci/siso/write_buildbuddy_env.py
+            ! grep -Fq "$BUILDBUDDY_API_KEY" .env
+            git check-ignore -q .env
+            cd "$HOME/project"
+            grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
+            grep -Fxq 'projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci' src/brave/.env
+            grep -Fxq 'use_remoteexec=false' src/brave/.env
+            echo "REMOTE_EXECUTION_ENABLED_BY_BUILD_ARGUMENT=true"
+            echo "REMOTE_CACHE_HITS=NOT_YET_PROVEN"
+
+jobs:
+  verify-source-pins:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - run:
+          name: Verify pinned Brave and Chromium source
+          command: |
+            set -euo pipefail
+            cd src/brave
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+            p = json.loads(Path("package.json").read_text())
+            actual = (p["version"], p["config"]["projects"]["chrome"]["tag"])
+            expected = ("1.100.10", "156.0.8078.39")
+            print("BRAVE_CORE_VERSION=" + actual[0])
+            print("CHROMIUM_PIN=" + actual[1])
+            if actual != expected:
+                raise SystemExit(f"Expected {expected}, got {actual}")
+            PY
+
+  stage-1-source-foundation:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - restore-sandium-source
+      - install-sandium-node
+      - run:
+          name: Synchronize pinned source and dependencies with shallow history
+          no_output_timeout: 50m
+          command: |
+            set -euo pipefail
+            cd src/brave
+            python3 ci/siso/write_buildbuddy_env.py
+            pnpm run init --target_os=android --target_arch=arm64 --no-history
+            cd "$HOME/project"
+            sudo ./src/build/install-build-deps.sh --android
+            python3 - <<'PY'
+            import re, shutil
+            from pathlib import Path
+            text = Path("src/chrome/VERSION").read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            if actual != "156.0.8078.39":
+                raise SystemExit(f"Chromium pin mismatch: {actual}")
+            free = shutil.disk_usage(".").free
+            print(f"FREE_DISK_AFTER_SYNC_BYTES={free}")
+            if free < 20 * 1024**3:
+                raise SystemExit("Less than 20 GiB free after source sync")
+            PY
+            mkdir -p build-diagnostics
+            git -C src rev-parse HEAD > build-diagnostics/chromium-commit.txt
+            python3 - <<'PY'
+            import hashlib, json
+            from pathlib import Path
+            p = Path("src/chrome/VERSION")
+            manifest = {
+              "schema": 1,
+              "brave_core_commit": __import__("subprocess").check_output(["git","-C","src/brave","rev-parse","HEAD"], text=True).strip(),
+              "chromium_commit": __import__("subprocess").check_output(["git","-C","src","rev-parse","HEAD"], text=True).strip(),
+              "chromium_version": "156.0.8078.39",
+              "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+              "target": "android-arm64-debug-apk"
+            }
+            Path("build-diagnostics/source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\\n")
+            PY
+      - run:
+          name: Exclude fresh Brave checkout from reusable Chromium cache
+          command: |
+            set -euo pipefail
+            mv src/brave "$HOME/brave-core-fresh"
+            test ! -e src/brave
+      - save_cache:
+          key: sandium-src-v1-chromium-156.0.8078.39-{{ .BuildNum }}
+          paths:
+            - src
+            - .gclient
+            - .brave_latest_successful_sync.json
+      - run:
+          name: Restore fresh Brave checkout and verify cache-save boundary
+          command: |
+            set -euo pipefail
+            mkdir -p src
+            mv "$HOME/brave-core-fresh" src/brave
+            test -f src/brave/package.json
+            test -f src/chrome/VERSION
+            echo "SOURCE_CACHE_SAVE_REQUESTED=true"
+            echo "CACHE_SAVE_IS_NOT_YET_PROVEN_UNTIL_NEXT_RUN_RESTORES_IT=true"
+      - store_artifacts:
+          path: build-diagnostics
+          destination: stage-1-source-foundation
+
+  stage-2-graph-and-compile-window:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - restore-sandium-source
+      - install-sandium-node
+      - configure-sandium-remote-cache
+      - run:
+          name: Validate fingerprint, configure GN and compile window 1
+          no_output_timeout: 45m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics
+            python3 - <<'PY'
+            import json, re, subprocess
+            from pathlib import Path
+            p=Path("src/chrome/VERSION").read_text()
+            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$",p,re.M))
+            v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
+            if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
+            Path("build-diagnostics/fingerprint.json").write_text(json.dumps({
+              "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
+              "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
+              "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
+              "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
+            },indent=2)+"\\n")
+            PY
+            cd src/brave
+            set +e
+            timeout --signal=INT --kill-after=30s 42m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
+            if [[ "$status" -ne 0 && "$status" -ne 124 && "$status" -ne 130 ]]; then exit "$status"; fi
+            echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+      - store_artifacts:
+          path: build-diagnostics
+          destination: stage-2-compile-window
+
+  stage-3-compile-continuation:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - restore-sandium-source
+      - install-sandium-node
+      - configure-sandium-remote-cache
+      - run:
+          name: Compile window 2 using same target and remote action cache
+          no_output_timeout: 45m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics
+            cd src/brave
+            set +e
+            timeout --signal=INT --kill-after=30s 42m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
+            if [[ "$status" -ne 0 && "$status" -ne 124 && "$status" -ne 130 ]]; then exit "$status"; fi
+            echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+      - store_artifacts:
+          path: build-diagnostics
+          destination: stage-3-compile-continuation
+
+  stage-4-finish-and-package:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - restore-sandium-source
+      - install-sandium-node
+      - configure-sandium-remote-cache
+      - run:
+          name: Finish compilation and require APK
+          no_output_timeout: 45m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics sandium-output
+            cd src/brave
+            set +e
+            timeout --signal=INT --kill-after=30s 42m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-3.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
+            if [[ "$status" -ne 0 ]]; then
+              echo "Final compile window did not complete successfully (status=$status)"
+              exit "$status"
+            fi
+            cd "$HOME/project"
+            mapfile -t apks < <(find src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
+            if [[ "${#apks[@]}" -ne 1 ]]; then
+              echo "Expected exactly one Bravearm64.apk, found ${#apks[@]}"
+              find src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\\n' || true
+              exit 3
+            fi
+            cp "${apks[0]}" sandium-output/Brave-debug-arm64.apk
+            sha256sum sandium-output/Brave-debug-arm64.apk | tee sandium-output/sha256.txt
+      - persist_to_workspace:
+          root: .
+          paths:
+            - sandium-output/Brave-debug-arm64.apk
+            - sandium-output/sha256.txt
+      - store_artifacts:
+          path: build-diagnostics
+          destination: stage-4-finish-build
+
+  stage-5-verify-publish:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Verify final APK
+          command: |
+            set -euo pipefail
+            python3 - <<'PY'
+            import hashlib, zipfile
+            from pathlib import Path
+            apk=Path("sandium-output/Brave-debug-arm64.apk")
+            expected=Path("sandium-output/sha256.txt").read_text().split()[0]
+            actual=hashlib.sha256(apk.read_bytes()).hexdigest()
+            if actual != expected: raise SystemExit("APK SHA-256 mismatch")
+            with zipfile.ZipFile(apk) as z:
+              if z.testzip() is not None: raise SystemExit("APK CRC failure")
+              names=set(z.namelist())
+              if "AndroidManifest.xml" not in names: raise SystemExit("Missing AndroidManifest.xml")
+              if not any(n.startswith("classes") and n.endswith(".dex") for n in names): raise SystemExit("Missing DEX")
+            print("APK_INTEGRITY=PASS")
+            print("APK_SHA256="+actual)
+            PY
+      - store_artifacts:
+          path: sandium-output
+          destination: sandium-verified-android-debug-apk
+
+workflows:
+  sandium-android-debug-apk-review-only:
+    when: << pipeline.parameters.run_sandium_android_apk_build >>
+    jobs:
+      - verify-source-pins
+      - stage-1-source-foundation:
+          requires:
+            - verify-source-pins
+      - stage-2-graph-and-compile-window:
+          requires:
+            - stage-1-source-foundation
+      - stage-3-compile-continuation:
+          requires:
+            - stage-2-graph-and-compile-window
+      - stage-4-finish-and-package:
+          requires:
+            - stage-3-compile-continuation
+      - stage-5-verify-publish:
+          requires:
+            - stage-4-finish-and-package
