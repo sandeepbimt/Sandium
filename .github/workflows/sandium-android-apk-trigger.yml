@@ -1,0 +1,69 @@
+name: Sandium Android Debug APK Build Trigger
+
+on:
+  push:
+    branches:
+      - build/sandium-android-debug-apk-2026-10-17
+    paths:
+      - .github/workflows/sandium-android-apk-trigger.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandium-android-debug-apk
+  cancel-in-progress: false
+
+jobs:
+  trigger-sandium-build:
+    name: Trigger the isolated Sandium five-stage APK pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Validate the one approved build branch
+        env:
+          BRANCH: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$BRANCH" != "build/sandium-android-debug-apk-2026-10-17" ]]; then
+            echo "::error::Refusing to trigger an APK build from an unreviewed branch."
+            exit 1
+          fi
+          echo "Approved isolated Sandium branch: $BRANCH"
+
+      - name: Trigger the five-stage CircleCI Android APK pipeline
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+          PIPELINE_DEFINITION_ID: "da327fe7-52aa-4dd5-bec1-4ef30d50d8c9"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CIRCLECI_TOKEN:-}" ]]; then
+            echo "::error::Repository secret CIRCLECI_TOKEN is missing; no CircleCI pipeline was started."
+            exit 1
+          fi
+          request_body="$(python3 -c 'import json,os; b=os.environ["BRANCH"]; print(json.dumps({"definition_id":os.environ["PIPELINE_DEFINITION_ID"],"config":{"branch":b},"checkout":{"branch":b},"parameters":{"run_sandium_android_apk_build":True}}))')"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          status="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" \
+            --request POST "https://circleci.com/api/v2/project/${CIRCLECI_PROJECT_SLUG}/pipeline/run" \
+            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$request_body")"
+          if [[ "$status" != "200" && "$status" != "201" ]]; then
+            echo "::error::CircleCI API returned HTTP $status. No successful trigger was confirmed."
+            cat "$response_file"
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json,sys
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              payload=json.load(stream)
+          summary={k:payload.get(k) for k in ("id","number","state","created_at","message") if k in payload}
+          print(json.dumps(summary, indent=2))
+          print("CircleCI accepted the Sandium Android debug APK build request.")
+          print("The CircleCI job results and APK verification determine success; API acceptance alone is not build success.")
+          PY
