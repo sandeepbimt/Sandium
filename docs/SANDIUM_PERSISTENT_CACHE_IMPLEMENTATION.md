@@ -79,3 +79,15 @@ Until all gates pass, this is an implementation design, not a proven resumable b
 - Intermediate compile windows accept only timeout exit status 124 as an expected stop. Any other nonzero status fails the job. This reduces, but does not eliminate, the risk of confusing a timeout with compiler failure.
 - The review candidate has not been parsed by a CircleCI YAML validator, run through shellcheck, executed on a runner, or tested against actual CircleCI cache restore/save or BuildBuddy/Siso metrics. Those remain hard gates. No claim of functional cache reuse is made.
 - The candidate saves a full source tree, so archive size and save/restore duration may erase the expected benefit. Measure these before considering activation.
+
+## Validation checkpoint (2026-10-17, offline)
+
+**NO-GO: do not activate or run the review candidate yet.**
+
+A source-level inspection found a definite Stage 1 configuration failure: `ci/siso/write_buildbuddy_env.py` reads `SANDIUM_REAPI_ADDRESS` and `SANDIUM_REAPI_INSTANCE` from the environment and rejects empty values, but the Stage 1 command invokes it without exporting either variable. Stage 1 will therefore fail before `pnpm run sync`. The candidate must set the reviewed values `remote.buildbuddy.io:443` and `sandium/android-arm64/ci` before invoking the helper.
+
+Validation status:
+- Verified by reading the pinned `sync.ts`: `--no-history` is a declared option and is forwarded to gclient.
+- Verified by reading the helper: both SANDIUM variables are mandatory and validated.
+- Static workflow inspection confirms five sequential job names and required dependency edges.
+- Not verified: CircleCI's own config parser, shellcheck, actual cache save/restore, remote execution, remote-cache hit rates, or APK output. No CI execution was performed.
