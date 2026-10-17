@@ -8,6 +8,9 @@ parameters:
   run_sandium_android_apk_build:
     type: boolean
     default: false
+  run_sandium_source_cache_test:
+    type: boolean
+    default: false
 
 commands:
   install-sandium-node:
@@ -107,6 +110,91 @@ commands:
             echo "REMOTE_CACHE_HITS=NOT_YET_PROVEN"
 
 jobs:
+  source-cache-only-test:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - install-sandium-node
+      - restore_cache:
+          keys:
+            - sandium-src-v3-chromium-156.0.8078.39-
+      - run:
+          name: Verify restored cache or synchronize source (no compilation)
+          no_output_timeout: 50m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics
+            if [[ -f src/brave/src/chrome/VERSION ]]; then
+              echo "SOURCE_CACHE_RESULT=RESTORED"
+              python3 - <<'PY'
+            import hashlib, json, subprocess
+            from pathlib import Path
+            import re
+            version_file = Path("src/brave/src/chrome/VERSION")
+            text = version_file.read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            if actual != "156.0.8078.39":
+                raise SystemExit(f"Unexpected restored Chromium version: {actual}")
+            manifest_path = Path(".sandium-source-cache-manifest.json")
+            if not manifest_path.is_file():
+                raise SystemExit("Restored cache has no manifest.")
+            manifest = json.loads(manifest_path.read_text())
+            commit = subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip()
+            digest = hashlib.sha256(version_file.read_bytes()).hexdigest()
+            if manifest.get("schema") != 2 or manifest.get("chromium_version") != actual or manifest.get("chromium_commit") != commit or manifest.get("version_file_sha256") != digest:
+                raise SystemExit("Restored source cache manifest does not match the checkout.")
+            print("SOURCE_CACHE_MANIFEST_VALID=PASS")
+            print("RESTORED_CHROMIUM_COMMIT=" + commit)
+            PY
+              echo "SOURCE_CACHE_REUSE=PASS"
+            else
+              echo "SOURCE_CACHE_RESULT=COLD_MISS"
+              cd src/brave
+              pnpm run sync --target_os=android --target_arch=arm64 --no-history
+              cd "$HOME/project"
+              test -f src/brave/src/chrome/VERSION
+              python3 - <<'PY'
+            import hashlib, json, subprocess
+            from pathlib import Path
+            import re
+            version_file = Path("src/brave/src/chrome/VERSION")
+            text = version_file.read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            if actual != "156.0.8078.39":
+                raise SystemExit(f"Unexpected synced Chromium version: {actual}")
+            manifest = {
+              "schema": 2,
+              "chromium_commit": subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"], text=True).strip(),
+              "chromium_version": actual,
+              "version_file_sha256": hashlib.sha256(version_file.read_bytes()).hexdigest(),
+              "target": "android-arm64-debug-apk"
+            }
+            Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\\n")
+            print("SOURCE_SYNC=PASS")
+            print("SYNCED_CHROMIUM_COMMIT=" + manifest["chromium_commit"])
+            PY
+              echo "SOURCE_CACHE_SAVE_REQUESTED=true"
+            fi
+            du -sh src/brave/src
+            df -h .
+      - save_cache:
+          key: sandium-src-v3-chromium-156.0.8078.39-{{ .BuildNum }}
+          paths:
+            - src/brave/src
+            - src/brave/.brave_gclient
+            - src/brave/.brave_gclient_entries
+            - src/brave/.gclient_entries
+            - .sandium-source-cache-manifest.json
+      - store_artifacts:
+          path: build-diagnostics
+          destination: source-cache-only-test
+
   stage-1-source-foundation:
     machine:
       image: ubuntu-2404:current
@@ -429,6 +517,11 @@ jobs:
           destination: sandium-verified-android-debug-apk
 
 workflows:
+  sandium-source-cache-only-test:
+    when: << pipeline.parameters.run_sandium_source_cache_test >>
+    jobs:
+      - source-cache-only-test
+
   sandium-android-debug-apk-review-only:
     when: << pipeline.parameters.run_sandium_android_apk_build >>
     jobs:
