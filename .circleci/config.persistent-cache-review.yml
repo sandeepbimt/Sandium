@@ -53,6 +53,10 @@ commands:
             manifest = json.loads(manifest_path.read_text())
             chromium_sha = subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip()
             version_sha256 = __import__("hashlib").sha256(Path("src/brave/src/chrome/VERSION").read_bytes()).hexdigest()
+            if manifest.get("schema") != 2:
+                raise SystemExit("Unsupported source-cache manifest schema.")
+            if manifest.get("chromium_version") != actual:
+                raise SystemExit("Source-cache manifest version does not match the checked-out source.")
             if manifest.get("chromium_commit") != chromium_sha:
                 raise SystemExit("Cached Chromium commit does not match manifest.")
             if manifest.get("version_file_sha256") != version_sha256:
