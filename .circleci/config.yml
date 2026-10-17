@@ -1,0 +1,80 @@
+version: 2.1
+
+parameters:
+  run_sandium_rbe_preflight:
+    type: boolean
+    default: false
+
+jobs:
+  sandium-rbe-configuration-preflight:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    steps:
+      - run:
+          name: Verify isolated Sandium remote-build configuration
+          command: |
+            set -euo pipefail
+
+            echo "=== SANDIUM RBE CONFIGURATION PREFLIGHT ONLY ==="
+            test "${CIRCLE_PROJECT_USERNAME:-}" = "sandeepbimt" || {
+              echo "Expected CircleCI project owner sandeepbimt; stopping."
+              exit 1
+            }
+            test "${CIRCLE_PROJECT_REPONAME:-}" = "Sandium" || {
+              echo "Expected CircleCI project Sandium; stopping."
+              exit 1
+            }
+            test -n "${CIRCLE_SHA1:-}" || {
+              echo "CIRCLE_SHA1 is unavailable; stopping."
+              exit 1
+            }
+
+            : "${SANDIUM_REAPI_ADDRESS:?Set a Sandium-specific REAPI endpoint in CircleCI project/context variables}"
+            : "${SANDIUM_REAPI_INSTANCE:?Set the intended REAPI instance/namespace explicitly}"
+            : "${BUILDBUDDY_API_KEY:?Create a fresh Sandium-specific BuildBuddy API key; do not copy a SANDFOX key}"
+            test "${SANDIUM_CACHE_SCOPE_CONFIRMED:-}" = "true" || {
+              echo "Set SANDIUM_CACHE_SCOPE_CONFIRMED=true only after confirming the chosen instance/project isolates Sandium cache scope."
+              exit 1
+            }
+
+            PACKAGE_FILE="$(mktemp)"
+            BACKEND_FILE="$(mktemp)"
+            trap 'rm -f "${PACKAGE_FILE}" "${BACKEND_FILE}"' EXIT
+            ROOT_URL="https://raw.githubusercontent.com/sandeepbimt/Sandium/${CIRCLE_SHA1}"
+
+            curl --fail --silent --show-error "${ROOT_URL}/package.json" -o "${PACKAGE_FILE}"
+            curl --fail --silent --show-error "${ROOT_URL}/ci/siso/buildbuddy_backend.star" -o "${BACKEND_FILE}"
+
+            python3 - "${PACKAGE_FILE}" <<'PY'
+            import json
+            import sys
+
+            with open(sys.argv[1], encoding="utf-8") as stream:
+                package = json.load(stream)
+
+            version = package.get("version")
+            chromium = package.get("config", {}).get("projects", {}).get("chrome", {}).get("tag")
+            print("BRAVE_CORE_VERSION=" + str(version))
+            print("CHROMIUM_REVISION=" + str(chromium))
+            if version != "1.100.10" or chromium != "156.0.8078.39":
+                raise SystemExit("Source pins differ from the reviewed feasibility baseline; stop and re-review.")
+            PY
+
+            grep -q 'OSFamily.*Linux' "${BACKEND_FILE}"
+            grep -q 'backend = module' "${BACKEND_FILE}"
+            echo "REAPI_ADDRESS=${SANDIUM_REAPI_ADDRESS}"
+            echo "REAPI_INSTANCE=${SANDIUM_REAPI_INSTANCE}"
+            echo "BUILDBUDDY_API_KEY_PRESENT=yes"
+            echo "CACHE_SCOPE_CONFIRMED=yes"
+            echo "SANDIUM_RBE_PREFLIGHT=PASS"
+            echo "REMOTE_EXECUTION_TESTED=no"
+            echo "SOURCE_SYNC_RUN=no"
+            echo "COMPILATION_RUN=no"
+            echo "This job performs static metadata checks only; it does not call BuildBuddy, clone Chromium, run gclient, generate GN or compile."
+ 
+workflows:
+  sandium-rbe-preflight:
+    when: << pipeline.parameters.run_sandium_rbe_preflight >>
+    jobs:
+      - sandium-rbe-configuration-preflight
