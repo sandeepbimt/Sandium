@@ -46,7 +46,7 @@ jobs:
             curl --fail --silent --show-error "${ROOT_URL}/package.json" -o "${PACKAGE_FILE}"
             curl --fail --silent --show-error "${ROOT_URL}/ci/siso/buildbuddy_backend.star" -o "${BACKEND_FILE}"
 
-            python3 - "${PACKAGE_FILE}" <<'PY'
+            python3 - "${PACKAGE_FILE}" \<<'PY'
             import json
             import sys
 
