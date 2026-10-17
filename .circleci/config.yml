@@ -20,7 +20,7 @@ jobs:
             set -euo pipefail
             cd src/brave
             test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import json
             from pathlib import Path
             p = json.loads(Path('package.json').read_text())
@@ -92,7 +92,7 @@ jobs:
           command: |
             set -euo pipefail
             test "$(git -C src/brave rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import shutil
             free = shutil.disk_usage('.').free
             print(f'FREE_DISK_BYTES={free}')
@@ -117,7 +117,7 @@ jobs:
             mkdir -p build-diagnostics sandium-output
             LOG="$PWD/build-diagnostics/source-sync-and-build.log"
             SCRIPT="$PWD/build-diagnostics/run-build.sh"
-            cat > "$SCRIPT" <<'BUILD'
+            cat > "$SCRIPT" \<<'BUILD'
             #!/usr/bin/env bash
             set -euo pipefail
             export PATH="/opt/sandium-node/bin:$PATH"
@@ -133,7 +133,7 @@ jobs:
             pnpm run init --target_os=android --target_arch=arm64
             cd "$PROJECT"
             sudo ./src/build/install-build-deps.sh --android
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import re, shutil
             from pathlib import Path
             root = Path.cwd()
@@ -167,7 +167,7 @@ jobs:
             test -n "$AAPT" && test -n "$APKSIGNER" || { echo 'Missing aapt or apksigner from fetched Android SDK.'; exit 4; }
             "$AAPT" dump badging "$APK" > build-diagnostics/apk-badging.txt
             "$APKSIGNER" verify --verbose "$APK" > build-diagnostics/apksigner-verify.txt 2>&1
-            python3 - "$APK" sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" <<'PY'
+            python3 - "$APK" sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" \<<'PY'
             import hashlib, json, re, shutil, subprocess, sys, zipfile
             from pathlib import Path
             src, dest, manifest_path = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
@@ -230,7 +230,7 @@ jobs:
           name: Verify APK hash, ZIP CRC and required Android entries
           command: |
             set -euo pipefail
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import hashlib, json, zipfile
             from pathlib import Path
             apk = Path('sandium-output/Brave-debug-arm64.apk')
@@ -266,7 +266,7 @@ jobs:
           name: Final artifact acceptance gate
           command: |
             set -euo pipefail
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import hashlib, json
             from pathlib import Path
             apk = Path('sandium-output/Brave-debug-arm64.apk')
