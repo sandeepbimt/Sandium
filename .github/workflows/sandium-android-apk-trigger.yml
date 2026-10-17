@@ -1,4 +1,5 @@
 name: Sandium Android Debug APK Build Trigger
+# Retry using the project's available CircleCI large machine class.
 # Retry after the user confirmed CircleCI BUILDBUDDY_API_KEY was configured.
 # Retrigger after CircleCI heredoc syntax fix; build branch remains isolated.
 
