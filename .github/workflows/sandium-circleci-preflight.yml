@@ -1,0 +1,74 @@
+name: Sandium CircleCI Preflight Trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Sandium branch used for both CircleCI config and checkout"
+        required: true
+        type: string
+        default: "ci/sandium-buildbuddy-siso-preflight"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandium-circleci-preflight-trigger
+  cancel-in-progress: false
+
+jobs:
+  trigger-preflight:
+    name: Trigger lightweight CircleCI preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate requested branch
+        env:
+          BRANCH: ${{ inputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$BRANCH" != "ci/sandium-buildbuddy-siso-preflight" ]]; then
+            echo "::error::Only the reviewed Sandium preflight branch may be triggered by this workflow."
+            exit 1
+          fi
+          echo "Requested branch is the reviewed Sandium preflight branch."
+
+      - name: Trigger CircleCI pipeline definition
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          BRANCH: ${{ inputs.branch }}
+          CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWVf14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+          PIPELINE_DEFINITION_ID: "da327b7b-52aa-4dd5-bec1-4ef30d50d8c9"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CIRCLECI_TOKEN:-}" ]]; then
+            echo "::error::Repository secret CIRCLECI_TOKEN is missing. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          request_body="$(python3 -c 'import json,os; b=os.environ["BRANCH"]; print(json.dumps({"definition_id":os.environ["PIPELINE_DEFINITION_ID"],"config":{"branch":b},"checkout":{"branch":b},"parameters":{"run_sandium_rbe_preflight":True}}))')"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
+          status="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" \
+            --request POST "https://circleci.com/api/v2/project/${CIRCLECI_PROJECT_SLUG}/pipeline/run" \
+            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$request_body")"
+
+          if [[ "$status" != "200" && "$status" != "201" ]]; then
+            echo "::error::CircleCI API returned HTTP $status."
+            cat "$response_file"
+            exit 1
+          fi
+
+          echo "CircleCI accepted the preflight trigger:"
+          python3 - "$response_file" <<'PY'
+          import json,sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              payload=json.load(f)
+          print(json.dumps({k: payload.get(k) for k in ("id","number","state","created_at","message") if k in payload}, indent=2))
+          PY
+          echo "This trigger requests only the lightweight configuration preflight; it does not start a Chromium build."
