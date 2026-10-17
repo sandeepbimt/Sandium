@@ -32,7 +32,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-src-v1-chromium-156.0.8078.39-
+            - sandium-src-v2-brave-{{ .Revision }}-chromium-156.0.8078.39-
       - run:
           name: Validate restored Chromium source cache or record cold start
           command: |
@@ -168,7 +168,7 @@ jobs:
             echo "CACHE_ROOT=src/brave/src"
             echo "FRESH_BRAVE_CORE_CHECKOUT_EXCLUDED=true"
       - save_cache:
-          key: sandium-src-v2-chromium-156.0.8078.39-{{ .BuildNum }}
+          key: sandium-src-v2-brave-{{ .Revision }}-chromium-156.0.8078.39-{{ .BuildNum }}
           paths:
             - src/brave/src
             - .sandium-source-cache-manifest.json
