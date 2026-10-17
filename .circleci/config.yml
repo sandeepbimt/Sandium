@@ -47,7 +47,7 @@ jobs:
             mkdir -p build-diagnostics
             if [[ -f src/brave/src/chrome/VERSION ]]; then
               echo "SOURCE_CACHE_RESULT=RESTORED"
-              python3 - <<'PY'
+              python3 - -\<<'PY'
             import hashlib, json, subprocess, re
             from pathlib import Path
             version_file = Path("src/brave/src/chrome/VERSION")
@@ -78,7 +78,7 @@ jobs:
               pnpm run sync --target_os=android --target_arch=arm64 --no-history
               cd "$HOME/project"
               test -f src/brave/src/chrome/VERSION
-              python3 - <<'PY'
+              python3 - -\<<'PY'
             import hashlib, json, subprocess, re
             from pathlib import Path
             version_file = Path("src/brave/src/chrome/VERSION")
