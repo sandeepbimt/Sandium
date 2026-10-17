@@ -223,6 +223,10 @@ jobs:
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build-diagnostics/fingerprint.json
       - store_artifacts:
           path: build-diagnostics
           destination: stage-2-compile-window
@@ -235,6 +239,8 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - attach_workspace:
+          at: .
       - restore-sandium-source
       - install-sandium-node
       - configure-sandium-remote-cache
@@ -247,19 +253,22 @@ jobs:
             python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/brave/src/chrome/VERSION").read_text()
-            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
-            v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
-            if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
-            expected={
-              "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
-              "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
-              "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
-              "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
+            version_text = Path("src/brave/src/chrome/VERSION").read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_text, re.M))
+            version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            actual = {
+              "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
+              "chromium_commit": subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip(),
+              "chromium_version": version, "target": "android-arm64", "config": "Debug", "format": "apk",
+              "siso_revision": "c574896b272b40aac6e44c228ee0b471ea7e3d7d"
             }
-            fp=Path("build-diagnostics/fingerprint.json")
-            fp.write_text(json.dumps(expected,indent=2)+"\n")
-            print("BUILD_FINGERPRINT=PASS")
+            fingerprint = Path("build-diagnostics/fingerprint.json")
+            if not fingerprint.is_file():
+                raise SystemExit("Stage 2 fingerprint missing from workspace.")
+            expected = json.loads(fingerprint.read_text())
+            if actual != expected:
+                raise SystemExit(f"Build fingerprint mismatch: expected={expected}, actual={actual}")
+            print("BUILD_FINGERPRINT_MATCHES_STAGE_2=PASS")
             PY
             cd src/brave
             set +e
@@ -281,6 +290,8 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - attach_workspace:
+          at: .
       - restore-sandium-source
       - install-sandium-node
       - configure-sandium-remote-cache
@@ -293,19 +304,22 @@ jobs:
             python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/brave/src/chrome/VERSION").read_text()
-            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
-            v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
-            if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
-            expected={
-              "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
-              "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
-              "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
-              "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
+            version_text = Path("src/brave/src/chrome/VERSION").read_text()
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_text, re.M))
+            version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+            actual = {
+              "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
+              "chromium_commit": subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip(),
+              "chromium_version": version, "target": "android-arm64", "config": "Debug", "format": "apk",
+              "siso_revision": "c574896b272b40aac6e44c228ee0b471ea7e3d7d"
             }
-            fp=Path("build-diagnostics/fingerprint.json")
-            fp.write_text(json.dumps(expected,indent=2)+"\n")
-            print("BUILD_FINGERPRINT=PASS")
+            fingerprint = Path("build-diagnostics/fingerprint.json")
+            if not fingerprint.is_file():
+                raise SystemExit("Stage 2 fingerprint missing from workspace.")
+            expected = json.loads(fingerprint.read_text())
+            if actual != expected:
+                raise SystemExit(f"Build fingerprint mismatch: expected={expected}, actual={actual}")
+            print("FINAL_STAGE_FINGERPRINT_MATCHES_STAGE_2=PASS")
             PY
             cd src/brave
             set +e
