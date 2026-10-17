@@ -225,7 +225,7 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
-            if [[ "$status" -ne 0 && "$status" -ne 124 && "$status" -ne 130 ]]; then exit "$status"; fi
+            if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - store_artifacts:
           path: build-diagnostics
@@ -271,7 +271,7 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
-            if [[ "$status" -ne 0 && "$status" -ne 124 && "$status" -ne 130 ]]; then exit "$status"; fi
+            if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - store_artifacts:
           path: build-diagnostics
