@@ -78,7 +78,7 @@ jobs:
   build-android-debug-apk:
     machine:
       image: ubuntu-2404:current
-    resource_class: xlarge
+    resource_class: large
     working_directory: ~/project
     environment:
       JAVA_OPTS: -Xmx10G -Xms1G
