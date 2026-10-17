@@ -123,3 +123,17 @@ Changes made to the review-only candidate:
 - The compiler output tree is intentionally not transferred through CircleCI workspaces because its size and transfer time are unknown. This design is viable only if the remote cache reliably restores completed actions on the next job. That remains unverified.
 
 Status remains **NO-GO** until the updated candidate is revalidated and a separately authorized, carefully scoped run demonstrates (a) source cache restoration, (b) correct dependency setup on every compile runner, (c) useful Siso/BuildBuddy action-cache hits after the first timed window, and (d) successful APK packaging. Active `.circleci/config.yml` and SANDFOX infrastructure remain untouched.
+
+
+### Chromium source-cache key correction (2026-10-17)
+
+The prior cache key incorrectly included `{{ .Revision }}` and the cache manifest required the fresh Brave Core checkout SHA to equal the SHA recorded by the cached source. Because the cache intentionally contains only `src/brave/src` (Chromium), a change to the surrounding Brave Core commit or CI-only files should not invalidate otherwise matching Chromium source. The old condition would have made reuse across ordinary commits impossible.
+
+The review candidate now:
+- Uses schema/key version 3 with a Chromium-version-scoped prefix, independent of the current Brave Core commit.
+- Stores Chromium source plus the generated gclient metadata paths used by Brave's sync flow (`.brave_gclient`, `.brave_gclient_entries`, and `.gclient_entries`) where present.
+- Removes the Brave Core SHA from the Chromium-only cache manifest.
+- Validates manifest schema, Chromium version, Chromium Git SHA, and the cached `chrome/VERSION` file hash.
+- Still uses CircleCI's unique `{{ .BuildNum }}` for each save, while restore uses the stable prefix to find a previous compatible cache.
+
+This is a source-level correction, not proof of a warm sync. The next validation run must pass, and a later explicitly approved source-cache test must show a real cache restore plus measured sync duration/transfer behavior. No build was run as part of this correction.
