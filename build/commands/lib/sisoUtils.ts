@@ -37,10 +37,12 @@ export function writeSisoRc() {
     // Use byte stream for most files as it is compression-aware.
     ninjaFlags.push('-reapi_byte_stream_read_threshold 1024')
 
-    // Enable googlechrome config to build most targets with RBE. This is
-    // disabled by default in Chromium to make only clang actions be
-    // RBE-buildable, but we can build most targets in Brave RBE infra.
-    ninjaFlags.push('-config googlechrome')
+    // Chromium's googlechrome preset is intended for Google's RBE backend.
+    // Keep it opt-in for non-Google REAPI backends unless compatibility has
+    // been established explicitly.
+    if (config.useGoogleChromeSisoConfig) {
+      ninjaFlags.push('-config googlechrome')
+    }
 
     // Disable remote execution and cache write if rbe_readonly is true.
     if (config.rbeReadOnly) {
