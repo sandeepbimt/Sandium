@@ -121,12 +121,12 @@ jobs:
           # CircleCI requires escaped heredoc openers in this config; normalize them only for
           # local shell/Python syntax analysis. Never execute an embedded command.
           python_heredoc = re.compile(
-              r"(?ms)^(?P<start>[^\n]*\\?python3?[^\n]*?\\?<<['\"]?PY['\"]?[ \\t]*\\n)"
-              r"(?P<body>.*?)^[ \\t]*PY[ \\t]*$"
+              r"(?ms)^(?P<start>[^\n]*\\?python3?[^\n]*?\\?<<['\"]?PY['\"]?[ \t]*\n)"
+              r"(?P<body>.*?)^[ \t]*PY[ \t]*$"
           )
           build_heredoc = re.compile(
-              r"(?ms)^[^\n]*\\?<<['\"]?BUILD['\"]?[ \\t]*\\n"
-              r"(?P<body>.*?)^[ \\t]*BUILD[ \\t]*$"
+              r"(?ms)^[^\n]*\\?<<['\"]?BUILD['\"]?[ \t]*\n"
+              r"(?P<body>.*?)^[ \t]*BUILD[ \t]*$"
           )
 
           checked_shell = 0
@@ -147,22 +147,22 @@ jobs:
                       checked_python += 1
                   except SyntaxError as error:
                       raise SystemExit(f"Embedded Python syntax error in {label}: {error}")
-                  return match.group("start") + "# embedded Python checked separately\\nPY"
+                  return match.group("start") + "# embedded Python checked separately\nPY"
 
               shell = python_heredoc.sub(remove_python, source)
               with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
-                  handle.write(shell + "\\n")
+                  handle.write(shell + "\n")
                   shell_path = Path(handle.name)
               try:
                   bash = subprocess.run(["bash", "-n", str(shell_path)], text=True, capture_output=True)
                   if bash.returncode:
-                      raise SystemExit(f"Bash syntax error in {label}:\\n{bash.stderr}")
+                      raise SystemExit(f"Bash syntax error in {label}:\n{bash.stderr}")
                   lint = subprocess.run(
                       ["shellcheck", "--shell=bash", "--severity=error", str(shell_path)],
                       text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
                   )
                   if lint.returncode:
-                      raise SystemExit(f"ShellCheck error in {label}:\\n{lint.stdout}")
+                      raise SystemExit(f"ShellCheck error in {label}:\n{lint.stdout}")
                   checked_shell += 1
               finally:
                   shell_path.unlink(missing_ok=True)
