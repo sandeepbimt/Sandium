@@ -43,7 +43,7 @@ jobs:
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
           BRANCH: ${{ inputs.branch || github.ref_name }}
-          CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWVf14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+          CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
           PIPELINE_DEFINITION_ID: "da327b7b-52aa-4dd5-bec1-4ef30d50d8c9"
         shell: bash
         run: |
