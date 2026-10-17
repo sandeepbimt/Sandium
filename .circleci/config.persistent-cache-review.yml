@@ -32,7 +32,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-src-v2-brave-{{ .Revision }}-chromium-156.0.8078.39-
+            - sandium-src-v3-chromium-156.0.8078.39-
       - run:
           name: Validate restored Chromium source cache or record cold start
           command: |
@@ -52,12 +52,13 @@ commands:
                 raise SystemExit("Source cache manifest missing; refusing to build.")
             manifest = json.loads(manifest_path.read_text())
             chromium_sha = subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip()
-            brave_sha = subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip()
+            version_sha256 = __import__("hashlib").sha256(Path("src/brave/src/chrome/VERSION").read_bytes()).hexdigest()
             if manifest.get("chromium_commit") != chromium_sha:
                 raise SystemExit("Cached Chromium commit does not match manifest.")
-            if manifest.get("brave_core_commit") != brave_sha:
-                raise SystemExit("Fresh Brave Core checkout does not match source-cache manifest.")
+            if manifest.get("version_file_sha256") != version_sha256:
+                raise SystemExit("Cached Chromium VERSION file hash does not match manifest.")
             print("SOURCE_CACHE_FINGERPRINT=PASS")
+            print("SOURCE_CACHE_SCOPE=CHROMIUM_ONLY")
             PY
             else
               echo "SOURCE_CACHE=COLD_MISS"
@@ -160,8 +161,7 @@ jobs:
             from pathlib import Path
             p = Path("src/brave/src/chrome/VERSION")
             manifest = {
-              "schema": 1,
-              "brave_core_commit": __import__("subprocess").check_output(["git","-C","src/brave","rev-parse","HEAD"], text=True).strip(),
+              "schema": 2,
               "chromium_commit": __import__("subprocess").check_output(["git","-C","src/brave/src","rev-parse","HEAD"], text=True).strip(),
               "chromium_version": "156.0.8078.39",
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
@@ -179,9 +179,12 @@ jobs:
             echo "CACHE_ROOT=src/brave/src"
             echo "FRESH_BRAVE_CORE_CHECKOUT_EXCLUDED=true"
       - save_cache:
-          key: sandium-src-v2-brave-{{ .Revision }}-chromium-156.0.8078.39-{{ .BuildNum }}
+          key: sandium-src-v3-chromium-156.0.8078.39-{{ .BuildNum }}
           paths:
             - src/brave/src
+            - src/brave/.brave_gclient
+            - src/brave/.brave_gclient_entries
+            - src/brave/.gclient_entries
             - .sandium-source-cache-manifest.json
       - run:
           name: Confirm source-cache save request
