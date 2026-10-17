@@ -101,3 +101,12 @@ The missing BuildBuddy environment variables have now been added to both call si
 A fresh static inspection confirms both helper call sites have both required values, the workflow contains five sequential jobs, and the active build branch config SHA remains unchanged at `be111053e53bdbe4cf0cca81c377b5b8ad401e72`.
 
 **Still NO-GO for activation:** this environment does not have an available CircleCI config validator or shellcheck invocation wired into the offline review, so full YAML/schema and shell syntax validation is not certified. No CI run, cache test, remote execution test, or APK build has been performed. The next gate is a real parser/linter check of this review file only, without triggering a pipeline.
+
+### Source-layout and fingerprint correction (2026-10-17)
+
+The first five-stage draft incorrectly treated the CircleCI workspace root as the Chromium source root. In this checkout, Brave Core is checked out at `src/brave`, and its declared Chromium directory is `src/brave/src`. The review config has now been corrected to use that nested path consistently for Chromium version/commit checks, Android build-dependency installation, cache root, and APK discovery.
+
+- Source cache schema/key bumped to v2 and scoped to the exact Brave Core revision, Chromium pin, and unique build number. The cache root is `src/brave/src`; the fresh Brave Core checkout itself is not moved or cached.
+- The compile-stage fingerprint is now persisted from stage 2 through the CircleCI workspace. Stages 3 and 4 reconstruct the current input fingerprint and compare it to the stage-2 fingerprint instead of overwriting it with a new fingerprint.
+- These changes are source-level corrections only. CircleCI YAML/ShellCheck validation is available via the manually dispatched GitHub Actions validator, but it has not yet been rerun against this latest commit. No CircleCI cache restore/save, BuildBuddy/Siso cache-hit behavior, remote execution, or APK build has been tested.
+- The source cache remains a candidate design. It must not be activated until the updated config passes validation and its cache behavior is tested with explicit approval.
