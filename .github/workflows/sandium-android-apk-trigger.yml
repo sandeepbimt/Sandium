@@ -1,4 +1,5 @@
 name: Sandium Android Debug APK Build Trigger
+# Retrigger after CircleCI heredoc syntax fix; build branch remains isolated.
 
 on:
   push:
