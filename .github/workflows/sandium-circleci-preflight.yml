@@ -38,6 +38,7 @@ jobs:
             exit 1
           fi
           echo "Requested branch is the reviewed Sandium preflight branch."
+          echo "Triggering the lightweight CircleCI configuration preflight only."
 
       - name: Trigger CircleCI pipeline definition
         env:
