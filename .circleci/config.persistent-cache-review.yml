@@ -39,7 +39,7 @@ commands:
             set -euo pipefail
             if [[ -f src/chrome/VERSION ]]; then
               python3 - <<'PY'
-            import re
+            import json, re, subprocess
             from pathlib import Path
             text = Path("src/chrome/VERSION").read_text()
             fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
@@ -47,6 +47,17 @@ commands:
             print("RESTORED_CHROMIUM_VERSION=" + actual)
             if actual != "156.0.8078.39":
                 raise SystemExit("Source cache pin mismatch; refusing to build from it.")
+            manifest_path = Path(".sandium-source-cache-manifest.json")
+            if not manifest_path.is_file():
+                raise SystemExit("Source cache manifest missing; refusing to build.")
+            manifest = json.loads(manifest_path.read_text())
+            chromium_sha = subprocess.check_output(["git", "-C", "src", "rev-parse", "HEAD"], text=True).strip()
+            brave_sha = subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip()
+            if manifest.get("chromium_commit") != chromium_sha:
+                raise SystemExit("Cached Chromium commit does not match manifest.")
+            if manifest.get("brave_core_commit") != brave_sha:
+                raise SystemExit("Fresh Brave Core checkout does not match source-cache manifest.")
+            print("SOURCE_CACHE_FINGERPRINT=PASS")
             PY
             else
               echo "SOURCE_CACHE=COLD_MISS"
@@ -148,7 +159,7 @@ jobs:
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
               "target": "android-arm64-debug-apk"
             }
-            Path("build-diagnostics/source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
+            Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
             PY
       - run:
           name: Exclude fresh Brave checkout from reusable Chromium cache
@@ -162,6 +173,7 @@ jobs:
             - src
             - .gclient
             - .brave_latest_successful_sync.json
+            - .sandium-source-cache-manifest.json
       - run:
           name: Restore fresh Brave checkout and verify cache-save boundary
           command: |
