@@ -22,7 +22,7 @@ commands:
             curl --fail --location --silent --show-error "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz
             sudo mkdir -p /opt/sandium-node
             sudo tar -xJf /tmp/node.tar.xz -C /opt/sandium-node --strip-components=1
-            echo 'export PATH=/opt/sandium-node/bin:$PATH' >> "$BASH_ENV"
+            echo "export PATH=/opt/sandium-node/bin:\$PATH" >> "$BASH_ENV"
             export PATH="/opt/sandium-node/bin:$PATH"
             node --version
             npm install --global pnpm@11.11.0
