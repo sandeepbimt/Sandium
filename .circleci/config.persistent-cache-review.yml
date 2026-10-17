@@ -74,6 +74,8 @@ commands:
           command: |
             set -euo pipefail
             : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
+            export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
+            export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
             cd src/brave
             python3 ci/siso/write_buildbuddy_env.py
             ! grep -Fq "$BUILDBUDDY_API_KEY" .env
