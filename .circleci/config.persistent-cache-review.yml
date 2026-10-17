@@ -233,6 +233,15 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
+            log="$HOME/project/build-diagnostics/compile-window-1.log"
+            evidence="$HOME/project/build-diagnostics/compile-window-1-remote-cache-evidence.txt"
+            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+              echo "REMOTE_CACHE_EVIDENCE_LINES=$(wc -l < "$evidence")"
+              grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+            else
+              echo "REMOTE_CACHE_EVIDENCE=NO_MATCHING_LOG_LINES"
+              : > "$evidence"
+            fi
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - persist_to_workspace:
@@ -289,6 +298,15 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
+            log="$HOME/project/build-diagnostics/compile-window-2.log"
+            evidence="$HOME/project/build-diagnostics/compile-window-2-remote-cache-evidence.txt"
+            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+              echo "REMOTE_CACHE_EVIDENCE_LINES=$(wc -l < "$evidence")"
+              grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+            else
+              echo "REMOTE_CACHE_EVIDENCE=NO_MATCHING_LOG_LINES"
+              : > "$evidence"
+            fi
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - store_artifacts:
@@ -341,6 +359,15 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
+            log="$HOME/project/build-diagnostics/compile-window-3.log"
+            evidence="$HOME/project/build-diagnostics/compile-window-3-remote-cache-evidence.txt"
+            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+              echo "REMOTE_CACHE_EVIDENCE_LINES=$(wc -l < "$evidence")"
+              grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+            else
+              echo "REMOTE_CACHE_EVIDENCE=NO_MATCHING_LOG_LINES"
+              : > "$evidence"
+            fi
             if [[ "$status" -ne 0 ]]; then
               echo "Final compile window did not complete successfully (status=$status)"
               exit "$status"
