@@ -129,7 +129,7 @@ jobs:
             set -euo pipefail
             cd src/brave
             python3 ci/siso/write_buildbuddy_env.py
-            pnpm run init --target_os=android --target_arch=arm64 --no-history
+            pnpm run sync --target_os=android --target_arch=arm64 --no-history
             cd "$HOME/project"
             sudo ./src/build/install-build-deps.sh --android
             python3 - <<'PY'
