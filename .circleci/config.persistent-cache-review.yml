@@ -11,6 +11,9 @@ parameters:
   run_sandium_source_cache_test:
     type: boolean
     default: false
+  save_sandium_source_cache:
+    type: boolean
+    default: true
 
 commands:
   install-sandium-node:
@@ -183,14 +186,17 @@ jobs:
             fi
             du -sh src/brave/src
             df -h .
-      - save_cache:
-          key: sandium-src-v3-chromium-156.0.8078.39-{{ .BuildNum }}
-          paths:
-            - src/brave/src
-            - src/brave/.brave_gclient
-            - src/brave/.brave_gclient_entries
-            - src/brave/.gclient_entries
-            - .sandium-source-cache-manifest.json
+      - when:
+          condition: << pipeline.parameters.save_sandium_source_cache >>
+          steps:
+            - save_cache:
+                key: sandium-src-v3-chromium-156.0.8078.39-{{ .BuildNum }}
+                paths:
+                  - src/brave/src
+                  - src/brave/.brave_gclient
+                  - src/brave/.brave_gclient_entries
+                  - src/brave/.gclient_entries
+                  - .sandium-source-cache-manifest.json
       - store_artifacts:
           path: build-diagnostics
           destination: source-cache-only-test
