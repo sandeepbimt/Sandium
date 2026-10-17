@@ -106,8 +106,8 @@ jobs:
               )
               # CircleCI parameter placeholders look constant to Bash; suppress SC2050 only on those lines.
               shell = re.sub(
-                  r"(?m)^(.*<<\\s*pipeline\\.parameters\\.[^>]+>>.*)$",
-                  r"# shellcheck disable=SC2050\\n\\1",
+                  r"(?m)^(.*<<\s*pipeline\.parameters\.[^>]+>>.*)$",
+                  r"# shellcheck disable=SC2050\n\1",
                   shell,
               )
               with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
