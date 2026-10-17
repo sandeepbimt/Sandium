@@ -91,3 +91,13 @@ Validation status:
 - Verified by reading the helper: both SANDIUM variables are mandatory and validated.
 - Static workflow inspection confirms five sequential job names and required dependency edges.
 - Not verified: CircleCI's own config parser, shellcheck, actual cache save/restore, remote execution, remote-cache hit rates, or APK output. No CI execution was performed.
+
+### Follow-up validation (2026-10-17)
+
+The missing BuildBuddy environment variables have now been added to both call sites in the review-only configuration:
+- Stage 1 exports `SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443` and `SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci` before generating the runtime `.env`.
+- The reusable remote-cache configuration command exports the same values before generating `.env`, covering compile stages 2–4.
+
+A fresh static inspection confirms both helper call sites have both required values, the workflow contains five sequential jobs, and the active build branch config SHA remains unchanged at `be111053e53bdbe4cf0cca81c377b5b8ad401e72`.
+
+**Still NO-GO for activation:** this environment does not have an available CircleCI config validator or shellcheck invocation wired into the offline review, so full YAML/schema and shell syntax validation is not certified. No CI run, cache test, remote execution test, or APK build has been performed. The next gate is a real parser/linter check of this review file only, without triggering a pipeline.
