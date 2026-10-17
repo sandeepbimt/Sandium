@@ -42,7 +42,7 @@ commands:
             import re
             from pathlib import Path
             text = Path("src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             print("RESTORED_CHROMIUM_VERSION=" + actual)
             if actual != "156.0.8078.39":
@@ -50,6 +50,10 @@ commands:
             PY
             else
               echo "SOURCE_CACHE=COLD_MISS"
+              if [[ "${CIRCLE_JOB:-}" != "stage-1-source-foundation" ]]; then
+                echo "Required source cache missing in a compile stage."
+                exit 2
+              fi
             fi
 
   configure-sandium-remote-cache:
@@ -121,7 +125,7 @@ jobs:
             import re, shutil
             from pathlib import Path
             text = Path("src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             if actual != "156.0.8078.39":
                 raise SystemExit(f"Chromium pin mismatch: {actual}")
@@ -144,7 +148,7 @@ jobs:
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
               "target": "android-arm64-debug-apk"
             }
-            Path("build-diagnostics/source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\\n")
+            Path("build-diagnostics/source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
             PY
       - run:
           name: Exclude fresh Brave checkout from reusable Chromium cache
@@ -193,7 +197,7 @@ jobs:
             import json, re, subprocess
             from pathlib import Path
             p=Path("src/chrome/VERSION").read_text()
-            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$",p,re.M))
+            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
             v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
             if v != "156.0.8078.39": raise SystemExit("Invalid Chromium pin")
             Path("build-diagnostics/fingerprint.json").write_text(json.dumps({
@@ -201,7 +205,7 @@ jobs:
               "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d"
-            },indent=2)+"\\n")
+            },indent=2)+"\n")
             PY
             cd src/brave
             set +e
@@ -275,7 +279,7 @@ jobs:
             mapfile -t apks < <(find src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
             if [[ "${#apks[@]}" -ne 1 ]]; then
               echo "Expected exactly one Bravearm64.apk, found ${#apks[@]}"
-              find src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\\n' || true
+              find src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\n' || true
               exit 3
             fi
             cp "${apks[0]}" sandium-output/Brave-debug-arm64.apk
