@@ -110,3 +110,16 @@ The first five-stage draft incorrectly treated the CircleCI workspace root as th
 - The compile-stage fingerprint is now persisted from stage 2 through the CircleCI workspace. Stages 3 and 4 reconstruct the current input fingerprint and compare it to the stage-2 fingerprint instead of overwriting it with a new fingerprint.
 - These changes are source-level corrections only. CircleCI YAML/ShellCheck validation is available via the manually dispatched GitHub Actions validator, but it has not yet been rerun against this latest commit. No CircleCI cache restore/save, BuildBuddy/Siso cache-hit behavior, remote execution, or APK build has been tested.
 - The source cache remains a candidate design. It must not be activated until the updated config passes validation and its cache behavior is tested with explicit approval.
+
+
+### Compile-runner isolation and remote-cache evidence correction (2026-10-17)
+
+A follow-up review identified that each CircleCI machine job is fresh: OS packages installed in stage 1 do not carry into stages 2–4, and the compile jobs do not transfer the large local Chromium output tree through the workspace. The intended continuation mechanism is therefore Siso/BuildBuddy remote action-cache reuse, not local `out/` persistence.
+
+Changes made to the review-only candidate:
+- Added `install-sandium-android-build-deps` and invoked it independently in stages 2, 3, and 4, so each fresh compile runner installs the Android build dependencies it needs.
+- Added per-window extraction of likely remote-cache/remote-execution log lines into `build-diagnostics/*-remote-cache-evidence.txt`, with an explicit `NO_MATCHING_LOG_LINES` marker when logs contain no matching lines.
+- The log extraction is diagnostic only: matching lines do not by themselves prove cache hits. The next real test must inspect the actual Siso log format and report actual action-cache hits/misses or BuildBuddy metrics before any claim of reuse.
+- The compiler output tree is intentionally not transferred through CircleCI workspaces because its size and transfer time are unknown. This design is viable only if the remote cache reliably restores completed actions on the next job. That remains unverified.
+
+Status remains **NO-GO** until the updated candidate is revalidated and a separately authorized, carefully scoped run demonstrates (a) source cache restoration, (b) correct dependency setup on every compile runner, (c) useful Siso/BuildBuddy action-cache hits after the first timed window, and (d) successful APK packaging. Active `.circleci/config.yml` and SANDFOX infrastructure remain untouched.
