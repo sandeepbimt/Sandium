@@ -52,7 +52,7 @@ jobs:
             from pathlib import Path
             version_file = Path("src/brave/src/chrome/VERSION")
             text = version_file.read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             if actual != "156.0.8078.39":
                 raise SystemExit(f"Unexpected restored Chromium version: {actual}")
@@ -83,7 +83,7 @@ jobs:
             from pathlib import Path
             version_file = Path("src/brave/src/chrome/VERSION")
             text = version_file.read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$", text, re.M))
+            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
             actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             if actual != "156.0.8078.39":
                 raise SystemExit(f"Unexpected synced Chromium version: {actual}")
@@ -94,7 +94,7 @@ jobs:
               "version_file_sha256": hashlib.sha256(version_file.read_bytes()).hexdigest(),
               "target": "android-arm64-debug-apk"
             }
-            Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\\n")
+            Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
             print("SOURCE_SYNC=PASS")
             print("SYNCED_CHROMIUM_COMMIT=" + manifest["chromium_commit"])
             PY
