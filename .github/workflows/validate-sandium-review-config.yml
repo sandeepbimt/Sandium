@@ -48,6 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import ast
           import re
           import subprocess
           import tempfile
@@ -75,12 +76,22 @@ jobs:
 
           failures = 0
           checked = 0
+          python_checked = 0
           for index, (label, command) in enumerate(commands, 1):
-              # Python heredocs are valid content embedded inside shell blocks;
-              # replace each whole heredoc with a no-op before shell linting.
+              # Syntax-check Python heredocs before replacing them for ShellCheck.
+              heredoc_pattern = r"(?m)^python3?\s+-\s+<<['\"]?PY['\"]?\s*\n(.*?)^PY\s*$"
+              for py_index, match in enumerate(re.finditer(heredoc_pattern, command, flags=re.DOTALL), 1):
+                  try:
+                      ast.parse(match.group(1))
+                      python_checked += 1
+                  except SyntaxError as error:
+                      failures += 1
+                      print(f"\n--- Python syntax error in {label}, heredoc {py_index} ---")
+                      print(error)
+              # Replace whole Python heredocs before shell linting.
               shell = re.sub(
                   r"(?m)^python3?\s+-\s+<<['\"]?PY['\"]?\s*\n.*?^PY\s*$",
-                  ": # embedded Python heredoc checked separately by CircleCI workflow runtime",
+                  ": # Python heredoc syntax checked separately above",
                   command,
                   flags=re.DOTALL,
               )
@@ -100,6 +111,7 @@ jobs:
                   print(result.stdout.rstrip())
               temp_path.unlink(missing_ok=True)
 
+          print(f"Python syntax checked {python_checked} embedded heredoc(s).")
           print(f"ShellCheck processed {checked} CircleCI command block(s).")
           if failures:
               raise SystemExit(f"ShellCheck failed for {failures} command block(s).")
