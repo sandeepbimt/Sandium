@@ -137,3 +137,17 @@ The review candidate now:
 - Still uses CircleCI's unique `{{ .BuildNum }}` for each save, while restore uses the stable prefix to find a previous compatible cache.
 
 This is a source-level correction, not proof of a warm sync. The next validation run must pass, and a later explicitly approved source-cache test must show a real cache restore plus measured sync duration/transfer behavior. No build was run as part of this correction.
+
+
+### Isolated source-cache test branch (2026-10-17)
+
+Created branch `test/source-cache-only-2026-10-17` with a branch-local `.circleci/config.yml` that contains only one optional source-cache job. The job does not install Android build dependencies, configure BuildBuddy, invoke GN/Ninja/Siso compilation, or produce an APK. Its workflow defaults to disabled, so an ordinary branch push should not execute the source sync.
+
+Test procedure:
+1. In CircleCI, select this branch and manually trigger the pipeline with `run_source_cache_test=true`, `save_source_cache=true`, and `require_source_cache_restore=false`. This first run will restore an existing compatible cache if one exists; otherwise it performs the pinned source sync, writes the manifest, and requests a cache save.
+2. After the first run completes successfully, trigger the same branch again with `run_source_cache_test=true`, `save_source_cache=false`, and `require_source_cache_restore=true`. This run must fail quickly if no compatible source cache is restored; it will not start a second sync on a cache miss.
+3. A valid second run must log `SOURCE_CACHE_RESULT=RESTORED`, `SOURCE_CACHE_MANIFEST_VALID=PASS`, and `SOURCE_CACHE_REUSE=PASS`. Record CircleCI's restore-cache output and the source size/disk metrics. The first run's `SOURCE_CACHE_SAVE_REQUESTED=true` alone is not proof that the cache was actually saved.
+
+Validation can be run from GitHub Actions using source ref `test/source-cache-only-2026-10-17` and config path `.circleci/config.yml`. This is static validation only and does not trigger CircleCI.
+
+Safety: this branch's config is independent of the active build branch. The active `.circleci/config.yml` on `build/sandium-android-debug-apk-2026-10-17` is unchanged. Do not merge the test branch. No source-cache test or APK build has been triggered by creating this branch.
