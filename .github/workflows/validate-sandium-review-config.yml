@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Branch containing the review-only CircleCI config"
+        description: "Branch containing the CircleCI config to validate"
         required: true
         default: "review/sandium-persistent-cache-2026-10-17"
+        type: string
+      config_path:
+        description: "CircleCI config path in the selected source branch"
+        required: true
+        default: ".circleci/config.persistent-cache-review.yml"
         type: string
 
 permissions:
@@ -38,13 +43,17 @@ jobs:
 
       - name: Validate CircleCI configuration (does not run a pipeline)
         shell: bash
+        env:
+          CONFIG_PATH: ${{ inputs.config_path }}
         run: |
           set -euo pipefail
-          test -f .circleci/config.persistent-cache-review.yml
-          circleci config validate .circleci/config.persistent-cache-review.yml
+          test -f "$CONFIG_PATH"
+          circleci config validate "$CONFIG_PATH"
 
       - name: Extract embedded shell commands and run ShellCheck
         shell: bash
+        env:
+          CONFIG_PATH: ${{ inputs.config_path }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -55,7 +64,7 @@ jobs:
           from pathlib import Path
           import yaml
 
-          config_path = Path(".circleci/config.persistent-cache-review.yml")
+          config_path = Path(__import__("os").environ["CONFIG_PATH"])
           config = yaml.safe_load(config_path.read_text())
 
           commands = []
