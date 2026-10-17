@@ -129,22 +129,19 @@ jobs:
               r"(?P<body>.*?)^[ \t]*BUILD[ \t]*$"
           )
 
-          checked_shell = 0
-          checked_python = 0
+          counts = {"shell": 0, "python": 0}
           seen_scripts = set()
 
           def syntax_check(label, source):
-              nonlocal checked_python, checked_shell
               source = source.replace("\\\\<<", "<<").replace("\\<<", "<<")
               # Validate generated bash scripts nested inside cat-heredocs separately.
               for idx, match in enumerate(build_heredoc.finditer(source), 1):
                   syntax_check(label + f".generated-BUILD-{idx}", match.group("body"))
 
               def remove_python(match):
-                  nonlocal checked_python
                   try:
                       ast.parse(match.group("body"))
-                      checked_python += 1
+                      counts["python"] += 1
                   except SyntaxError as error:
                       raise SystemExit(f"Embedded Python syntax error in {label}: {error}")
                   return match.group("start") + "# embedded Python checked separately\nPY"
@@ -163,7 +160,7 @@ jobs:
                   )
                   if lint.returncode:
                       raise SystemExit(f"ShellCheck error in {label}:\n{lint.stdout}")
-                  checked_shell += 1
+                  counts["shell"] += 1
               finally:
                   shell_path.unlink(missing_ok=True)
 
@@ -174,7 +171,7 @@ jobs:
               syntax_check(label, command)
 
           print("FIVE_STAGE_CONTRACT=PASS")
-          print(f"EMBEDDED_PYTHON_BLOCKS_SYNTAX_CHECKED={checked_python}")
-          print(f"SHELL_COMMANDS_SYNTAX_CHECKED={checked_shell}")
+          print(f"EMBEDDED_PYTHON_BLOCKS_SYNTAX_CHECKED={counts['python']}")
+          print(f"SHELL_COMMANDS_SYNTAX_CHECKED={counts['shell']}")
           print("APK_BUILD=NOT_RUN")
           PY
