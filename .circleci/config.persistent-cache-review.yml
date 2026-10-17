@@ -118,6 +118,8 @@ jobs:
           command: |
             set -euo pipefail
             cd src/brave
+            export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
+            export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
             python3 ci/siso/write_buildbuddy_env.py
             pnpm run sync --target_os=android --target_arch=arm64 --no-history
             cd "$HOME/project"
