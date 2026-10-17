@@ -1,6 +1,7 @@
 # SANDIUM Persistent Cache Implementation Plan
 
-Status: review branch only. No CI run authorized by this file.
+Status: candidate implementation on `ci/sandium-five-stage-persistent-cache-2026-10-18`. The APK workflow remains disabled by default.
+No Android build, cache restore/save test, or BuildBuddy/Siso remote-action test has been run.
 
 ## Acceptance criteria
 
@@ -137,3 +138,24 @@ The review candidate now:
 - Still uses CircleCI's unique `{{ .BuildNum }}` for each save, while restore uses the stable prefix to find a previous compatible cache.
 
 This is a source-level correction, not proof of a warm sync. The next validation run must pass, and a later explicitly approved source-cache test must show a real cache restore plus measured sync duration/transfer behavior. No build was run as part of this correction.
+
+
+## Candidate configuration checkpoint — 2026-10-18
+
+The five-stage design is now represented by the active-path candidate at `.circleci/config.yml` on branch `ci/sandium-five-stage-persistent-cache-2026-10-18`. The separate source-cache-only test job/workflow was removed from that branch to avoid continuing the cancelled side experiment.
+
+The five jobs are:
+
+1. `stage-1-source-foundation` — verify pins, restore a compatible source cache when present, synchronize pinned Chromium/dependencies with `--no-history`, validate the Chromium pin, and request a source-cache save only after validation.
+2. `stage-2-graph-and-compile-window` — restore source, configure the SANDIUM BuildBuddy settings, run the first bounded build window, then seal a fingerprint that includes the generated `out/Debug/args.gn` SHA-256.
+3. `stage-3-compile-continuation` — verify stable source/build inputs, run the same build target, and compare the generated GN arguments with Stage 2.
+4. `stage-4-finish-and-package` — run the final build window; require completion, APK discovery, ZIP/DEX/manifest checks, `aapt` package metadata, `apksigner` verification, and a build manifest.
+5. `stage-5-verify-publish` — independently recheck SHA-256, APK ZIP entries, package metadata and the Stage-4 signature-verification record before storing the artifact.
+
+The compile windows are capped at 30 minutes, below the previously used 36-minute build-command cap, to leave time for orderly interruption and diagnostics. This is a conservative configuration choice, not a measured optimum; stage setup/cache-restore duration still needs real logs. Source-cache bytes are reported before save, while CircleCI step timings are needed to measure upload/restore time.
+
+The ordinary CircleCI pipeline trigger is deliberately gated by `run_sandium_android_apk_build`, whose default is `false`. A push to this branch may register a CircleCI pipeline, but the APK jobs should remain skipped unless that parameter is explicitly enabled.
+
+A configuration-only GitHub Actions workflow was added on this branch. It validates the CircleCI schema and the five-stage structure, and syntax-checks embedded Python/Bash; it does not launch CircleCI or compile Android.
+
+**Not yet proven:** successful cold source sync within budget; cache size/transfer economics; actual Siso remote execution; same-run and cross-run action-cache hits; complete APK production; installation on a real device. Do not claim persistent build reuse until a separately approved run produces the required logs and metrics.
