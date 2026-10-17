@@ -1,0 +1,107 @@
+name: Validate SANDIUM review config
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch containing the review-only CircleCI config"
+        required: true
+        default: "review/sandium-persistent-cache-2026-10-17"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-review-config:
+    name: CircleCI config and ShellCheck (no build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout selected review branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install validation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3-yaml
+          curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh -o /tmp/install-circleci-cli.sh
+          sudo bash /tmp/install-circleci-cli.sh
+          circleci version
+          shellcheck --version
+
+      - name: Validate CircleCI configuration (does not run a pipeline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .circleci/config.persistent-cache-review.yml
+          circleci config validate .circleci/config.persistent-cache-review.yml
+
+      - name: Extract embedded shell commands and run ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import subprocess
+          import tempfile
+          from pathlib import Path
+          import yaml
+
+          config_path = Path(".circleci/config.persistent-cache-review.yml")
+          config = yaml.safe_load(config_path.read_text())
+
+          commands = []
+          def walk(value, path="$"):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key == "command" and isinstance(child, str):
+                          commands.append((path + ".command", child))
+                      else:
+                          walk(child, path + "." + str(key))
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      walk(child, f"{path}[{index}]")
+
+          walk(config)
+          if not commands:
+              raise SystemExit("No CircleCI command blocks found to lint.")
+
+          failures = 0
+          checked = 0
+          for index, (label, command) in enumerate(commands, 1):
+              # Python heredocs are valid content embedded inside shell blocks;
+              # replace each whole heredoc with a no-op before shell linting.
+              shell = re.sub(
+                  r"(?m)^python3?\s+-\s+<<['\"]?PY['\"]?\s*\n.*?^PY\s*$",
+                  ": # embedded Python heredoc checked separately by CircleCI workflow runtime",
+                  command,
+                  flags=re.DOTALL,
+              )
+              with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+                  handle.write(shell + "\n")
+                  temp_path = Path(handle.name)
+              result = subprocess.run(
+                  ["shellcheck", "--shell=bash", str(temp_path)],
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+              )
+              checked += 1
+              if result.returncode:
+                  failures += 1
+                  print(f"\n--- ShellCheck findings in {label} ---")
+                  print(result.stdout.rstrip())
+              temp_path.unlink(missing_ok=True)
+
+          print(f"ShellCheck processed {checked} CircleCI command block(s).")
+          if failures:
+              raise SystemExit(f"ShellCheck failed for {failures} command block(s).")
+          print("SHELLCHECK_RESULT=PASS")
+          PY
