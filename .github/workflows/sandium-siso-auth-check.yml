@@ -1,0 +1,41 @@
+name: Sandium Siso BuildBuddy Auth Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  auth-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      SANDIUM_REAPI_ADDRESS: remote.buildbuddy.io:443
+      SANDIUM_REAPI_INSTANCE: sandium/android-arm64/ci
+    steps:
+      - name: Checkout reviewed Sandium branch
+        uses: actions/checkout@v4
+        with:
+          ref: review/sandium-buildbuddy-backend-2026-10-17
+          persist-credentials: false
+      - name: Install pinned Siso
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${BUILDBUDDY_API_KEY:-}" || { echo "::error::Missing BUILDBUDDY_API_KEY Actions secret"; exit 2; }
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          mkdir -p "$RUNNER_TEMP/siso"
+          cipd install infra/tools/siso/linux-amd64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d -root "$RUNNER_TEMP/siso"
+          test -x "$RUNNER_TEMP/siso/siso"
+          "$RUNNER_TEMP/siso/siso" version
+      - name: Configure and run authentication-only check
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 700 ci/siso/buildbuddy-credential-helper.py
+          export SISO_CREDENTIAL_HELPER="$GITHUB_WORKSPACE/ci/siso/buildbuddy-credential-helper.py"
+          timeout 120s "$RUNNER_TEMP/siso/siso" auth-check -reapi_address="$SANDIUM_REAPI_ADDRESS" -reapi_instance="$SANDIUM_REAPI_INSTANCE"
+          echo "Siso authentication check succeeded. No Chromium checkout, GN, compile, or APK build was performed."
