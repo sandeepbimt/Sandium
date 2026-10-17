@@ -67,6 +67,17 @@ commands:
               fi
             fi
 
+  install-sandium-android-build-deps:
+    steps:
+      - run:
+          name: Install Android build dependencies on this fresh machine
+          no_output_timeout: 15m
+          command: |
+            set -euo pipefail
+            test -x src/brave/src/build/install-build-deps.sh
+            sudo src/brave/src/build/install-build-deps.sh --android
+            echo "ANDROID_BUILD_DEPS_INSTALLED_ON_CURRENT_JOB=true"
+
   configure-sandium-remote-cache:
     steps:
       - run:
@@ -194,6 +205,7 @@ jobs:
           path: src/brave
       - restore-sandium-source
       - install-sandium-node
+      - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
           name: Validate fingerprint, configure GN and compile window 1
@@ -243,6 +255,7 @@ jobs:
           at: .
       - restore-sandium-source
       - install-sandium-node
+      - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
           name: Compile window 2 using same target and remote action cache
@@ -294,6 +307,7 @@ jobs:
           at: .
       - restore-sandium-source
       - install-sandium-node
+      - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
           name: Finish compilation and require APK
