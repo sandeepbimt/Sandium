@@ -1,0 +1,304 @@
+version: 2.1
+
+parameters:
+  run_sandium_android_apk_build:
+    type: boolean
+    default: false
+
+jobs:
+  verify-source-pins:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: src/brave
+      - run:
+          name: Verify pinned source and offline adapter tests
+          command: |
+            set -euo pipefail
+            cd src/brave
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+            p = json.loads(Path('package.json').read_text())
+            expected = ('1.100.10', '156.0.8078.39')
+            actual = (p.get('version'), p.get('config', {}).get('projects', {}).get('chrome', {}).get('tag'))
+            print('BRAVE_CORE_VERSION=' + str(actual[0]))
+            print('CHROMIUM_PIN=' + str(actual[1]))
+            if actual != expected: raise SystemExit(f'Pinned source changed: expected {expected}, got {actual}')
+            PY
+            python3 -m py_compile ci/siso/buildbuddy-credential-helper.py ci/siso/write_buildbuddy_env.py tests/ci/test_siso_buildbuddy_config.py
+            python3 -m unittest discover -s tests/ci -p 'test_siso_buildbuddy_config.py' -v
+            grep -Fq 'sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a' ci/siso/buildbuddy_backend.star
+            echo SOURCE_AND_OFFLINE_TESTS=PASS
+
+  verify-buildbuddy-auth:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    environment:
+      SANDIUM_REAPI_ADDRESS: remote.buildbuddy.io:443
+      SANDIUM_REAPI_INSTANCE: sandium/android-arm64/ci
+    steps:
+      - checkout:
+          path: src/brave
+      - run:
+          name: Validate runtime config and authenticate pinned Siso
+          command: |
+            set -euo pipefail
+            : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
+            cd src/brave
+            python3 ci/siso/write_buildbuddy_env.py
+            ! grep -Fq "$BUILDBUDDY_API_KEY" .env
+            git check-ignore -q .env
+            grep -Fxq 'rbe_service=remote.buildbuddy.io:443' .env
+            grep -Fxq 'projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci' .env
+            grep -Fxq 'siso_use_googlechrome_config=false' .env
+            grep -Fxq 'use_remoteexec=false' .env
+            cd "$HOME/project"
+            expected="$(realpath src/brave/ci/siso/buildbuddy_backend.star)"
+            configured="$(realpath -m src/build/config/siso/backend_config/../../../../brave/ci/siso/buildbuddy_backend.star)"
+            test "$configured" = "$expected" || { echo "Backend path mismatch: $configured"; exit 2; }
+            HELPER="$HOME/project/src/brave/ci/siso/buildbuddy-credential-helper.py"
+            chmod 700 "$HELPER"
+            export SISO_CREDENTIAL_HELPER="$HELPER"
+            git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
+            export PATH="$HOME/depot_tools:$PATH"
+            cipd install build/siso/linux-amd64 git_revision:c574896b272b40aac6e44c228ee0b471ea7e3d7d -root "$HOME/siso"
+            test -x "$HOME/siso/siso"
+            "$HOME/siso/siso" version
+            timeout 120s "$HOME/siso/siso" auth-check -reapi_address="$SANDIUM_REAPI_ADDRESS" -reapi_instance="$SANDIUM_REAPI_INSTANCE"
+            echo SANDIUM_BUILDBUDDY_AUTH=PASS
+            echo REMOTE_ACTION_EXECUTION=NOT_YET_TESTED
+
+  build-android-debug-apk:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: xlarge
+    working_directory: ~/project
+    environment:
+      JAVA_OPTS: -Xmx10G -Xms1G
+      SANDIUM_REAPI_ADDRESS: remote.buildbuddy.io:443
+      SANDIUM_REAPI_INSTANCE: sandium/android-arm64/ci
+    steps:
+      - checkout:
+          path: src/brave
+      - run:
+          name: Preflight disk and install pinned Node and pnpm
+          command: |
+            set -euo pipefail
+            test "$(git -C src/brave rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
+            python3 - <<'PY'
+            import shutil
+            free = shutil.disk_usage('.').free
+            print(f'FREE_DISK_BYTES={free}')
+            if free < 100 * 1024**3: raise SystemExit('Stopping before sync: less than 100 GiB free disk.')
+            PY
+            sudo apt-get update
+            sudo apt-get install -y build-essential ca-certificates curl python-is-python3 python3-setuptools xz-utils
+            NODE_VERSION=24.16.0
+            curl --fail --location --silent --show-error "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz
+            sudo mkdir -p /opt/sandium-node
+            sudo tar -xJf /tmp/node.tar.xz -C /opt/sandium-node --strip-components=1
+            echo 'export PATH=/opt/sandium-node/bin:$PATH' >> "$BASH_ENV"
+            export PATH="/opt/sandium-node/bin:$PATH"
+            node --version
+            npm install --global pnpm@11.11.0
+            pnpm --version
+      - run:
+          name: Sync pinned Chromium and produce baseline ARM64 debug APK
+          no_output_timeout: 50m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics sandium-output
+            LOG="$PWD/build-diagnostics/source-sync-and-build.log"
+            SCRIPT="$PWD/build-diagnostics/run-build.sh"
+            cat > "$SCRIPT" <<'BUILD'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            export PATH="/opt/sandium-node/bin:$PATH"
+            export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
+            export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
+            : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
+            PROJECT="$HOME/project"
+            cd "$PROJECT/src/brave"
+            python3 ci/siso/write_buildbuddy_env.py
+            ! grep -Fq "$BUILDBUDDY_API_KEY" .env
+            git check-ignore -q .env
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
+            pnpm run init --target_os=android --target_arch=arm64
+            cd "$PROJECT"
+            sudo ./src/build/install-build-deps.sh --android
+            python3 - <<'PY'
+            import re, shutil
+            from pathlib import Path
+            root = Path.cwd()
+            v = (root / 'src/chrome/VERSION').read_text()
+            fields = dict(re.findall(r'^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$', v, re.M))
+            actual = '.'.join(fields.get(k, '') for k in ('MAJOR','MINOR','BUILD','PATCH'))
+            print('SYNCED_CHROMIUM_VERSION=' + actual)
+            if actual != '156.0.8078.39': raise SystemExit(f'Chromium pin mismatch: {actual}')
+            free = shutil.disk_usage(root).free
+            print(f'FREE_DISK_AFTER_SYNC_BYTES={free}')
+            if free < 20 * 1024**3: raise SystemExit('Stopping before compilation: less than 20 GiB free after sync.')
+            backend = root / 'src/brave/ci/siso/buildbuddy_backend.star'
+            configs = root / 'src/build/config/siso'
+            if not any(p.is_file() and p.read_bytes() == backend.read_bytes() for p in configs.rglob('backend.star')):
+                raise SystemExit('Configured BuildBuddy backend missing from Chromium backend_config.')
+            print('GENERATED_BACKEND_CONFIG=PASS')
+            PY
+            cd "$PROJECT/src/brave"
+            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true
+            cd "$PROJECT"
+            mapfile -t apks < <(find src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
+            if [[ "${#apks[@]}" -ne 1 ]]; then
+              echo "Expected exactly one non-empty Bravearm64.apk, found ${#apks[@]}"
+              find src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\\n' || true
+              exit 3
+            fi
+            APK="${apks[0]}"
+            SDK=src/third_party/android_sdk
+            AAPT="$(find "$SDK" -type f -name aapt -perm -111 -print -quit 2>/dev/null || true)"
+            APKSIGNER="$(find "$SDK" -type f -name apksigner -perm -111 -print -quit 2>/dev/null || true)"
+            test -n "$AAPT" && test -n "$APKSIGNER" || { echo 'Missing aapt or apksigner from fetched Android SDK.'; exit 4; }
+            "$AAPT" dump badging "$APK" > build-diagnostics/apk-badging.txt
+            "$APKSIGNER" verify --verbose "$APK" > build-diagnostics/apksigner-verify.txt 2>&1
+            python3 - "$APK" sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" <<'PY'
+            import hashlib, json, re, shutil, subprocess, sys, zipfile
+            from pathlib import Path
+            src, dest, manifest_path = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+            source_sha = sys.argv[4]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            with zipfile.ZipFile(dest) as z:
+                if z.testzip() is not None: raise SystemExit('APK zip CRC integrity failed')
+                names = set(z.namelist())
+                if 'AndroidManifest.xml' not in names: raise SystemExit('Missing AndroidManifest.xml')
+                if not any(n.startswith('classes') and n.endswith('.dex') for n in names): raise SystemExit('Missing DEX bytecode')
+            badging = Path('build-diagnostics/apk-badging.txt').read_text()
+            pkg = re.search(r"^package: name='([^']+)'", badging, re.M)
+            if not pkg: raise SystemExit('Could not parse package name from aapt')
+            v = Path('src/chrome/VERSION').read_text()
+            fields = dict(re.findall(r'^(MAJOR|MINOR|BUILD|PATCH)=(\\d+)$', v, re.M))
+            chromium = '.'.join(fields.get(k, '') for k in ('MAJOR','MINOR','BUILD','PATCH'))
+            if chromium != '156.0.8078.39': raise SystemExit('Wrong Chromium revision in artifact')
+            manifest = {'product_baseline':'Regular Brave Android; unbranded starting point for SANDIUM','source_commit':source_sha,'brave_core_version':'1.100.10','chromium_version':chromium,'chromium_commit':subprocess.check_output(['git','-C','src','rev-parse','HEAD'],text=True).strip(),'android_target':'arm64','build_config':'Debug','artifact':dest.name,'apk_bytes':dest.stat().st_size,'apk_sha256':hashlib.sha256(dest.read_bytes()).hexdigest(),'app_package_name':pkg.group(1),'apk_zip_integrity':'PASS','android_manifest_present':True,'dalvik_bytecode_present':True,'apksigner_verification':'PASS','remote_execution_requested':True,'remote_execution_usage':'Must be established from build log; configuration alone is not evidence','device_install_and_smoke_test':'NOT_RUN'}
+            manifest_path.write_text(json.dumps(manifest,indent=2)+'\\n')
+            print('APK_BYTES='+str(manifest['apk_bytes']))
+            print('APK_SHA256='+manifest['apk_sha256'])
+            print('APK_PACKAGE='+manifest['app_package_name'])
+            PY
+            BUILD
+            chmod +x "$SCRIPT"
+            set +e
+            timeout --signal=INT --kill-after=30s 52m "$SCRIPT" 2>&1 | tee "$LOG"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "$status" > build-diagnostics/build-exit-code.txt
+            if [[ "$status" -ne 0 ]]; then echo "BUILD_EXIT_CODE=$status; diagnostics will be uploaded."; exit 0; fi
+            grep -Ei 'reapi|remote.*(exec|action)|cache.*(hit|miss)|buildbuddy' "$LOG" > build-diagnostics/rbe-evidence-candidates.log || true
+            echo BUILD_EXIT_CODE=0
+      - store_artifacts:
+          path: build-diagnostics
+          destination: sandium-android-build-diagnostics
+      - run:
+          name: Fail only after build diagnostics are preserved
+          command: |
+            set -euo pipefail
+            test "$(cat build-diagnostics/build-exit-code.txt)" = 0
+            test -s sandium-output/Brave-debug-arm64.apk
+            test -s sandium-output/build-manifest.json
+      - persist_to_workspace:
+          root: .
+          paths:
+            - sandium-output/Brave-debug-arm64.apk
+            - sandium-output/build-manifest.json
+
+  verify-apk-integrity:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Verify APK hash, ZIP CRC and required Android entries
+          command: |
+            set -euo pipefail
+            python3 - <<'PY'
+            import hashlib, json, zipfile
+            from pathlib import Path
+            apk = Path('sandium-output/Brave-debug-arm64.apk')
+            m = json.loads(Path('sandium-output/build-manifest.json').read_text())
+            if not apk.is_file() or apk.stat().st_size < 1_000_000: raise SystemExit('APK missing or unexpectedly small')
+            digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+            if digest != m.get('apk_sha256'): raise SystemExit('APK SHA-256 mismatch')
+            with zipfile.ZipFile(apk) as z:
+                if z.testzip() is not None: raise SystemExit('APK ZIP CRC failure')
+                names = set(z.namelist())
+                if 'AndroidManifest.xml' not in names or not any(n.startswith('classes') and n.endswith('.dex') for n in names): raise SystemExit('Required Android APK entries are missing')
+            print(f'APK_BYTES={apk.stat().st_size}')
+            print(f'APK_SHA256={digest}')
+            print('APK_ZIP_AND_CONTENT_CHECK=PASS')
+            PY
+            printf '{"verification":"PASS","checks":["SHA-256 matches manifest","ZIP CRC integrity","AndroidManifest.xml present","classes*.dex present"]}\\n' > sandium-output/verification.json
+      - persist_to_workspace:
+          root: .
+          paths:
+            - sandium-output/Brave-debug-arm64.apk
+            - sandium-output/build-manifest.json
+            - sandium-output/verification.json
+
+  publish-verified-apk:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Final artifact acceptance gate
+          command: |
+            set -euo pipefail
+            python3 - <<'PY'
+            import hashlib, json
+            from pathlib import Path
+            apk = Path('sandium-output/Brave-debug-arm64.apk')
+            m = json.loads(Path('sandium-output/build-manifest.json').read_text())
+            v = json.loads(Path('sandium-output/verification.json').read_text())
+            if v.get('verification') != 'PASS': raise SystemExit('APK integrity stage did not pass')
+            digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+            if digest != m.get('apk_sha256'): raise SystemExit('Final SHA-256 mismatch')
+            print(f'FINAL_APK_SHA256={digest}')
+            print(f'FINAL_APK_BYTES={apk.stat().st_size}')
+            print(f'SOURCE_COMMIT={m["source_commit"]}')
+            print(f'CHROMIUM_VERSION={m["chromium_version"]}')
+            print('SANDIUM_BASELINE_APK_ACCEPTANCE=PASS')
+            PY
+      - store_artifacts:
+          path: sandium-output
+          destination: sandium-verified-android-debug-apk
+
+workflows:
+  sandium-android-debug-apk:
+    when: << pipeline.parameters.run_sandium_android_apk_build >>
+    jobs:
+      - verify-source-pins
+      - verify-buildbuddy-auth:
+          requires:
+            - verify-source-pins
+      - build-android-debug-apk:
+          requires:
+            - verify-buildbuddy-auth
+      - verify-apk-integrity:
+          requires:
+            - build-android-debug-apk
+      - publish-verified-apk:
+          requires:
+            - verify-apk-integrity
