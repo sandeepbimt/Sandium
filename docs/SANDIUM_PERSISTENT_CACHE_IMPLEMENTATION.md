@@ -70,3 +70,12 @@ A later explicitly approved test must demonstrate:
 7. Measured CircleCI credits/storage and BuildBuddy transfer bytes.
 
 Until all gates pass, this is an implementation design, not a proven resumable build.
+
+## Review findings and remaining gates (2026-10-17)
+
+- The pinned `build/commands/scripts/sync.ts` declares `--no-history` and forwards it to gclient as `--no-history`; this confirms option forwarding, not that every Android dependency/hook is complete or that cold sync fits the time budget.
+- The review-only CircleCI candidate now rechecks the pinned Chromium version and emits a build fingerprint in each compile window. The source restore command also checks the manifest's Chromium and exact Brave Core commits.
+- The source cache deliberately requires an exact Brave Core commit match. This is safe against silently using stale Brave patch/source state, but a new Brave Core commit will reject an older source cache even if the Chromium pin is unchanged. Cross-run reuse across Brave-only commits is therefore **not implemented** yet; do not loosen this guard without a separately designed and tested cache compatibility rule.
+- Intermediate compile windows accept only timeout exit status 124 as an expected stop. Any other nonzero status fails the job. This reduces, but does not eliminate, the risk of confusing a timeout with compiler failure.
+- The review candidate has not been parsed by a CircleCI YAML validator, run through shellcheck, executed on a runner, or tested against actual CircleCI cache restore/save or BuildBuddy/Siso metrics. Those remain hard gates. No claim of functional cache reuse is made.
+- The candidate saves a full source tree, so archive size and save/restore duration may erase the expected benefit. Measure these before considering activation.
