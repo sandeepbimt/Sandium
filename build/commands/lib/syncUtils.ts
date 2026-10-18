@@ -4,6 +4,7 @@
 // You can obtain one at https://mozilla.org/MPL/2.0/.
 
 import chalk from 'chalk'
+import { createHash } from 'node:crypto'
 import config from './config.ts'
 import { checkoutChromiumRef } from './chromiumFetch.ts'
 import { isCI } from './ciDetect.ts'
@@ -172,7 +173,12 @@ print(json.dumps(out))
 
 interface SyncInfo {
   chromiumRef: string
-  gclientTimestamp: string
+  gclientHash: string
+}
+
+function getGclientConfigHash(): string {
+  const content = fs.readFileSync(config.gclientFile)
+  return createHash('sha256').update(content).digest('hex')
 }
 
 function shouldUpdateChromium(
@@ -293,7 +299,10 @@ export function syncChromium(program: SyncOptions) {
   const latestSyncInfo = util.readJSON(latestSyncInfoFilePath, {})
   const expectedSyncInfo = {
     chromiumRef: requiredChromiumRef,
-    gclientTimestamp: fs.statSync(config.gclientFile).mtimeMs.toString(),
+    // File modification times change when a cached workspace is restored and
+    // regenerated even if the effective gclient configuration is identical.
+    // Hash the content so a valid, manually pinned Chromium cache stays reusable.
+    gclientHash: getGclientConfigHash(),
   }
 
   const chromiumNeedsUpdate = shouldUpdateChromium(
