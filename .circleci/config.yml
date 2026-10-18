@@ -463,7 +463,7 @@ jobs:
             assert.ok(source.includes('SANDIUM_OVERRIDE_RECONCILIATION_FAILED='),
               'Per-file Chromium overlay diagnostics must remain enabled')
             const build = fs.readFileSync('src/brave/build/commands/lib/build.ts', 'utf8')
-            assert.ok(build.includes('writeSync(fd, message + \'\\n\')'),
+            assert.ok(build.includes('function writePhaseDiagnostic') && build.includes('writeSync(fd, message +'),
               'Build phase markers must be written synchronously before process termination')
             console.log('SANDIUM_RUNNER_FAILURE_DIAGNOSTICS=PASS')
             console.log('SANDIUM_SYNCHRONOUS_PHASE_MARKERS=PASS')
@@ -485,7 +485,7 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - run:
-          name: Test Chromium override cleanup before compilation
+          name: Test build command failure and Chromium override cleanup before compilation
           command: |
             set -euo pipefail
             cd src/brave
