@@ -368,10 +368,20 @@ jobs:
             fi
             python3 src/brave/ci/siso/build_state.py record --commit "$CIRCLE_SHA1" --stage stage-2 --compile-complete "$COMPLETE" --artifact-verified auto --log build-diagnostics/compile-window-1.log
             python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+            mkdir -p sandium-output
+            if [[ -s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk && "$(stat -c %s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk)" -ge 1000000 ]]; then
+              python3 src/brave/ci/siso/package_apk.py --commit "$CIRCLE_SHA1" --stage stage-2
+            else
+              echo "APK_NOT_YET_AVAILABLE=stage-2"
+            fi
       - save_cache:
           key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - src/brave/src/out/android_Debug_arm64
+      - save_cache:
+          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage2-{{ .BuildNum }}
+          paths:
+            - sandium-output
       - store_artifacts:
           path: build-diagnostics
           destination: stage-2-compile-window
@@ -448,10 +458,20 @@ jobs:
             fi
             python3 src/brave/ci/siso/build_state.py record --commit "$CIRCLE_SHA1" --stage stage-3 --compile-complete "$COMPLETE" --artifact-verified auto --log build-diagnostics/compile-window-2.log
             python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+            mkdir -p sandium-output
+            if [[ -s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk && "$(stat -c %s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk)" -ge 1000000 ]]; then
+              python3 src/brave/ci/siso/package_apk.py --commit "$CIRCLE_SHA1" --stage stage-3
+            else
+              echo "APK_NOT_YET_AVAILABLE=stage-3"
+            fi
       - save_cache:
           key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - src/brave/src/out/android_Debug_arm64
+      - save_cache:
+          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage3-{{ .BuildNum }}
+          paths:
+            - sandium-output
       - store_artifacts:
           path: build-diagnostics
           destination: stage-3-compile-continuation
