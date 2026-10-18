@@ -406,30 +406,7 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p build-diagnostics
-            python3 - \<<'PY'
-            import json, re, subprocess
-            from pathlib import Path
-            version_text = Path("src/brave/src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_text, re.M))
-            version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-            actual = {
-              "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
-              "chromium_commit": subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip(),
-              "chromium_version": version, "target": "android-arm64", "config": "Debug", "format": "apk",
-              "siso_revision": "c574896b272b40aac6e44c228ee0b471ea7e3d7d",
-              "build_command_args": ["Debug", "--target_os=android", "--target_arch=arm64", "--target_android_output_format=apk", "--use_remoteexec", "true", "--gn", "use_siso:true", "--gn", "use_reclient:false"]
-            }
-            fingerprint = Path("build-diagnostics/fingerprint.json")
-            if not fingerprint.is_file():
-                raise SystemExit("Stage 2 fingerprint missing from workspace.")
-            expected = json.loads(fingerprint.read_text())
-            stable_keys = ("brave_core_commit", "chromium_commit", "chromium_version", "target", "config", "format", "siso_revision", "build_command_args")
-            if any(actual.get(key) != expected.get(key) for key in stable_keys):
-                raise SystemExit(f"Build input fingerprint mismatch: expected={expected}, actual={actual}")
-            if not expected.get("gn_args_sha256"):
-                raise SystemExit("Stage 2 GN argument fingerprint is missing.")
-            print("BUILD_INPUT_FINGERPRINT_MATCHES_STAGE_2=PASS")
-            PY
+            python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
             cd src/brave
             set +e
             timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
@@ -448,28 +425,20 @@ jobs:
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - run:
-          name: Verify generated GN arguments against Stage 2
+          name: Checkpoint Stage-3 output and capture validated Siso statistics
           command: |
             set -euo pipefail
-            ARGS=src/brave/src/out/android_Debug_arm64/args.gn
-            if [[ ! -s "$ARGS" ]]; then
-              echo "Expected generated GN arguments at $ARGS."
-              find src/brave/src/out -name args.gn -type f -print || true
-              exit 4
+            status="$(cat build-diagnostics/compile-window-2-exit.txt)"
+            COMPLETE=false
+            if [[ "$status" == "0" || -s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk ]]; then
+              COMPLETE=true
             fi
-            python3 - "$ARGS" build-diagnostics/fingerprint.json \<<'PY'
-            import hashlib, json, sys
-            from pathlib import Path
-            args_path = Path(sys.argv[1])
-            fingerprint = json.loads(Path(sys.argv[2]).read_text())
-            actual = hashlib.sha256(args_path.read_bytes()).hexdigest()
-            expected = fingerprint.get("gn_args_sha256")
-            print("GN_ARGS_PATH=" + str(args_path))
-            print("GN_ARGS_SHA256=" + actual)
-            if not expected or actual != expected:
-                raise SystemExit(f"GN arguments changed between stages: expected={expected}, actual={actual}")
-            print("GN_ARGS_FINGERPRINT_MATCH=PASS")
-            PY
+            python3 src/brave/ci/siso/build_state.py record --commit "$CIRCLE_SHA1" --stage stage-3 --compile-complete "$COMPLETE" --artifact-verified auto --log build-diagnostics/compile-window-2.log
+            python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+      - save_cache:
+          key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage3-{{ .BuildNum }}
+          paths:
+            - src/brave/src/out/android_Debug_arm64
       - store_artifacts:
           path: build-diagnostics
           destination: stage-3-compile-continuation
