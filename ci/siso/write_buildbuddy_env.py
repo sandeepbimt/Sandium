@@ -19,7 +19,7 @@ END_MARKER = "# END SANDIUM BUILDBUDDY RUNTIME CONFIG"
 EXPECTED_ADDRESS = "remote.buildbuddy.io:443"
 BACKEND_CONFIG_RELATIVE = Path("ci/siso/buildbuddy_backend.star")
 CHROMIUM_PIN_RELATIVE = Path("ci/pins/chromium-tag.txt")
-CHROMIUM_TAG_PATTERN = re.compile(r"^\\d+\\.\\d+\\.\\d+\\.\\d+$")
+CHROMIUM_TAG_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 
 
 def validate_instance(instance: str) -> None:
