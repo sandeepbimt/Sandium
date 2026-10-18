@@ -95,9 +95,11 @@ jobs:
                   echo "DOWNLOADED_CIRCLECI_ARTIFACT=$artifact_path job=$job_number"
                   if [[ "$safe_name" == compile-window-*.log ]]; then
                     echo "=== BUILD ERROR SUMMARY: job $job_number $safe_name ==="
-                    grep -n -Eai 'SANDIUM_BUILD_PHASE_FAILED|Error:|ERROR:|FATAL|undefined|ELIFECYCLE|ninja: error|FAILED:|remote execution|permission denied|unauthorized|UNAUTHENTICATED|PERMISSION_DENIED|UNAVAILABLE|deadline exceeded|timed out|not found' "$target" | tail -n 120 || true
+                    grep -n -Eai 'SANDIUM_BUILD_PHASE_(BEGIN|END|FAILED)|SANDIUM_BUILD_PHASE_ERROR_TYPE|Error:|ERROR:|FATAL|undefined|ELIFECYCLE|ninja: error|FAILED:|remote execution|permission denied|unauthorized|UNAUTHENTICATED|PERMISSION_DENIED|UNAVAILABLE|deadline exceeded|timed out|not found|exit code' "$target" | tail -n 160 || true
+                    echo "=== BUILD LOG HEAD: job $job_number $safe_name ==="
+                    head -n 100 "$target"
                     echo "=== BUILD LOG TAIL: job $job_number $safe_name ==="
-                    tail -n 100 "$target"
+                    tail -n 40 "$target"
                   fi
                 else
                   echo "ARTIFACT_DOWNLOAD_UNAVAILABLE: job=$job_number path=$artifact_path"
