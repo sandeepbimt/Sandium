@@ -125,6 +125,36 @@ def _read_state() -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _build_input_fingerprint() -> str:
+    """Hash tracked browser/build inputs while excluding CI-only control files."""
+    try:
+        entries = subprocess.check_output(
+            ["git", "-C", str(CORE_DIR), "ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise StateError(f"Cannot enumerate tracked build inputs: {exc}") from exc
+
+    excluded_exact = {"docs/SANDIUM_PERSISTENT_CACHE_IMPLEMENTATION.md"}
+    excluded_prefixes = (".circleci/", ".github/", "ci/siso/", "tests/ci/")
+    digest = hashlib.sha256()
+    for record in entries.split(b"\\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\\t", 1)
+            path = raw_path.decode("utf-8", errors="strict")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise StateError("Unexpected git ls-tree record while fingerprinting build inputs") from exc
+        if path in excluded_exact or path.startswith(excluded_prefixes):
+            continue
+        digest.update(metadata)
+        digest.update(b"\\t")
+        digest.update(raw_path)
+        digest.update(b"\\0")
+    return digest.hexdigest()
+
+
 def _context(expected_commit: str | None = None) -> dict[str, Any]:
     source_commit = _git_head(CORE_DIR)
     if expected_commit and source_commit != expected_commit:
@@ -143,6 +173,7 @@ def _context(expected_commit: str | None = None) -> dict[str, Any]:
         "schema": 1,
         "source_commit": source_commit,
         "brave_core_commit": source_commit,
+        "build_input_fingerprint": _build_input_fingerprint(),
         "chromium_commit": chromium_commit,
         "chromium_version": chromium_version,
         "target": TARGET,
@@ -176,30 +207,30 @@ def _remote_backend_proven(metrics: dict[str, int]) -> bool:
 
 
 def _valid_state(mode: str, expected_commit: str | None) -> dict[str, Any]:
+    context = _context(expected_commit)
+    state = _read_state()
+    if not state:
+        raise StateError("Restored build-output cache has no SANDIUM state manifest")
+
     if mode == "cache":
-        state = _read_state()
-        if not state:
-            raise StateError("Restored build-output cache has no SANDIUM state manifest")
-        chromium_commit = _git_head(CHROMIUM_DIR)
-        chromium_version = _chromium_version()
-        if (
-            state.get("schema") != 1
-            or state.get("target") != TARGET
-            or state.get("chromium_commit") != chromium_commit
-            or state.get("chromium_version") != chromium_version
-            or chromium_version != PINNED_CHROMIUM_VERSION
-        ):
-            raise StateError("Restored build-output cache targets a different Chromium revision")
-        _gn_fingerprint()
+        cache_keys = (
+            "schema",
+            "target",
+            "chromium_commit",
+            "chromium_version",
+            "build_input_fingerprint",
+            "gn_args_sha256",
+        )
+        if any(state.get(key) != context.get(key) for key in cache_keys):
+            raise StateError("Restored build-output cache does not match current source, Chromium, or GN arguments")
         return state
 
-    context = _context(expected_commit)
     state = _read_state()
     if not state:
         raise StateError("No resumable SANDIUM build-state manifest")
     for key in (
         "schema",
-        "source_commit",
+        "build_input_fingerprint",
         "chromium_commit",
         "chromium_version",
         "target",
@@ -233,9 +264,22 @@ def command_check(args: argparse.Namespace) -> int:
         return 1
     print("BUILD_STATE_CHECK=PASS")
     print(f"BUILD_STATE_SOURCE_COMMIT={state['source_commit']}")
+    print(f"BUILD_INPUT_FINGERPRINT={state['build_input_fingerprint']}")
+    print(f"GN_ARGS_SHA256={state['gn_args_sha256']}")
     print(f"BUILD_STATE_CHROMIUM_COMMIT={state['chromium_commit']}")
     print(f"BUILD_STATE_APK_SHA256={state['apk_sha256']}")
     print(f"BUILD_STATE_ARTIFACT_VERIFIED={str(state.get('artifact_verified') is True).lower()}")
+    return 0
+
+
+def command_fingerprint(args: argparse.Namespace) -> int:
+    try:
+        context = _context(args.commit)
+    except StateError as exc:
+        print(f"BUILD_FINGERPRINT=FAIL ({exc})", file=sys.stderr)
+        return 2
+    print(f"BUILD_INPUT_FINGERPRINT={context['build_input_fingerprint']}")
+    print(f"GN_ARGS_SHA256={context['gn_args_sha256']}")
     return 0
 
 
@@ -251,7 +295,8 @@ def command_record(args: argparse.Namespace) -> int:
         can_preserve_remote_proof = False
         if old and isinstance(old.get("remote_metrics"), dict):
             same_chromium_and_args = (
-                old.get("chromium_commit") == context["chromium_commit"]
+                old.get("build_input_fingerprint") == context["build_input_fingerprint"]
+                and old.get("chromium_commit") == context["chromium_commit"]
                 and old.get("chromium_version") == context["chromium_version"]
                 and old.get("gn_args_sha256") == context["gn_args_sha256"]
                 and old.get("target") == TARGET
@@ -326,6 +371,10 @@ def main() -> int:
     check.add_argument("--mode", choices=("cache", "compiled", "verified"), required=True)
     check.add_argument("--commit", default=None, help="expected Brave Core commit SHA")
     check.set_defaults(func=command_check)
+
+    fingerprint = subparsers.add_parser("fingerprint", help="print validated build-input and GN fingerprints")
+    fingerprint.add_argument("--commit", default=None, help="expected Brave Core commit SHA")
+    fingerprint.set_defaults(func=command_fingerprint)
 
     record = subparsers.add_parser("record", help="record a completed or timed-out build window")
     record.add_argument("--commit", required=True)
