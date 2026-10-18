@@ -45,8 +45,10 @@ class BuildStateTests(unittest.TestCase):
         self._git_init(self.chromium)
         subprocess.run(["git", "-C", str(self.chromium), "tag", "156.1.100.0"], check=True)
         self.out.mkdir(parents=True)
+        # use_remoteexec is a Brave CLI/runtime option; args.gn carries
+        # only the actual GN switches for Siso and reclient.
         (self.out / "args.gn").write_text(
-            "use_remoteexec = true\nuse_siso = true\nuse_reclient = false\n",
+            "use_siso = true\nuse_reclient = false\n",
             encoding="utf-8",
         )
         (self.out / "apks").mkdir()
@@ -188,9 +190,16 @@ class BuildStateTests(unittest.TestCase):
         with self.assertRaises(state_module.StateError):
             state_module._valid_artifact_cache(self.commit)
 
-    def test_required_gn_flags_are_checked_in_generated_file(self):
+    def test_remoteexec_cli_option_is_not_required_in_generated_gn_file(self):
+        # Brave exposes --use_remoteexec as a build/runtime option, not a
+        # required GN argument. The checkpoint must accept args.gn that has
+        # valid Siso/reclient GN flags without a use_remoteexec line.
+        digest = state_module._gn_fingerprint()
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_required_siso_gn_flags_are_checked_in_generated_file(self):
         (self.out / "args.gn").write_text(
-            "use_remoteexec = true\nuse_siso = true\nuse_reclient = true\n",
+            "use_siso = true\nuse_reclient = true\n",
             encoding="utf-8",
         )
         with self.assertRaises(state_module.StateError):
