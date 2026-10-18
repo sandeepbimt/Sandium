@@ -95,6 +95,7 @@ class RuntimeConfigTests(unittest.TestCase):
         self.core = Path(self.temp.name) / "src" / "brave"
         (self.core / "ci/siso").mkdir(parents=True)
         shutil.copy2(HELPER, self.core / "ci/siso/buildbuddy-credential-helper.py")
+        shutil.copy2(BACKEND_PATH, self.core / "ci/siso/buildbuddy_backend.star")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -114,9 +115,9 @@ class RuntimeConfigTests(unittest.TestCase):
             "projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci",
             content,
         )
+        expected_backend = str((self.core / "ci/siso/buildbuddy_backend.star").resolve())
         self.assertIn(
-            "projects_chrome_custom_vars_reapi_backend_config_path="
-            "../../../../brave/ci/siso/buildbuddy_backend.star",
+            "projects_chrome_custom_vars_reapi_backend_config_path=" + expected_backend,
             content,
         )
         self.assertIn("projects_chrome_custom_vars_reapi_credential_helper=", content)
