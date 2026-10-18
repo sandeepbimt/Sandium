@@ -327,7 +327,7 @@ jobs:
               "chromium_commit":subprocess.check_output(["git","-C","src/brave/src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d",
-              "build_command_args":["Debug","--target_os=android","--target_arch=arm64","--target_android_output_format=apk","--use_remoteexec","true"]
+              "build_command_args":["Debug","--target_os=android","--target_arch=arm64","--target_android_output_format=apk","--use_remoteexec","true","--gn","use_siso:true","--gn","use_reclient:false"]
             },indent=2)+"\n")
             PY
             cd src/brave
@@ -348,7 +348,7 @@ jobs:
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - run:
-          name: Seal Stage-2 fingerprint with generated GN arguments
+          name: Validate effective GN flags and checkpoint Stage-2 output
           command: |
             set -euo pipefail
             ARGS=src/brave/src/out/android_Debug_arm64/args.gn
@@ -357,23 +357,17 @@ jobs:
               find src/brave/src/out -name args.gn -type f -print || true
               exit 4
             fi
-            python3 - "$ARGS" build-diagnostics/fingerprint.json \<<'PY'
-            import hashlib, json, sys
-            from pathlib import Path
-            args_path = Path(sys.argv[1])
-            fingerprint_path = Path(sys.argv[2])
-            fingerprint = json.loads(fingerprint_path.read_text())
-            fingerprint["gn_args_path"] = str(args_path)
-            fingerprint["gn_args_sha256"] = hashlib.sha256(args_path.read_bytes()).hexdigest()
-            fingerprint_path.write_text(json.dumps(fingerprint, indent=2) + "\n")
-            print("GN_ARGS_PATH=" + str(args_path))
-            print("GN_ARGS_SHA256=" + fingerprint["gn_args_sha256"])
-            print("GN_ARGS_FINGERPRINT=SEALED")
-            PY
-      - persist_to_workspace:
-          root: .
+            status="$(cat build-diagnostics/compile-window-1-exit.txt)"
+            COMPLETE=false
+            if [[ "$status" == "0" || -s src/brave/src/out/android_Debug_arm64/apks/Bravearm64.apk ]]; then
+              COMPLETE=true
+            fi
+            python3 src/brave/ci/siso/build_state.py record --commit "$CIRCLE_SHA1" --stage stage-2 --compile-complete "$COMPLETE" --artifact-verified auto --log build-diagnostics/compile-window-1.log
+            python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+      - save_cache:
+          key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
-            - build-diagnostics/fingerprint.json
+            - src/brave/src/out/android_Debug_arm64
       - store_artifacts:
           path: build-diagnostics
           destination: stage-2-compile-window
