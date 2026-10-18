@@ -297,14 +297,6 @@ jobs:
             fi
       - restore-sandium-source
       - restore-sandium-build-output
-      - run:
-          name: Skip compilation when reusable Chromium output already has an APK
-          command: |
-            set -euo pipefail
-            if python3 src/brave/ci/siso/build_state.py check --mode compiled --commit "$CIRCLE_SHA1"; then
-              echo "REUSABLE_APK_FOUND=true; skipping compilation setup in this stage"
-              circleci-agent step halt
-            fi
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
@@ -415,14 +407,6 @@ jobs:
             fi
       - restore-sandium-source
       - restore-sandium-build-output
-      - run:
-          name: Skip compilation when reusable Chromium output already has an APK
-          command: |
-            set -euo pipefail
-            if python3 src/brave/ci/siso/build_state.py check --mode compiled --commit "$CIRCLE_SHA1"; then
-              echo "REUSABLE_APK_FOUND=true; skipping compilation setup in this stage"
-              circleci-agent step halt
-            fi
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
