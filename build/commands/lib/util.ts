@@ -166,17 +166,34 @@ function updateFileUTimesIfOverrideIsNewer(original: string, override: string) {
 }
 
 function deleteFileIfOverrideIsNewer(original: string, override: string) {
-  if (fs.existsSync(original) && isOverrideNewer(original, override)) {
-    try {
-      fs.unlinkSync(original)
-      console.log(original + ' has been deleted.')
-      return true
-    } catch (err) {
-      console.error('Unable to delete file: ' + original + ' error: ', err)
-      process.exit(1)
-    }
+  if (!fs.existsSync(original) || !isOverrideNewer(original, override)) {
+    return false
   }
-  return false
+
+  try {
+    // A restored incremental output cache can contain a directory at a path
+    // which the current Chromium source now treats as a generated file. The
+    // old unlinkSync-only path exited immediately and could lose the diagnostic
+    // on CI pipes. Remove only this stale path inside the generated output tree.
+    const stats = fs.lstatSync(original)
+    if (stats.isDirectory() && !stats.isSymbolicLink()) {
+      fs.rmSync(original, { recursive: true, force: true })
+    } else {
+      fs.rmSync(original, { force: true })
+    }
+    console.log(original + ' has been deleted.')
+    return true
+  } catch (err) {
+    const detail = err instanceof Error
+      ? `${err.name}: ${err.message}`
+      : String(err)
+    const message =
+      `Unable to remove stale generated output "${original}" for Chromium override "${override}": ${detail}`
+    // Do not call process.exit() from the helper: immediate exit can truncate
+    // piped stderr and reduce the actionable error to "undefined" in CI logs.
+    console.error(message)
+    throw new Error(message, { cause: err })
+  }
 }
 
 function getAdditionalGenLocation() {
