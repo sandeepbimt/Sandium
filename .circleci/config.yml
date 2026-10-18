@@ -514,7 +514,10 @@ jobs:
             fi
             echo "CHROMIUM_PIN_BEFORE_BRAVE_DEPS_SYNC=$before_tag"
             set +e
-            pnpm run sync --target_os=android --target_arch=arm64 --no-history 2>&1 | tee "$ROOT/build-diagnostics/stage2-brave-deps-sync.log"
+            # Chromium reuse is mandatory here. The explicit false flag makes Brave's
+            # sync code skip the Chromium solution and sync only Brave's own DEPS
+            # plus the upstream hooks generated from the restored checkout.
+            pnpm run sync --target_os=android --target_arch=arm64 --no-history --sync_chromium=false 2>&1 | tee "$ROOT/build-diagnostics/stage2-brave-deps-sync.log"
             sync_status=${PIPESTATUS[0]}
             set -e
             echo "$sync_status" > "$ROOT/build-diagnostics/stage2-brave-deps-sync-exit.txt"
@@ -530,6 +533,18 @@ jobs:
               echo "CHROMIUM_AFTER=$after_tag@$after_commit"
               exit 32
             fi
+            python3 - "$ROOT" <<'PY'
+            import hashlib, json, sys
+            from pathlib import Path
+            root = Path(sys.argv[1])
+            manifest = json.loads((root / ".sandium-source-cache-manifest.json").read_text())
+            current_hash = hashlib.sha256((root / ".gclient").read_bytes()).hexdigest()
+            if manifest.get("gclient_sha256") != current_hash:
+                raise SystemExit(
+                    "SANDIUM_GCLIENT_MANIFEST_DRIFT=true; generated gclient config differs from validated cached source"
+                )
+            print("SANDIUM_GCLIENT_MANIFEST_MATCH=PASS")
+            PY
             test -s "$ROOT/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" || {
               echo "SANDIUM_REQUIRED_DEPS_MISSING=src/brave/vendor/bat-native-tweetnacl/BUILD.gn"
               exit 33
