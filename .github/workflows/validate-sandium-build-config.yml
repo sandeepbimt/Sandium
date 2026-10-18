@@ -188,7 +188,8 @@ jobs:
           ):
               if required not in deps_block and required != "src/brave/build/version.gni":
                   raise SystemExit(f"Stage 2 Brave DEPS restoration is missing guard: {required}")
-          if "src/brave/build/version.gni" not in raw[version_step:compile_step]:
+          version_block = raw[version_step:compile_step]
+          if "test -s build/version.gni" not in version_block or "SANDIUM_BRAVE_VERSION_GNI=GENERATED" not in version_block:
               raise SystemExit("GN compile window is not preceded by a generated Brave version.gni validation")
           pin_helper_source = Path("ci/siso/chromium_pin.py").read_text()
           if '"--require-reusable"' not in pin_helper_source or "CHROMIUM_REUSE_REQUIRED_FAILED=true" not in pin_helper_source:
