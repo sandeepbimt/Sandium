@@ -634,7 +634,7 @@ jobs:
             mkdir -p build-diagnostics
             cd src/brave
             set +e
-            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
+            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/prepare-only-exit.txt"
@@ -680,7 +680,7 @@ jobs:
               "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
               "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d",
-              "build_command_args":["Debug","--target_os=android","--target_arch=arm64","--target_android_output_format=apk","--use_remoteexec","true","--gn","use_siso:true","--gn","use_reclient:false"]
+              "build_command_args":["Debug","--target_os=android","--target_arch=arm64","--target_android_output_format=apk","--use_remoteexec","true","--gn","use_siso:true","--gn","use_reclient:false","--gn","clang_diagnostic_dir:\"clang-crashreports\""]
             },indent=2)+"\n")
             PY
             cd src/brave
@@ -695,7 +695,7 @@ jobs:
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
             set +e
-            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
+            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -817,7 +817,7 @@ jobs:
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
             set +e
-            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
+            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
@@ -942,7 +942,7 @@ jobs:
             fi
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
-              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
+              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
               status=${PIPESTATUS[0]}
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
@@ -1099,7 +1099,7 @@ jobs:
                 echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
                 echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
                 set +e
-                timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
+                timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
                 status=${PIPESTATUS[0]}
                 set -e
               fi
