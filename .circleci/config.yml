@@ -31,51 +31,69 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-src-v5-chromium-156.1.100.0-
+            - sandium-src-v6-{{ .Branch }}-
       - run:
           name: Validate restored Chromium source cache or record cold start
           command: |
             set -euo pipefail
-            if [[ -f src/chrome/VERSION ]]; then
-              python3 - \<<'PY'
-            import json, re, subprocess
+            valid_cache=false
+            if [[ -d src/.git && -f src/chrome/VERSION ]]; then
+              if python3 - \<<'PY'
+            import hashlib, json, re, subprocess, sys
             from pathlib import Path
-            text = Path("src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
-            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-            print("RESTORED_CHROMIUM_VERSION=" + actual)
-            if actual != "156.1.100.0":
-                raise SystemExit("Source cache pin mismatch; refusing to build from it.")
-            manifest_path = Path(".sandium-source-cache-manifest.json")
-            if not manifest_path.is_file():
-                raise SystemExit("Source cache manifest missing; refusing to build.")
-            manifest = json.loads(manifest_path.read_text())
-            chromium_sha = subprocess.check_output(["git", "-C", "src", "rev-parse", "HEAD"], text=True).strip()
-            version_sha256 = __import__("hashlib").sha256(Path("src/chrome/VERSION").read_bytes()).hexdigest()
-            if manifest.get("schema") != 2:
-                raise SystemExit("Unsupported source-cache manifest schema.")
-            if manifest.get("chromium_version") != actual:
-                raise SystemExit("Source-cache manifest version does not match the checked-out source.")
-            if manifest.get("chromium_commit") != chromium_sha:
-                raise SystemExit("Cached Chromium commit does not match manifest.")
-            if manifest.get("version_file_sha256") != version_sha256:
-                raise SystemExit("Cached Chromium VERSION file hash does not match manifest.")
-            print("SOURCE_CACHE_FINGERPRINT=PASS")
-            print("SOURCE_CACHE_SCOPE=CHROMIUM_ONLY")
+            try:
+                tag = subprocess.check_output(
+                    ["git", "-C", "src", "describe", "--tags", "--exact-match", "HEAD"],
+                    text=True, stderr=subprocess.PIPE,
+                ).strip()
+                if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", tag):
+                    raise ValueError(f"invalid Chromium source tag: {tag!r}")
+                manifest = json.loads(Path(".sandium-source-cache-manifest.json").read_text())
+                chromium_sha = subprocess.check_output(
+                    ["git", "-C", "src", "rev-parse", "HEAD"], text=True
+                ).strip()
+                version_sha256 = hashlib.sha256(Path("src/chrome/VERSION").read_bytes()).hexdigest()
+                if manifest.get("schema") != 3:
+                    raise ValueError("unsupported source-cache manifest schema")
+                if manifest.get("chromium_version") != tag or manifest.get("chromium_tag") != tag:
+                    raise ValueError("source-cache tag does not match the restored Chromium checkout")
+                if manifest.get("chromium_commit") != chromium_sha:
+                    raise ValueError("cached Chromium commit does not match the source manifest")
+                if manifest.get("version_file_sha256") != version_sha256:
+                    raise ValueError("cached VERSION file hash does not match the source manifest")
+                if Path(".gclient").is_file():
+                    gclient_sha256 = hashlib.sha256(Path(".gclient").read_bytes()).hexdigest()
+                    if manifest.get("gclient_sha256") != gclient_sha256:
+                        raise ValueError("cached .gclient file does not match the source manifest")
+                print("RESTORED_CHROMIUM_SOURCE_TAG=" + tag)
+                print("SOURCE_CACHE_FINGERPRINT=PASS")
+            except Exception as exc:
+                print("SOURCE_CACHE_VALIDATION_ERROR=" + str(exc), file=sys.stderr)
+                raise SystemExit(1)
             PY
+              then
+                valid_cache=true
+              fi
+            fi
+            if [[ "$valid_cache" == "true" ]]; then
+              echo "SOURCE_CACHE=HIT"
+              echo "SOURCE_CACHE_SCOPE=CHROMIUM_ONLY"
             else
-              echo "SOURCE_CACHE=COLD_MISS"
-              if [[ "${CIRCLE_JOB:-}" != "stage-1-source-foundation" ]]; then
-                echo "Required source cache missing in a compile stage."
+              echo "SOURCE_CACHE=INVALID_OR_COLD_MISS"
+              if [[ "$CIRCLE_JOB" != "stage-1-source-foundation" ]]; then
+                echo "Required validated Chromium source cache missing in compile stage."
                 exit 2
               fi
+              rm -rf src
+              rm -f .gclient .gclient_entries .brave_latest_successful_sync.json .sandium-source-cache-manifest.json
+              echo "SOURCE_CACHE=INVALID_COLD_START"
             fi
 
   restore-sandium-build-output:
     steps:
       - restore_cache:
           keys:
-            - sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-
+            - sandium-out-v4-{{ .Branch }}-android-debug-arm64-
       - run:
           name: Validate cached Android build output against source and GN inputs
           command: |
@@ -109,7 +127,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-
+            - sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-
       - run:
           name: Verify reusable APK artifact without checking out Brave source
           command: |
@@ -223,20 +241,24 @@ jobs:
       - checkout:
           path: src/brave
       - run:
-          name: Verify source pins before any expensive work
+          name: Validate Brave checkout metadata before sync
           command: |
             set -euo pipefail
             cd src/brave
-            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1"
             python3 - \<<'PY'
-            import json
+            import json, re
             from pathlib import Path
             p=json.loads(Path("package.json").read_text())
-            actual=(p["version"],p["config"]["projects"]["chrome"]["tag"])
-            expected=("1.100.10","156.1.100.0")
-            print("BRAVE_CORE_VERSION="+actual[0])
-            print("CHROMIUM_PIN="+actual[1])
-            if actual != expected: raise SystemExit(f"Expected {expected}, got {actual}")
+            brave_version=p["version"]
+            declared_tag=p["config"]["projects"]["chrome"]["tag"]
+            print("BRAVE_CORE_VERSION="+brave_version)
+            print("DECLARED_CHROMIUM_TAG="+declared_tag)
+            print("CHROMIUM_VERSION_POLICY=RESOLVE_FROM_SYNCED_SOURCE")
+            if not re.fullmatch(r"\d+\.\d+\.\d+", brave_version):
+                raise SystemExit(f"Invalid Brave Core version in package.json: {brave_version!r}")
+            if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", declared_tag):
+                raise SystemExit(f"Invalid declared Chromium tag in package.json: {declared_tag!r}")
             PY
       - install-sandium-node
       - restore-sandium-pnpm-cache
@@ -262,16 +284,18 @@ jobs:
             cd "$HOME/project"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             python3 - \<<'PY'
-            import shutil, subprocess
-            # Brave downstream patches rewrite chrome/VERSION to the Brave product
-            # version, so validate Chromium via its pinned Git tag instead.
+            import re, shutil, subprocess
+            from pathlib import Path
+            # Brave downstream patches rewrite chrome/VERSION to its own product
+            # version; use the exact tag on the synced Chromium commit as identity.
             actual = subprocess.check_output(
                 ["git", "-C", "src", "describe", "--tags", "--exact-match", "HEAD"],
                 text=True,
             ).strip()
             print("CHROMIUM_SOURCE_TAG=" + actual)
-            if actual != "156.1.100.0":
-                raise SystemExit(f"Chromium source tag mismatch: {actual}")
+            if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", actual):
+                raise SystemExit(f"Chromium source tag is not a four-part numeric version: {actual!r}")
+            Path("build-diagnostics/chromium-source-tag.txt").write_text(actual + "\n")
             free = shutil.disk_usage(".").free
             print(f"FREE_DISK_AFTER_SYNC_BYTES={free}")
             if free < 20 * 1024**3:
@@ -280,14 +304,22 @@ jobs:
             mkdir -p build-diagnostics
             git -C src rev-parse HEAD > build-diagnostics/chromium-commit.txt
             python3 - \<<'PY'
-            import hashlib, json
+            import hashlib, json, re, subprocess
             from pathlib import Path
             p = Path("src/chrome/VERSION")
+            tag = subprocess.check_output(
+              ["git", "-C", "src", "describe", "--tags", "--exact-match", "HEAD"],
+              text=True,
+            ).strip()
+            if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", tag):
+              raise SystemExit(f"Invalid Chromium source tag for cache manifest: {tag!r}")
             manifest = {
-              "schema": 2,
-              "chromium_commit": __import__("subprocess").check_output(["git","-C","src","rev-parse","HEAD"], text=True).strip(),
-              "chromium_version": "156.1.100.0",
+              "schema": 3,
+              "chromium_commit": subprocess.check_output(["git","-C","src","rev-parse","HEAD"], text=True).strip(),
+              "chromium_version": tag,
+              "chromium_tag": tag,
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+              "gclient_sha256": hashlib.sha256(Path(".gclient").read_bytes()).hexdigest() if Path(".gclient").is_file() else None,
               "target": "android-arm64-debug-apk"
             }
             Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
@@ -327,7 +359,7 @@ jobs:
             test ! -e src/brave
             echo "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true"
       - save_cache:
-          key: sandium-src-v5-chromium-156.1.100.0-{{ .BuildNum }}
+          key: sandium-src-v6-{{ .Branch }}-{{ .BuildNum }}
           paths:
             - src
             - .gclient
@@ -403,10 +435,11 @@ jobs:
             python3 - \<<'PY'
             import json, re, subprocess
             from pathlib import Path
-            p=Path("src/chrome/VERSION").read_text()
-            fields=dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$",p,re.M))
-            v=".".join(fields[k] for k in ("MAJOR","MINOR","BUILD","PATCH"))
-            if v != "156.1.100.0": raise SystemExit("Invalid Chromium pin")
+            v=subprocess.check_output(
+              ["git","-C","src","describe","--tags","--exact-match","HEAD"], text=True
+            ).strip()
+            if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+",v):
+              raise SystemExit(f"Invalid Chromium source tag: {v!r}")
             Path("build-diagnostics/fingerprint.json").write_text(json.dumps({
               "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
               "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
@@ -466,11 +499,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-2"
             fi
       - save_cache:
-          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -582,11 +615,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-3"
             fi
       - save_cache:
-          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -706,11 +739,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -862,11 +895,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
             fi
       - save_cache:
-          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
