@@ -534,7 +534,7 @@ jobs:
               exit 32
             fi
             python3 - "$ROOT" <<'PY'
-            import hashlib, json, sys
+            import hashlib, json, subprocess, sys
             from pathlib import Path
             root = Path(sys.argv[1])
             manifest = json.loads((root / ".sandium-source-cache-manifest.json").read_text())
@@ -543,7 +543,32 @@ jobs:
                 raise SystemExit(
                     "SANDIUM_GCLIENT_MANIFEST_DRIFT=true; generated gclient config differs from validated cached source"
                 )
+            source = root / "src"
+            actual_commit = subprocess.check_output(
+                ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+            ).strip()
+            actual_tag = subprocess.check_output(
+                ["git", "-C", str(source), "describe", "--tags", "--exact-match", "HEAD"], text=True
+            ).strip()
+            version_hash = hashlib.sha256((source / "chrome/VERSION").read_bytes()).hexdigest()
+            pin_lines = [
+                line.strip()
+                for line in (root / "src/brave/ci/pins/chromium-tag.txt").read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            if len(pin_lines) != 1:
+                raise SystemExit("SANDIUM_PIN_POST_SYNC_INVALID=true")
+            pin = pin_lines[0]
+            if actual_tag != pin or manifest.get("chromium_tag") != pin or manifest.get("chromium_commit") != actual_commit:
+                raise SystemExit(
+                    f"SANDIUM_SOURCE_MANIFEST_DRIFT=true; pin={pin}, tag={actual_tag}, commit={actual_commit}"
+                )
+            if manifest.get("version_file_sha256") != version_hash:
+                raise SystemExit(
+                    "SANDIUM_VERSION_FILE_DRIFT=true; Brave sync/hooks changed chrome/VERSION from the validated cache"
+                )
             print("SANDIUM_GCLIENT_MANIFEST_MATCH=PASS")
+            print("SANDIUM_SOURCE_MANIFEST_MATCH=PASS")
             PY
             test -s "$ROOT/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" || {
               echo "SANDIUM_REQUIRED_DEPS_MISSING=src/brave/vendor/bat-native-tweetnacl/BUILD.gn"
