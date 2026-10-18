@@ -495,6 +495,53 @@ jobs:
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
+          name: Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium
+          no_output_timeout: 15m
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            mkdir -p "$ROOT/build-diagnostics"
+            cd "$ROOT/src/brave"
+            python3 ci/siso/chromium_pin.py --workspace "$ROOT" --require-reusable 2>&1 | tee "$ROOT/build-diagnostics/stage2-chromium-reuse-guard.log"
+            expected_tag="$(grep -v '^[[:space:]]*#' ci/pins/chromium-tag.txt | sed '/^[[:space:]]*$/d' | head -n 1)"
+            before_commit="$(git -C "$ROOT/src" rev-parse HEAD)"
+            before_tag="$(git -C "$ROOT/src" describe --tags --exact-match HEAD)"
+            if [[ "$before_tag" != "$expected_tag" ]]; then
+              echo "SANDIUM_STAGE2_SYNC_ABORTED=true; restored Chromium tag does not match the manual pin"
+              echo "RESTORED_CHROMIUM_TAG=$before_tag"
+              echo "EXPECTED_CHROMIUM_TAG=$expected_tag"
+              exit 31
+            fi
+            echo "CHROMIUM_PIN_BEFORE_BRAVE_DEPS_SYNC=$before_tag"
+            set +e
+            pnpm run sync --target_os=android --target_arch=arm64 --no-history 2>&1 | tee "$ROOT/build-diagnostics/stage2-brave-deps-sync.log"
+            sync_status=${PIPESTATUS[0]}
+            set -e
+            echo "$sync_status" > "$ROOT/build-diagnostics/stage2-brave-deps-sync-exit.txt"
+            if [[ "$sync_status" -ne 0 ]]; then
+              echo "SANDIUM_BRAVE_DEPS_SYNC_FAILED=$sync_status"
+              exit "$sync_status"
+            fi
+            after_commit="$(git -C "$ROOT/src" rev-parse HEAD)"
+            after_tag="$(git -C "$ROOT/src" describe --tags --exact-match HEAD)"
+            if [[ "$after_commit" != "$before_commit" || "$after_tag" != "$expected_tag" ]]; then
+              echo "SANDIUM_CHROMIUM_PIN_PRESERVATION=FAIL"
+              echo "CHROMIUM_BEFORE=$before_tag@$before_commit"
+              echo "CHROMIUM_AFTER=$after_tag@$after_commit"
+              exit 32
+            fi
+            test -s "$ROOT/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" || {
+              echo "SANDIUM_REQUIRED_DEPS_MISSING=src/brave/vendor/bat-native-tweetnacl/BUILD.gn"
+              exit 33
+            }
+            test -s "$ROOT/src/brave/build/version.gni" || {
+              echo "SANDIUM_REQUIRED_GENERATED_GN_INPUT_MISSING=src/brave/build/version.gni"
+              exit 34
+            }
+            echo "SANDIUM_BRAVE_DEPS_SYNC=PASS"
+            echo "SANDIUM_REQUIRED_BRAVE_GN_INPUTS=PASS"
+            echo "SANDIUM_CHROMIUM_PIN_PRESERVATION=PASS"
+      - run:
           name: Preflight GN executable using the build environment
           command: |
             set -euo pipefail
