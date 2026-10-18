@@ -953,6 +953,39 @@ describe('util', () => {
       expect(consoleLog).toHaveBeenCalledWith(`${gen} has been deleted.`)
     })
 
+    it('removes cached generated directories regardless of their newer mtime', () => {
+      const genDirectory = path.join(config.outputDir, 'gen', 'ui', 'x.mojom')
+      fs.mkdirSync(genDirectory, { recursive: true })
+      write(path.join(genDirectory, 'stale-child.txt'))
+      const override = write(path.join(chromiumSrc, 'ui', 'x.mojom'))
+      fs.utimesSync(override, oldTime, oldTime)
+      const newerTime = (Date.now() + 60_000) / 1000
+      fs.utimesSync(genDirectory, newerTime, newerTime)
+
+      util.touchOverriddenFiles()
+
+      expect(fs.existsSync(genDirectory)).toBe(false)
+      expect(consoleLog).toHaveBeenCalledWith(
+        `${genDirectory} has been deleted.`,
+      )
+    })
+
+    it('removes dangling generated symlinks without following their targets', () => {
+      if (process.platform === 'win32') {
+        return
+      }
+      const gen = path.join(config.outputDir, 'gen', 'ui', 'x.mojom')
+      fs.mkdirSync(path.dirname(gen), { recursive: true })
+      fs.symlinkSync(path.join(tmpDir, 'missing-target'), gen)
+      const override = write(path.join(chromiumSrc, 'ui', 'x.mojom'))
+      fs.utimesSync(override, oldTime, oldTime)
+
+      util.touchOverriddenFiles()
+
+      expect(fs.existsSync(gen)).toBe(false)
+      expect(() => fs.lstatSync(gen)).toThrow()
+    })
+
     it.each([
       ['android', 'arm64', 'android_clang_arm'],
       ['android', 'x64', 'android_clang_x86'],
