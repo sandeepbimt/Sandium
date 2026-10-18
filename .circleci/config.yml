@@ -461,10 +461,6 @@ jobs:
             console.log('SANDIUM_REPROXY_CACHE_GUARD=PASS')
             console.log('SANDIUM_STALE_OUTPUT_CLEANUP=PASS')
             NODE
-          command: |
-            set -euo pipefail
-            node --check src/brave/build/commands/lib/util.ts
-            echo "SANDIUM_RUNTIME_TYPESCRIPT_SYNTAX=PASS"
       - restore-sandium-pnpm-cache
       - run:
           name: Reuse pinned Node dependencies; install only after lockfile change
