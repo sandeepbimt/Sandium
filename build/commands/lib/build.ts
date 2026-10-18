@@ -3,28 +3,51 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import { writeSync } from 'node:fs'
 import config from './config.ts'
 import util from './util.ts'
 import branding from './branding.js'
 import type * as buildOptions from './buildOptions.ts'
 import * as buildUtils from './buildUtils.ts'
 
+// Phase markers use synchronous writes because Commander and legacy helpers
+// may terminate the process immediately after an action fails. console.log()
+// can leave recent markers buffered, making the wrong internal phase appear to
+// have failed in CI.
+function writePhaseDiagnostic(fd: 1 | 2, message: string) {
+  try {
+    writeSync(fd, message + '\n')
+  } catch {
+    // Do not replace the original build failure with a diagnostics-write error.
+  }
+}
+
+function describePhaseError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`
+  }
+  try {
+    return String(error)
+  } catch {
+    return '<unprintable thrown value>'
+  }
+}
+
 function runBuildPhase<T>(name: string, action: () => T): T {
-  console.log(`SANDIUM_BUILD_PHASE_BEGIN=${name}`)
+  writePhaseDiagnostic(1, `SANDIUM_BUILD_PHASE_BEGIN=${name}`)
   try {
     const result = action()
-    console.log(`SANDIUM_BUILD_PHASE_END=${name}`)
+    writePhaseDiagnostic(1, `SANDIUM_BUILD_PHASE_END=${name}`)
     return result
   } catch (error) {
-    console.error(`SANDIUM_BUILD_PHASE_FAILED=${name}`)
-    console.error(`SANDIUM_BUILD_PHASE_ERROR_TYPE=${typeof error}`)
-    console.error(
-      error instanceof Error
-        ? error.stack || error.message
-        : String(error),
-    )
+    writePhaseDiagnostic(2, `SANDIUM_BUILD_PHASE_FAILED=${name}`)
+    writePhaseDiagnostic(2, `SANDIUM_BUILD_PHASE_ERROR_TYPE=${typeof error}`)
+    writePhaseDiagnostic(2, describePhaseError(error))
     if (!(error instanceof Error)) {
-      console.error(new Error(`Stack while handling phase ${name}`).stack)
+      writePhaseDiagnostic(
+        2,
+        describePhaseError(new Error(`Stack while handling phase ${name}`)),
+      )
     }
     throw error
   }
@@ -34,21 +57,20 @@ async function runBuildPhaseAsync<T>(
   name: string,
   action: () => Promise<T>,
 ): Promise<T> {
-  console.log(`SANDIUM_BUILD_PHASE_BEGIN=${name}`)
+  writePhaseDiagnostic(1, `SANDIUM_BUILD_PHASE_BEGIN=${name}`)
   try {
     const result = await action()
-    console.log(`SANDIUM_BUILD_PHASE_END=${name}`)
+    writePhaseDiagnostic(1, `SANDIUM_BUILD_PHASE_END=${name}`)
     return result
   } catch (error) {
-    console.error(`SANDIUM_BUILD_PHASE_FAILED=${name}`)
-    console.error(`SANDIUM_BUILD_PHASE_ERROR_TYPE=${typeof error}`)
-    console.error(
-      error instanceof Error
-        ? error.stack || error.message
-        : String(error),
-    )
+    writePhaseDiagnostic(2, `SANDIUM_BUILD_PHASE_FAILED=${name}`)
+    writePhaseDiagnostic(2, `SANDIUM_BUILD_PHASE_ERROR_TYPE=${typeof error}`)
+    writePhaseDiagnostic(2, describePhaseError(error))
     if (!(error instanceof Error)) {
-      console.error(new Error(`Stack while handling phase ${name}`).stack)
+      writePhaseDiagnostic(
+        2,
+        describePhaseError(new Error(`Stack while handling phase ${name}`)),
+      )
     }
     throw error
   }
