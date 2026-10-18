@@ -105,40 +105,6 @@ commands:
           keys:
             - sandium-pnpm-v1-{{ .Branch }}-{{ checksum "src/brave/pnpm-lock.yaml" }}-
 
-  restore-sandium-build-output:
-    steps:
-      - restore_cache:
-          keys:
-            - sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-
-      - run:
-          name: Validate cached Android build output against source and GN inputs
-          command: |
-            set -euo pipefail
-            OUT=src/brave/src/out/android_Debug_arm64
-            STATE=src/brave/ci/siso/build_state.py
-            if [[ ! -d "$OUT" ]]; then
-              echo "BUILD_OUTPUT_CACHE=COLD_MISS"
-              exit 0
-            fi
-            if python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
-              echo "BUILD_OUTPUT_CACHE=COMPATIBLE"
-              if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
-                echo 'export SANDIUM_COMPILED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
-              fi
-              if python3 "$STATE" check --mode verified --commit "$CIRCLE_SHA1"; then
-                echo 'export SANDIUM_VERIFIED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
-              fi
-            else
-              echo "BUILD_OUTPUT_CACHE=INCOMPATIBLE; discarding stale output directory"
-              rm -rf "$OUT"
-            fi
-
-  restore-sandium-pnpm-cache:
-    steps:
-      - restore_cache:
-          keys:
-            - sandium-pnpm-v1-{{ .Branch }}-{{ checksum "src/brave/pnpm-lock.yaml" }}-
-
   install-sandium-android-build-deps:
     steps:
       - run:
