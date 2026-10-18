@@ -439,58 +439,28 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
-      - run:
-          name: Guard stale generated-output cleanup in the actual Brave build checkout
-          command: |
-            set -euo pipefail
-            python3 - \<<'PY'
-            from pathlib import Path
-            path = Path("src/brave/build/commands/lib/util.ts")
-            text = path.read_text()
-            start = text.index("function deleteFileIfOverrideIsNewer(")
-            end = text.index("function getAdditionalGenLocation()", start)
-            replacement = """function deleteFileIfOverrideIsNewer(original: string, override: string) {
-              if (!fs.existsSync(original) || !isOverrideNewer(original, override)) {
-                return false
-              }
-
-              try {
-                const stats = fs.lstatSync(original)
-                if (stats.isDirectory() && !stats.isSymbolicLink()) {
-                  fs.rmSync(original, { recursive: true, force: true })
-                } else {
-                  fs.rmSync(original, { force: true })
-                }
-                console.log(original + ' has been deleted.')
-                return true
-              } catch (err) {
-                const detail = err instanceof Error
-                  ? err.name + ': ' + err.message
-                  : String(err)
-                const message =
-                  'Unable to remove stale generated output "' + original +
-                  '" for Chromium override "' + override + '": ' + detail
-                console.error(message)
-                throw new Error(message)
-              }
-            }
-
-            """
-            updated = text[:start] + replacement + text[end:]
-            path.write_text(updated)
-            check = path.read_text()
-            start = check.index("function deleteFileIfOverrideIsNewer(")
-            end = check.index("function getAdditionalGenLocation()", start)
-            block = check[start:end]
-            if "fs.rmSync(original, { recursive: true, force: true })" not in block or "process.exit(" in block:
-                raise SystemExit("Runtime stale-output cleanup guard failed verification")
-            print("SANDIUM_RUNTIME_STALE_OUTPUT_FIX=APPLIED")
-            print("SANDIUM_RUNTIME_STALE_OUTPUT_DIRECTORY_SAFE=true")
-            print("SANDIUM_RUNTIME_STALE_OUTPUT_FAILURE_PRESERVES_ERROR=true")
-            PY
       - install-sandium-node
       - run:
-          name: Validate runtime-patched TypeScript syntax before compilation
+          name: Validate committed Brave TypeScript cleanup logic before compilation
+          command: |
+            set -euo pipefail
+            node --check src/brave/build/commands/lib/util.ts
+            node - \<<'NODE'
+            const fs = require('node:fs')
+            const assert = require('node:assert/strict')
+            const source = fs.readFileSync('src/brave/build/commands/lib/util.ts', 'utf8')
+            assert.ok(source.includes('config.extraGnArgs.use_reclient !== false'),
+              'Reproxy cache cleanup must be gated when Reclient is disabled')
+            assert.ok(source.includes('SANDIUM_REPROXY_CACHE_CLEANUP=SKIPPED_USE_RECLIENT_FALSE'),
+              'Siso/Reclient-off skip marker is missing')
+            assert.ok(source.includes('Failed to remove Reproxy dependency-cache entry'),
+              'Reproxy cleanup failures must name the exact cache path')
+            assert.ok(source.includes('fs.rmSync(original, { recursive: true, force: true })'),
+              'Stale generated directories must be removed recursively')
+            console.log('SANDIUM_COMMITTED_TYPESCRIPT_SYNTAX=PASS')
+            console.log('SANDIUM_REPROXY_CACHE_GUARD=PASS')
+            console.log('SANDIUM_STALE_OUTPUT_CLEANUP=PASS')
+            NODE
           command: |
             set -euo pipefail
             node --check src/brave/build/commands/lib/util.ts
