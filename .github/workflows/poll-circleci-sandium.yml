@@ -1,4 +1,4 @@
-name: Inspect Sandium pipeline after GN PATH fix without a rebuild
+name: Inspect latest Sandium pipeline after version.gni fix without a rebuild
 
 on:
   push:
