@@ -465,9 +465,11 @@ jobs:
                 return true
               } catch (err) {
                 const detail = err instanceof Error
-                  ? \`${err.name}: ${err.message}\`
+                  ? err.name + ': ' + err.message
                   : String(err)
-                const message = \`Unable to remove stale generated output "${original}" for Chromium override "${override}": ${detail}\`
+                const message =
+                  'Unable to remove stale generated output "' + original +
+                  '" for Chromium override "' + override + '": ' + detail
                 console.error(message)
                 throw new Error(message)
               }
@@ -487,6 +489,12 @@ jobs:
             print("SANDIUM_RUNTIME_STALE_OUTPUT_FAILURE_PRESERVES_ERROR=true")
             PY
       - install-sandium-node
+      - run:
+          name: Validate runtime-patched TypeScript syntax before compilation
+          command: |
+            set -euo pipefail
+            node --check src/brave/build/commands/lib/util.ts
+            echo "SANDIUM_RUNTIME_TYPESCRIPT_SYNTAX=PASS"
       - restore-sandium-pnpm-cache
       - run:
           name: Reuse pinned Node dependencies; install only after lockfile change
