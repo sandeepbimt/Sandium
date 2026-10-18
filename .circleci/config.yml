@@ -701,7 +701,7 @@ jobs:
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
             log="$HOME/project/build-diagnostics/compile-window-1.log"
             evidence="$HOME/project/build-diagnostics/compile-window-1-remote-cache-log-candidates.txt"
-            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+            if grep -Eai 'local:[[:space:]]*[0-9]+[[:space:]]+remote:|remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
               echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
               grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
             else
@@ -720,6 +720,13 @@ jobs:
               find src/out -name args.gn -type f -print || true
               exit 4
             fi
+            # Preserve the exact generated GN arguments and the runtime/remote
+            # setting evidence with the artifacts, even if later validation fails.
+            cp -f "$ARGS" build-diagnostics/effective-args.gn
+            {
+              echo "BRAVE_BUILD_OPTION_USE_REMOTEEXEC=--use_remoteexec true"
+              grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" || true
+            } > build-diagnostics/effective-build-mode.txt
             status="$(cat build-diagnostics/compile-window-1-exit.txt)"
             COMPLETE=false
             if [[ "$status" == "0" || -s src/out/android_Debug_arm64/apks/Bravearm64.apk ]]; then
