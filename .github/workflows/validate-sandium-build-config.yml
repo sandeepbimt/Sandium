@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - build/sandium-android-debug-apk-2026-10-17
+      - fix/dynamic-chromium-version-and-cache-v1
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-sandium-build-config.yml"
