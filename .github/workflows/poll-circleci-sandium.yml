@@ -18,7 +18,7 @@ jobs:
       - name: Read CircleCI pipeline, workflow and job state (no new build)
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
-          PIPELINE_ID: 1d1b5b98-2dfe-4457-8945-9cd2b3d04200
+          PIPELINE_ID: 3e487b6e-0343-4497-b462-6cc526dbbce4
           CIRCLECI_PROJECT_SLUG: circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2
         shell: bash
         run: |
@@ -74,11 +74,42 @@ jobs:
               fi
             done
           done < circleci-status/workflow-summary.tsv
+          # Download the actual compile-window log from CircleCI's job artifacts.
+          # This inspection workflow does not trigger or rerun CircleCI builds.
+          while IFS="$(printf '\\t')" read -r workflow_id workflow_name workflow_status created stopped; do
+            [[ -n "$workflow_id" ]] || continue
+            jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
+              [[ -n "$job_number" ]] || continue
+              artifact_json="circleci-status/artifacts-$job_number.json"
+              if ! curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+                  "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/$job_number/artifacts" -o "$artifact_json"; then
+                echo "ARTIFACT_LIST_UNAVAILABLE: job=$job_number"
+                continue
+              fi
+              jq -r '.items[]? | select(.path | test("compile-window-[1-4]\\.log$|fingerprint\\.json$|args\\.gn$|remote.*log"; "i")) | [.path,.url] | @tsv' "$artifact_json" |
+              while IFS="$(printf '\\t')" read -r artifact_path artifact_url; do
+                [[ -n "$artifact_url" ]] || continue
+                safe_name="$(basename "$artifact_path")"
+                target="circleci-status/job-$job_number-$safe_name"
+                if curl --fail --location --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" "$artifact_url" -o "$target"; then
+                  echo "DOWNLOADED_CIRCLECI_ARTIFACT=$artifact_path job=$job_number"
+                  if [[ "$safe_name" == compile-window-*.log ]]; then
+                    echo "=== BUILD ERROR SUMMARY: job $job_number $safe_name ==="
+                    grep -n -Eai 'SANDIUM_BUILD_PHASE_FAILED|Error:|ERROR:|FATAL|undefined|ELIFECYCLE|ninja: error|FAILED:|remote execution|permission denied|unauthorized|UNAUTHENTICATED|PERMISSION_DENIED|UNAVAILABLE|deadline exceeded|timed out|not found' "$target" | tail -n 120 || true
+                    echo "=== BUILD LOG TAIL: job $job_number $safe_name ==="
+                    tail -n 100 "$target"
+                  fi
+                else
+                  echo "ARTIFACT_DOWNLOAD_UNAVAILABLE: job=$job_number path=$artifact_path"
+                fi
+              done
+            done
+          done < circleci-status/workflow-summary.tsv
           echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
       - name: Save inspection results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: circleci-pipeline-17-status-${{ github.run_id }}-${{ github.run_attempt }}
+          name: circleci-pipeline-17-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: circleci-status/
           if-no-files-found: ignore
