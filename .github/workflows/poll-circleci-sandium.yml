@@ -1,4 +1,4 @@
-name: Inspect instrumented Sandium Stage 2 failure without a rebuild
+name: Inspect Sandium pipeline after GN PATH fix without a rebuild
 
 on:
   push:
