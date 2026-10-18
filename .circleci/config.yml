@@ -495,6 +495,37 @@ jobs:
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
+          name: Preflight GN executable using the build environment
+          command: |
+            set -euo pipefail
+            cd src/brave
+            node - \<<'NODE'
+            import { spawnSync } from 'node:child_process'
+            import config from './build/commands/lib/config.ts'
+            const options = config.defaultOptions
+            const lookup = spawnSync('bash', ['-c', 'command -v gn'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
+              throw new Error('GN executable is not resolvable with Brave build PATH: '
+                + (lookup.error?.message || lookup.stderr || 'command -v gn returned no path'))
+            }
+            const gnPath = lookup.stdout.trim()
+            console.log('SANDIUM_GN_RESOLVED_PATH=' + gnPath)
+            const version = spawnSync('gn', ['--version'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (version.error) {
+              throw new Error('GN failed to spawn at ' + gnPath + ': ' + version.error.message)
+            }
+            if (version.status !== 0) {
+              throw new Error('GN --version failed with status ' + version.status
+                + '; stdout=' + (version.stdout || '') + '; stderr=' + (version.stderr || ''))
+            }
+            console.log('SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS')
+            console.log('SANDIUM_GN_VERSION=' + version.stdout.trim())
+            NODE
+      - run:
           name: Prepare source overlay and branding before GN
           no_output_timeout: 10m
           command: |
