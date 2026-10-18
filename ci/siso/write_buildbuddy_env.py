@@ -17,7 +17,7 @@ from typing import Mapping
 BEGIN_MARKER = "# BEGIN SANDIUM BUILDBUDDY RUNTIME CONFIG"
 END_MARKER = "# END SANDIUM BUILDBUDDY RUNTIME CONFIG"
 EXPECTED_ADDRESS = "remote.buildbuddy.io:443"
-BACKEND_CONFIG = "../../../../brave/ci/siso/buildbuddy_backend.star"
+BACKEND_CONFIG_RELATIVE = Path("ci/siso/buildbuddy_backend.star")
 
 
 def validate_instance(instance: str) -> None:
@@ -43,6 +43,9 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
     helper_path = (core_dir / "ci/siso/buildbuddy-credential-helper.py").resolve()
     if not helper_path.is_file():
         raise FileNotFoundError(f"Credential helper not found: {helper_path}")
+    backend_path = (core_dir / BACKEND_CONFIG_RELATIVE).resolve()
+    if not backend_path.is_file():
+        raise FileNotFoundError(f"Siso backend config not found: {backend_path}")
     if " " in str(core_dir.resolve()):
         raise ValueError("Brave build root cannot contain spaces")
 
@@ -51,7 +54,7 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
         f"rbe_service={address}",
         f"projects_chrome_custom_vars_reapi_address={address}",
         f"projects_chrome_custom_vars_reapi_instance={instance}",
-        f"projects_chrome_custom_vars_reapi_backend_config_path={BACKEND_CONFIG}",
+        f"projects_chrome_custom_vars_reapi_backend_config_path={backend_path}",
         f"projects_chrome_custom_vars_reapi_credential_helper={helper_path}",
         "siso_use_googlechrome_config=false",
         "use_remoteexec=false",
