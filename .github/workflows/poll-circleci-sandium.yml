@@ -1,4 +1,4 @@
-name: Inspect latest Sandium pipeline after version.gni fix without a rebuild
+name: Inspect pipeline 25 Brave DEPS restoration failure without a rebuild
 
 on:
   push:
@@ -169,6 +169,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: circleci-pipeline-18-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          name: circleci-pipeline-25-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: circleci-status/
           if-no-files-found: ignore
