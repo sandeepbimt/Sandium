@@ -18,7 +18,7 @@ jobs:
       - name: Read CircleCI pipeline, workflow and job state (no new build)
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
-          PIPELINE_ID: 31a8d53a-8d33-4df6-803d-1a0df1a207bb
+          BRANCH: build/sandium-android-debug-apk-2026-10-17
           CIRCLECI_PROJECT_SLUG: circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2
         shell: bash
         run: |
@@ -28,6 +28,17 @@ jobs:
             exit 1
           fi
           mkdir -p circleci-status
+          curl --fail --silent --show-error --get --header "Circle-Token: $CIRCLECI_TOKEN" \
+            --data-urlencode "branch=$BRANCH" \
+            "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/pipeline" \
+            -o circleci-status/pipeline-list.json
+          PIPELINE_ID="$(jq -r '.items[0].id // empty' circleci-status/pipeline-list.json)"
+          if [[ -z "$PIPELINE_ID" ]]; then
+            echo "No CircleCI pipeline found for branch $BRANCH"
+            jq . circleci-status/pipeline-list.json
+            exit 1
+          fi
+          echo "INSPECTING_LATEST_BRANCH_PIPELINE=$PIPELINE_ID"
           curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
             "https://circleci.com/api/v2/pipeline/$PIPELINE_ID" -o circleci-status/pipeline.json
           curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
