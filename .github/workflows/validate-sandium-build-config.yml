@@ -155,7 +155,7 @@ jobs:
           if "sandium-src-v6-{{ .Branch }}-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw or "CHROMIUM_UPDATE_POLICY=MANUAL_PIN" not in raw:
               raise SystemExit("Chromium source cache must use the explicit manual pin and exclude the separate Brave Core checkout")
           pins = [line.strip() for line in Path("ci/pins/chromium-tag.txt").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
-          if len(pins) != 1 or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", pins[0]):
+          if len(pins) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", pins[0]):
               raise SystemExit("Manual Chromium pin must be exactly one four-part numeric tag")
           writer_source = Path("ci/siso/write_buildbuddy_env.py").read_text()
           config_source = Path("build/commands/lib/config.ts").read_text()
@@ -167,7 +167,7 @@ jobs:
               raise SystemExit("Chromium sync decision must hash gclient content rather than unstable mtimes")
           if "MIGRATED_TIMESTAMP_TO_CONTENT_HASH" not in pin_helper or "SOURCE_CACHE_FINGERPRINT=PASS" not in pin_helper:
               raise SystemExit("Verified cached Chromium source does not have a safe legacy sync-metadata fast path")
-          if "python3 ci/siso/chromium_pin.py --workspace \\"$HOME/project\\"" not in raw:
+          if 'python3 ci/siso/chromium_pin.py --workspace "$HOME/project"' not in raw:
               raise SystemExit("Stage 1 does not run the offline manual-pin cache fast path")
           if '"manual_chromium_pin": tag' not in raw:
               raise SystemExit("Saved source-cache manifest does not record the approved manual Chromium pin")
