@@ -499,7 +499,7 @@ jobs:
           command: |
             set -euo pipefail
             cd src/brave
-            node - \<<'NODE'
+            node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
