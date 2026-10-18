@@ -31,6 +31,19 @@ STATS_PATTERN = re.compile(
     r"fallback:(\d+)\s+retry:(\d+)\s+skip:(\d+)",
     re.IGNORECASE,
 )
+STATS_SUMMARY_PATTERN = re.compile(
+    r"local:(?P<local>\d+)\s+remote:(?P<remote>\d+)\s+"
+    r"cache:(?P<cache>\d+)(?:\s+skip:(?P<skip>\d+))?",
+    re.IGNORECASE,
+)
+CACHE_WRITE_PATTERN = re.compile(
+    r"cache-write:(?P<writes>\d+)(?:\(err:(?P<errors>\d+)\))?",
+    re.IGNORECASE,
+)
+FALLBACK_RETRY_PATTERN = re.compile(
+    r"fallback:(?P<fallback>\d+)\s+retry:(?P<retry>\d+)",
+    re.IGNORECASE,
+)
 
 
 class StateError(RuntimeError):
@@ -110,14 +123,37 @@ def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
 
     found = False
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = STATS_PATTERN.search(line)
-        if not match:
+        # Older Siso logs put all counters on one line. Current logs split the
+        # cache-write/fallback/retry counters onto the following line.
+        combined = STATS_PATTERN.search(line)
+        if combined:
+            found = True
+            values = [int(value or 0) for value in combined.groups()]
+            metrics.update(dict(zip(list(metrics), values)))
             continue
-        found = True
-        values = [int(value or 0) for value in match.groups()]
-        names = list(metrics)
-        for name, value in zip(names, values):
-            metrics[name] += value
+
+        summary = STATS_SUMMARY_PATTERN.search(line)
+        if summary:
+            found = True
+            metrics["local_actions"] = int(summary.group("local"))
+            metrics["remote_actions"] = int(summary.group("remote"))
+            metrics["remote_cache_hits"] = int(summary.group("cache"))
+            if summary.group("skip") is not None:
+                metrics["skipped_actions"] = int(summary.group("skip"))
+
+        cache_write = CACHE_WRITE_PATTERN.search(line)
+        if cache_write:
+            found = True
+            metrics["remote_cache_writes"] = int(cache_write.group("writes"))
+            if cache_write.group("errors") is not None:
+                metrics["remote_cache_write_errors"] = int(cache_write.group("errors"))
+
+        fallback_retry = FALLBACK_RETRY_PATTERN.search(line)
+        if fallback_retry:
+            found = True
+            metrics["local_fallbacks"] = int(fallback_retry.group("fallback"))
+            metrics["remote_retries"] = int(fallback_retry.group("retry"))
+
     return metrics, found
 
 
