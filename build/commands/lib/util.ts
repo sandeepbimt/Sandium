@@ -192,7 +192,7 @@ function deleteFileIfOverrideIsNewer(original: string, override: string) {
     // Do not call process.exit() from the helper: immediate exit can truncate
     // piped stderr and reduce the actionable error to "undefined" in CI logs.
     console.error(message)
-    throw new Error(message, { cause: err })
+    throw new Error(message)
   }
 }
 
