@@ -262,13 +262,16 @@ jobs:
             cd "$HOME/project"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             python3 - \<<'PY'
-            import re, shutil
-            from pathlib import Path
-            text = Path("src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", text, re.M))
-            actual = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-            if actual != "156.1.100.0":
-                raise SystemExit(f"Chromium pin mismatch: {actual}")
+            import shutil, subprocess
+            # Brave downstream patches rewrite chrome/VERSION to the Brave product
+            # version, so validate Chromium via its pinned Git tag instead.
+            actual = subprocess.check_output(
+                ["git", "-C", "src", "describe", "--tags", "--exact-match", "HEAD"],
+                text=True,
+            ).strip()
+            print("CHROMIUM_SOURCE_TAG=" + actual)
+            if actual != "156.0.8078.39":
+                raise SystemExit(f"Chromium source tag mismatch: {actual}")
             free = shutil.disk_usage(".").free
             print(f"FREE_DISK_AFTER_SYNC_BYTES={free}")
             if free < 20 * 1024**3:
