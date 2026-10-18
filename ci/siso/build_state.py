@@ -219,7 +219,7 @@ def _valid_artifact_cache(expected_commit: str | None) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise StateError(f"Cannot read pinned Chromium tag from package.json: {exc}") from exc
 
-    project_dir = CORE_DIR.parent
+    project_dir = CORE_DIR.parent.parent
     output_dir = project_dir / "sandium-output"
     state_path = output_dir / "build-state.json"
     manifest_path = output_dir / "build-manifest.json"
