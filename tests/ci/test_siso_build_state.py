@@ -45,11 +45,7 @@ class BuildStateTests(unittest.TestCase):
         self._git_init(self.chromium)
         self.out.mkdir(parents=True)
         (self.out / "args.gn").write_text(
-            'import("//out/android_Debug_arm64/args_generated.gni")\n',
-            encoding="utf-8",
-        )
-        (self.out / "args_generated.gni").write_text(
-            "use_remoteexec=true\nuse_siso=true\nuse_reclient=false\n",
+            "use_remoteexec = true\nuse_siso = true\nuse_reclient = false\n",
             encoding="utf-8",
         )
         (self.out / "apks").mkdir()
@@ -188,8 +184,8 @@ class BuildStateTests(unittest.TestCase):
             state_module._valid_artifact_cache(self.commit)
 
     def test_required_gn_flags_are_checked_in_generated_file(self):
-        (self.out / "args_generated.gni").write_text(
-            "use_remoteexec=true\nuse_siso=true\nuse_reclient=true\n",
+        (self.out / "args.gn").write_text(
+            "use_remoteexec = true\nuse_siso = true\nuse_reclient = true\n",
             encoding="utf-8",
         )
         with self.assertRaises(state_module.StateError):
