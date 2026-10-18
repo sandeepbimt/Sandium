@@ -439,6 +439,53 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
+      - run:
+          name: Guard stale generated-output cleanup in the actual Brave build checkout
+          command: |
+            set -euo pipefail
+            python3 - <<'PY'
+            from pathlib import Path
+            path = Path("src/brave/build/commands/lib/util.ts")
+            text = path.read_text()
+            start = text.index("function deleteFileIfOverrideIsNewer(")
+            end = text.index("function getAdditionalGenLocation()", start)
+            replacement = """function deleteFileIfOverrideIsNewer(original: string, override: string) {
+              if (!fs.existsSync(original) || !isOverrideNewer(original, override)) {
+                return false
+              }
+
+              try {
+                const stats = fs.lstatSync(original)
+                if (stats.isDirectory() && !stats.isSymbolicLink()) {
+                  fs.rmSync(original, { recursive: true, force: true })
+                } else {
+                  fs.rmSync(original, { force: true })
+                }
+                console.log(original + ' has been deleted.')
+                return true
+              } catch (err) {
+                const detail = err instanceof Error
+                  ? \`${err.name}: ${err.message}\`
+                  : String(err)
+                const message = \`Unable to remove stale generated output "${original}" for Chromium override "${override}": ${detail}\`
+                console.error(message)
+                throw new Error(message)
+              }
+            }
+
+            """
+            updated = text[:start] + replacement + text[end:]
+            path.write_text(updated)
+            check = path.read_text()
+            start = check.index("function deleteFileIfOverrideIsNewer(")
+            end = check.index("function getAdditionalGenLocation()", start)
+            block = check[start:end]
+            if "fs.rmSync(original, { recursive: true, force: true })" not in block or "process.exit(" in block:
+                raise SystemExit("Runtime stale-output cleanup guard failed verification")
+            print("SANDIUM_RUNTIME_STALE_OUTPUT_FIX=APPLIED")
+            print("SANDIUM_RUNTIME_STALE_OUTPUT_DIRECTORY_SAFE=true")
+            print("SANDIUM_RUNTIME_STALE_OUTPUT_FAILURE_PRESERVES_ERROR=true")
+            PY
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
