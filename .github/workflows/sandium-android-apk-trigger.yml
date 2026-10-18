@@ -36,6 +36,69 @@ jobs:
           fi
           echo "Approved isolated Sandium branch: $BRANCH"
 
+      - name: Ensure BuildBuddy credential is configured in the isolated CircleCI project
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+          CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CIRCLECI_TOKEN:?Missing CIRCLECI_TOKEN; refusing to start an unmonitorable build}"
+          : "${BUILDBUDDY_API_KEY:?Missing tested GitHub Actions BUILDBUDDY_API_KEY secret}"
+          base="https://circleci.com/api/v2/project/${CIRCLECI_PROJECT_SLUG}/envvar"
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          expected_suffix="${BUILDBUDDY_API_KEY: -4}"
+          get_vars() {
+            curl --silent --show-error --output "$temp_dir/envvars.json" --write-out "%{http_code}" \
+              --header "Circle-Token: ${CIRCLECI_TOKEN}" "$base"
+          }
+          http_status="$(get_vars)"
+          if [[ "$http_status" != "200" ]]; then
+            echo "::error::Cannot inspect the CircleCI project's protected environment variables (HTTP $http_status); refusing to spend a build run."
+            exit 1
+          fi
+          key_is_listed=false
+          if jq -e --arg name "BUILDBUDDY_API_KEY" '.items[]? | select(.name == $name)' "$temp_dir/envvars.json" >/dev/null; then
+            key_is_listed=true
+          fi
+          if [[ "$key_is_listed" == "true" ]]; then
+            masked_value="$(jq -r '.items[] | select(.name == "BUILDBUDDY_API_KEY") | .value' "$temp_dir/envvars.json" | head -n 1)"
+            actual_suffix="${masked_value: -4}"
+            if [[ "$actual_suffix" != "$expected_suffix" ]]; then
+              echo "CircleCI BuildBuddy credential differs from the tested Actions secret; rotating the project value."
+              delete_status="$(curl --silent --show-error --output "$temp_dir/delete.json" --write-out "%{http_code}" \
+                --request DELETE --header "Circle-Token: ${CIRCLECI_TOKEN}" "$base/BUILDBUDDY_API_KEY")"
+              if [[ "$delete_status" != "200" ]]; then
+                echo "::error::Unable to replace stale BuildBuddy project credential (HTTP $delete_status); no APK pipeline was triggered."
+                exit 1
+              fi
+              key_is_listed=false
+            else
+              echo "BUILDBUDDY_API_KEY already matches the verified Actions secret by masked suffix."
+            fi
+          fi
+          if [[ "$key_is_listed" == "false" ]]; then
+            python3 -c 'import json,os; print(json.dumps({"name":"BUILDBUDDY_API_KEY","value":os.environ["BUILDBUDDY_API_KEY"]}))' > "$temp_dir/request.json"
+            create_status="$(curl --silent --show-error --output "$temp_dir/create.json" --write-out "%{http_code}" \
+              --request POST "$base" \
+              --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data-binary "@$temp_dir/request.json")"
+            if [[ "$create_status" != "201" ]]; then
+              echo "::error::Unable to provision BuildBuddy project credential (HTTP $create_status); no APK pipeline was triggered."
+              exit 1
+            fi
+            echo "BUILDBUDDY_API_KEY provisioned without logging or committing its value."
+          fi
+          get_status="$(curl --silent --show-error --output "$temp_dir/verify.json" --write-out "%{http_code}" \
+            --header "Circle-Token: ${CIRCLECI_TOKEN}" "$base/BUILDBUDDY_API_KEY")"
+          if [[ "$get_status" != "200" ]] || ! jq -e --arg suffix "$expected_suffix" '.value[-4:] == $suffix' "$temp_dir/verify.json" >/dev/null; then
+            echo "::error::CircleCI BuildBuddy credential verification failed; no APK pipeline was triggered."
+            exit 1
+          fi
+          echo "BUILDBUDDY_CREDENTIAL_READY=true"
       - name: Trigger the five-stage CircleCI Android APK pipeline
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
