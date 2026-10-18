@@ -166,7 +166,7 @@ jobs:
                   raise SystemExit(f"Missing phase-level build diagnostics: {phase}")
           if "SANDIUM_BUILD_PHASE_FAILED=" not in build_impl:
               raise SystemExit("Build-phase failure details are not logged")
-          delete_helper = util_impl.split("function deleteFileIfOverrideIsNewer(", 1)[1].split("\\nfunction getAdditionalGenLocation()", 1)[0]
+          delete_helper = util_impl.split("function deleteFileIfOverrideIsNewer(", 1)[1].split("\nfunction getAdditionalGenLocation()", 1)[0]
           if "process.exit(1)" in delete_helper or "Unable to remove stale generated output" not in delete_helper:
               raise SystemExit("Stale generated-output cleanup can still exit without preserving the error")
           if "fs.rmSync(original, { recursive: true, force: true })" not in delete_helper:
