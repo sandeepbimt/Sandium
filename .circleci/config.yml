@@ -464,97 +464,80 @@ jobs:
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
-          name: Finish compilation and require APK
+          name: Finish compilation, reuse completed APK, and verify artifact
           no_output_timeout: 45m
           command: |
             set -euo pipefail
             mkdir -p build-diagnostics sandium-output
-            python3 - \<<'PY'
-            import json, re, subprocess
-            from pathlib import Path
-            version_text = Path("src/brave/src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_text, re.M))
-            version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-            actual = {
-              "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
-              "chromium_commit": subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip(),
-              "chromium_version": version, "target": "android-arm64", "config": "Debug", "format": "apk",
-              "siso_revision": "c574896b272b40aac6e44c228ee0b471ea7e3d7d",
-              "build_command_args": ["Debug", "--target_os=android", "--target_arch=arm64", "--target_android_output_format=apk", "--use_remoteexec", "true", "--gn", "use_siso:true", "--gn", "use_reclient:false"]
-            }
-            fingerprint = Path("build-diagnostics/fingerprint.json")
-            if not fingerprint.is_file():
-                raise SystemExit("Stage 2 fingerprint missing from workspace.")
-            expected = json.loads(fingerprint.read_text())
-            stable_keys = ("brave_core_commit", "chromium_commit", "chromium_version", "target", "config", "format", "siso_revision", "build_command_args")
-            if any(actual.get(key) != expected.get(key) for key in stable_keys):
-                raise SystemExit(f"Final build input fingerprint mismatch: expected={expected}, actual={actual}")
-            if not expected.get("gn_args_sha256"):
-                raise SystemExit("Stage 2 GN argument fingerprint is missing.")
-            print("FINAL_BUILD_INPUT_FINGERPRINT_MATCHES_STAGE_2=PASS")
-            PY
-            cd src/brave
-            set +e
-            timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-3.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
-            log="$HOME/project/build-diagnostics/compile-window-3.log"
-            evidence="$HOME/project/build-diagnostics/compile-window-3-remote-cache-log-candidates.txt"
-            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
-              echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
-              grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+            OUT=src/brave/src/out/android_Debug_arm64
+            STATE=src/brave/ci/siso/build_state.py
+            LOG="$HOME/project/build-diagnostics/compile-window-3.log"
+            status=0
+
+            if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
+              echo "FINAL_COMPILE_SKIPPED=REUSABLE_APK_PRESENT"
+              : > "$LOG"
             else
-              echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
+              python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+              cd src/brave
+              set +e
+              timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
+              status=${PIPESTATUS[0]}
+              set -e
+              echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
+              if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+                echo "Final compile window failed (status=$status)"
+                exit "$status"
+              fi
+              if [[ "$status" -eq 124 ]]; then
+                echo "FINAL_COMPILE_WINDOW_TIMED_OUT=124"
+              fi
+              cd "$HOME/project"
+            fi
+            echo "$status" > build-diagnostics/compile-window-3-exit.txt
+
+            evidence=build-diagnostics/compile-window-3-remote-cache-log-candidates.txt
+            if [[ -s "$LOG" ]] && grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)|local:[[:space:]]*[0-9]+[[:space:]]+remote:' "$LOG" > "$evidence"; then
+              echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
+              tail -n 20 "$evidence" || true
+            else
               : > "$evidence"
+              echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
             fi
-            if [[ "$status" -ne 0 ]]; then
-              echo "Final compile window did not complete successfully (status=$status)"
-              exit "$status"
+
+            COMPLETE=false
+            if [[ "$status" -eq 0 || -s "$OUT/apks/Bravearm64.apk" ]]; then
+              COMPLETE=true
             fi
-            cd "$HOME/project"
-            ARGS=src/brave/src/out/android_Debug_arm64/args.gn
-            if [[ ! -s "$ARGS" ]]; then
-              echo "Expected generated GN arguments at $ARGS."
-              find src/brave/src/out -name args.gn -type f -print || true
-              exit 4
-            fi
-            python3 - "$ARGS" build-diagnostics/fingerprint.json \<<'PY'
-            import hashlib, json, sys
-            from pathlib import Path
-            args_path = Path(sys.argv[1])
-            fingerprint = json.loads(Path(sys.argv[2]).read_text())
-            actual = hashlib.sha256(args_path.read_bytes()).hexdigest()
-            expected = fingerprint.get("gn_args_sha256")
-            print("GN_ARGS_PATH=" + str(args_path))
-            print("GN_ARGS_SHA256=" + actual)
-            if not expected or actual != expected:
-                raise SystemExit(f"GN arguments changed between stages: expected={expected}, actual={actual}")
-            print("GN_ARGS_FINGERPRINT_MATCH=PASS")
-            PY
-            mapfile -t apks < <(find src/brave/src/out -type f -path '*/apks/Bravearm64.apk' -size +1M -print)
-            if [[ "${#apks[@]}" -ne 1 ]]; then
-              echo "Expected exactly one Bravearm64.apk, found ${#apks[@]}"
+            python3 "$STATE" record --commit "$CIRCLE_SHA1" --stage stage-4 --compile-complete "$COMPLETE" --artifact-verified auto --log "$LOG"
+            python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
+
+            APK="$OUT/apks/Bravearm64.apk"
+            if [[ ! -s "$APK" || "$(stat -c %s "$APK")" -lt 1000000 ]]; then
+              echo "No complete Bravearm64.apk exists after the final compile window; prior stage checkpoints remain reusable."
               find src/brave/src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\n' || true
               exit 3
             fi
-            cp "${apks[0]}" sandium-output/Brave-debug-arm64.apk
+            cp "$APK" sandium-output/Brave-debug-arm64.apk
+
             SDK=src/brave/src/third_party/android_sdk
             AAPT="$(find "$SDK" -type f -name aapt -perm -111 -print -quit 2>/dev/null || true)"
             APKSIGNER="$(find "$SDK" -type f -name apksigner -perm -111 -print -quit 2>/dev/null || true)"
             test -n "$AAPT" && test -n "$APKSIGNER" || { echo "Missing aapt or apksigner from the synced Android SDK."; exit 5; }
             "$AAPT" dump badging sandium-output/Brave-debug-arm64.apk > sandium-output/apk-badging.txt
             "$APKSIGNER" verify --verbose sandium-output/Brave-debug-arm64.apk > sandium-output/apksigner-verify.txt 2>&1
-            python3 - sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" \<<'PY'
+
+            python3 - sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" "$OUT/.sandium-build-state.json" \<<'PY'
             import hashlib, json, re, subprocess, sys, zipfile
             from pathlib import Path
             apk = Path(sys.argv[1])
             manifest_path = Path(sys.argv[2])
             source_commit = sys.argv[3]
-            with zipfile.ZipFile(apk) as z:
-                if z.testzip() is not None:
+            state_path = Path(sys.argv[4])
+            with zipfile.ZipFile(apk) as archive:
+                if archive.testzip() is not None:
                     raise SystemExit("APK ZIP CRC integrity failed")
-                names = set(z.namelist())
+                names = set(archive.namelist())
                 if "AndroidManifest.xml" not in names:
                     raise SystemExit("APK is missing AndroidManifest.xml")
                 if not any(name.startswith("classes") and name.endswith(".dex") for name in names):
@@ -568,7 +551,7 @@ jobs:
             chromium_version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
             if chromium_version != "156.0.8078.39":
                 raise SystemExit(f"Unexpected Chromium version in APK source tree: {chromium_version}")
-            fingerprint = json.loads(Path("build-diagnostics/fingerprint.json").read_text())
+            state = json.loads(state_path.read_text())
             manifest = {
                 "source_commit": source_commit,
                 "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
@@ -583,14 +566,37 @@ jobs:
                 "apk_zip_integrity": "PASS",
                 "dalvik_bytecode_present": True,
                 "apksigner_verification": "PASS",
-                "build_fingerprint": fingerprint,
-                "remote_execution_usage": "Must be established from compile logs; configuration is not proof"
+                "build_input_fingerprint": state["build_input_fingerprint"],
+                "gn_args_sha256": state["gn_args_sha256"],
+                "remote_execution_usage": {
+                    "proven_from_siso_stats": state.get("remote_backend_proven", False),
+                    "metrics": state.get("remote_metrics", {}),
+                },
             }
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
             print("APK_BYTES=" + str(manifest["apk_bytes"]))
             print("APK_SHA256=" + manifest["apk_sha256"])
             print("APK_PACKAGE=" + manifest["app_package_name"])
+            print("APK_ZIP_INTEGRITY=PASS")
             print("APK_SIGNATURE_VERIFICATION=PASS")
+            PY
+            python3 "$STATE" record --commit "$CIRCLE_SHA1" --stage stage-4 --compile-complete true --artifact-verified true
+            python3 - sandium-output/build-manifest.json "$OUT/.sandium-build-state.json" \<<'PY'
+            import json, sys
+            from pathlib import Path
+            manifest_path = Path(sys.argv[1])
+            state = json.loads(Path(sys.argv[2]).read_text())
+            manifest = json.loads(manifest_path.read_text())
+            manifest["remote_execution_usage"] = {
+                "proven_from_siso_stats": state.get("remote_backend_proven", False),
+                "metrics": state.get("remote_metrics", {}),
+            }
+            manifest["artifact_verified"] = state.get("artifact_verified") is True
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+            print("SISO_REMOTE_BACKEND_PROVEN=" + str(state.get("remote_backend_proven", False)).lower())
+            print("SISO_REMOTE_ACTIONS=" + str(state.get("remote_metrics", {}).get("remote_actions", 0)))
+            print("SISO_REMOTE_CACHE_HITS=" + str(state.get("remote_metrics", {}).get("remote_cache_hits", 0)))
+            print("SISO_REMOTE_CACHE_WRITES=" + str(state.get("remote_metrics", {}).get("remote_cache_writes", 0)))
             PY
             sha256sum sandium-output/Brave-debug-arm64.apk | tee sandium-output/sha256.txt
       - persist_to_workspace:
