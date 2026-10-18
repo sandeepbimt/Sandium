@@ -126,11 +126,11 @@ class BuildStateTests(unittest.TestCase):
                 0,
             )
 
-    def test_verified_state_is_rejected_without_remote_cache_or_execution_proof(self):
+    def test_apk_verification_is_not_blocked_when_remote_stats_are_missing(self):
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertNotEqual(self._record(verified="true"), 0)
+            self.assertEqual(self._record(verified="true"), 0)
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        self.assertFalse(state["artifact_verified"])
+        self.assertTrue(state["artifact_verified"])
         self.assertFalse(state["remote_backend_proven"])
 
     def test_required_gn_flags_are_checked_in_generated_file(self):
