@@ -117,8 +117,9 @@ jobs:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
           if "circleci-agent step halt" not in raw:
               raise SystemExit("A completed APK must short-circuit unnecessary later-stage work")
-          if "apksigner" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in raw:
-              raise SystemExit("Final APK signature verification is missing")
+          package_helper = Path("ci/siso/package_apk.py").read_text()
+          if "apksigner" not in package_helper or "APK_SIGNATURE_VERIFICATION=PASS" not in package_helper:
+              raise SystemExit("Final APK signature verification is missing from the package helper")
           compile_windows = re.findall(r"timeout --signal=INT --kill-after=30s 38m pnpm run build", raw)
           if len(compile_windows) != 3:
               raise SystemExit(f"Expected three 38-minute bounded compile windows; got {len(compile_windows)}")
