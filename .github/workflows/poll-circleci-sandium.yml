@@ -63,7 +63,7 @@ jobs:
                   [[ -n "$output_url" ]] || continue
                   if curl --fail --silent --show-error "$output_url" -o "circleci-status/step-$job_number-$step_index.json"; then
                     echo "=== LAST LOG LINES: job $job_number step $step_index ($step_name) ==="
-                    jq -r '.[].message // empty' "circleci-status/step-$job_number-$step_index.json" | tail -n 160
+                    jq -r '.[].message // empty' "circleci-status/step-$job_number-$step_index.json" | tail -n 600
                   else
                     echo "LOG_OUTPUT_UNAVAILABLE: job=$job_number step=$step_index name=$step_name; continuing to collect remaining pipeline state."
                     continue
