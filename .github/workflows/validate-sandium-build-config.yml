@@ -1,0 +1,227 @@
+name: Validate SANDIUM five-stage CI
+
+on:
+  push:
+    branches:
+      - build/sandium-android-debug-apk-2026-10-17
+    paths:
+      - ".circleci/config.yml"
+      - ".github/workflows/validate-sandium-build-config.yml"
+      - "ci/siso/**"
+      - "tests/ci/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: CircleCI config and embedded script checks (no APK build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install local validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml shellcheck
+          curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh -o /tmp/install-circleci-cli.sh
+          sudo bash /tmp/install-circleci-cli.sh
+          circleci version
+          shellcheck --version
+
+      - name: Validate CircleCI schema (no pipeline execution)
+        shell: bash
+        run: |
+          set -euo pipefail
+          circleci config validate .circleci/config.yml
+
+      - name: Check five-stage contract and embedded syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          import re
+          import subprocess
+          import tempfile
+          from pathlib import Path
+          import yaml
+
+          path = Path(".circleci/config.yml")
+          raw = path.read_text()
+          config = yaml.safe_load(raw)
+          bad_heredocs = [
+              line for line in raw.splitlines()
+              if ("python3 - <<'PY'" in line or "python - <<'PY'" in line or "python3 - <<'BUILD'" in line)
+          ]
+          if bad_heredocs:
+              raise SystemExit(
+                  "CircleCI heredoc markers must escape << as \\<<; found: "
+                  + repr(bad_heredocs)
+              )
+
+          expected_jobs = [
+              "stage-1-source-foundation",
+              "stage-2-graph-and-compile-window",
+              "stage-3-compile-continuation",
+              "stage-4-finish-and-package",
+              "stage-5-verify-publish",
+          ]
+          jobs = list(config.get("jobs", {}))
+          if jobs != expected_jobs:
+              raise SystemExit(f"Expected exactly the five designed jobs in order; got {jobs}")
+          if re.search(r"source-cache-only-test|run_sandium_source_cache_test", raw):
+              raise SystemExit("Abandoned source-cache-only experiment remains in the active config")
+          parameter = config.get("parameters", {}).get("run_sandium_android_apk_build", {})
+          if parameter.get("default") is not False:
+              raise SystemExit("APK build parameter must remain disabled by default")
+
+          workflow = config.get("workflows", {}).get("sandium-android-debug-apk", {})
+          if workflow.get("when") != "<< pipeline.parameters.run_sandium_android_apk_build >>":
+              raise SystemExit("The five-stage APK workflow is not gated by the opt-in parameter")
+          workflow_jobs = workflow.get("jobs", [])
+          names = [item if isinstance(item, str) else next(iter(item)) for item in workflow_jobs]
+          if names != expected_jobs:
+              raise SystemExit(f"Workflow order does not match the five-stage design: {names}")
+
+          # Verify required handoffs instead of accepting five unrelated jobs.
+          requires = {
+              "stage-2-graph-and-compile-window": "stage-1-source-foundation",
+              "stage-3-compile-continuation": "stage-2-graph-and-compile-window",
+              "stage-4-finish-and-package": "stage-3-compile-continuation",
+              "stage-5-verify-publish": "stage-4-finish-and-package",
+          }
+          for job, upstream in requires.items():
+              refs = config["jobs"].get(job, {}).get("requires", [])
+              workflow_ref = next((item for item in workflow_jobs if isinstance(item, dict) and job in item), None)
+              if workflow_ref is None or workflow_ref[job].get("requires") != [upstream]:
+                  raise SystemExit(f"Wrong dependency edge for {job}; expected after {upstream}")
+
+          source_text = str(config["jobs"]["stage-1-source-foundation"])
+          if "--no-history" not in source_text or "save_cache" not in source_text or "SOURCE_CACHE_BYTES=" not in raw:
+              raise SystemExit("Stage 1 must sync pinned source and record a validated cache save")
+          if "build_state.py fingerprint" not in raw:
+              raise SystemExit("GN inputs are not fingerprinted by the shared build-state helper")
+          if "restore-sandium-apk-cache" not in raw or "sandium-apk-v2-" not in raw or "VERIFIED_APK_CACHE=HIT" not in raw:
+              raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
+          if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
+              raise SystemExit("Revision pinning or APK verification evidence is missing")
+          if raw.count("package_apk.py --commit") < 3:
+              raise SystemExit("Stages 2, 3 and 4 must package an APK immediately when it appears")
+          if "build-state.json" not in raw or "APK_ARTIFACT_VERIFIED=true" not in raw:
+              raise SystemExit("The verified APK cache is missing its integrity state and manifest")
+          if "use_siso:true" not in raw or "use_reclient:false" not in raw or "--use_remoteexec true" not in raw:
+              raise SystemExit("Compile commands must explicitly enable remote execution and Siso, and disable reclient")
+          if "src/out/android_Debug_arm64/args.gn" not in raw or "src/out/Debug/args.gn" in raw:
+              raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
+          if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
+              raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
+          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v2-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage") < 3:
+              raise SystemExit("Compiled output is not restored and checkpointed between all compile stages and runs")
+          if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
+              raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
+          if "circleci-agent step halt" not in raw:
+              raise SystemExit("A completed APK must short-circuit unnecessary later-stage work")
+          package_helper = Path("ci/siso/package_apk.py").read_text()
+          if "apksigner" not in package_helper or "APK_SIGNATURE_VERIFICATION=PASS" not in package_helper:
+              raise SystemExit("Final APK signature verification is missing from the package helper")
+          compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
+          if len(compile_windows) != 3:
+              raise SystemExit(f"Expected three dynamically bounded compile windows; got {len(compile_windows)}")
+          if raw.count("Start stage budget clock before restoration and handover") != 5:
+              raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
+          if "sandium-src-v4-chromium-156.0.8078.39-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw:
+              raise SystemExit("Chromium source cache must be revision-pinned and exclude the separate Brave Core checkout")
+          if "src/brave/src" in raw:
+              raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
+          if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
+              raise SystemExit("Stage 1 source sync must be time-bounded to preserve handover time")
+          if raw.count("no_output_timeout: 45m") != 3:
+              raise SystemExit("Each compile stage must permit up to 45 minutes without output before the no-output guard")
+
+          command_blocks = []
+          def walk(value, label="$"):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key == "command" and isinstance(child, str):
+                          command_blocks.append((label + ".command", child))
+                      else:
+                          walk(child, label + "." + str(key))
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      walk(child, f"{label}[{index}]")
+          walk(config)
+
+          # CircleCI requires escaped heredoc openers in this config; normalize them only for
+          # local shell/Python syntax analysis. Never execute an embedded command.
+          python_heredoc = re.compile(
+              r"(?ms)^(?P<start>[^\n]*\\?python3?[^\n]*?\\?<<['\"]?PY['\"]?[ \t]*\n)"
+              r"(?P<body>.*?)^[ \t]*PY[ \t]*$"
+          )
+          build_heredoc = re.compile(
+              r"(?ms)^[^\n]*\\?<<['\"]?BUILD['\"]?[ \t]*\n"
+              r"(?P<body>.*?)^[ \t]*BUILD[ \t]*$"
+          )
+
+          counts = {"shell": 0, "python": 0}
+          seen_scripts = set()
+
+          def syntax_check(label, source):
+              source = source.replace("\\\\<<", "<<").replace("\\<<", "<<")
+              # Validate generated bash scripts nested inside cat-heredocs separately.
+              for idx, match in enumerate(build_heredoc.finditer(source), 1):
+                  syntax_check(label + f".generated-BUILD-{idx}", match.group("body"))
+
+              def remove_python(match):
+                  try:
+                      ast.parse(match.group("body"))
+                      counts["python"] += 1
+                  except SyntaxError as error:
+                      raise SystemExit(f"Embedded Python syntax error in {label}: {error}")
+                  return match.group("start") + "# embedded Python checked separately\nPY"
+
+              shell = python_heredoc.sub(remove_python, source)
+              with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+                  handle.write(shell + "\n")
+                  shell_path = Path(handle.name)
+              try:
+                  bash = subprocess.run(["bash", "-n", str(shell_path)], text=True, capture_output=True)
+                  if bash.returncode:
+                      raise SystemExit(f"Bash syntax error in {label}:\n{bash.stderr}")
+                  lint = subprocess.run(
+                      ["shellcheck", "--shell=bash", "--severity=error", str(shell_path)],
+                      text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                  )
+                  if lint.returncode:
+                      raise SystemExit(f"ShellCheck error in {label}:\n{lint.stdout}")
+                  counts["shell"] += 1
+              finally:
+                  shell_path.unlink(missing_ok=True)
+
+          for label, command in command_blocks:
+              if label in seen_scripts:
+                  continue
+              seen_scripts.add(label)
+              syntax_check(label, command)
+
+          print("FIVE_STAGE_CONTRACT=PASS")
+          print(f"EMBEDDED_PYTHON_BLOCKS_SYNTAX_CHECKED={counts['python']}")
+          print(f"SHELL_COMMANDS_SYNTAX_CHECKED={counts['shell']}")
+          print("APK_BUILD=NOT_RUN")
+          PY
+
+      - name: Run offline Siso and resumable-output unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py
+          python3 tests/ci/test_siso_buildbuddy_config.py
+          python3 tests/ci/test_siso_build_state.py
