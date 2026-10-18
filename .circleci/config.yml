@@ -441,25 +441,33 @@ jobs:
       - restore-sandium-build-output
       - install-sandium-node
       - run:
-          name: Validate committed Brave TypeScript cleanup logic before compilation
+          name: Validate committed Brave build failure diagnostics before compilation
           command: |
             set -euo pipefail
             node --check src/brave/build/commands/lib/util.ts
+            node --check src/brave/build/commands/lib/build.ts
             node - \<<'NODE'
             const fs = require('node:fs')
             const assert = require('node:assert/strict')
             const source = fs.readFileSync('src/brave/build/commands/lib/util.ts', 'utf8')
-            assert.ok(source.includes('config.extraGnArgs.use_reclient !== false'),
-              'Reproxy cache cleanup must be gated when Reclient is disabled')
-            assert.ok(source.includes('SANDIUM_REPROXY_CACHE_CLEANUP=SKIPPED_USE_RECLIENT_FALSE'),
-              'Siso/Reclient-off skip marker is missing')
-            assert.ok(source.includes('Failed to remove Reproxy dependency-cache entry'),
-              'Reproxy cleanup failures must name the exact cache path')
-            assert.ok(source.includes('fs.rmSync(original, { recursive: true, force: true })'),
-              'Stale generated directories must be removed recursively')
-            console.log('SANDIUM_COMMITTED_TYPESCRIPT_SYNTAX=PASS')
-            console.log('SANDIUM_REPROXY_CACHE_GUARD=PASS')
-            console.log('SANDIUM_STALE_OUTPUT_CLEANUP=PASS')
+            const runStart = source.indexOf('  run: (')
+            const runEnd = source.indexOf('  runGit:', runStart)
+            assert.ok(runStart >= 0 && runEnd > runStart, 'Unable to isolate util.run')
+            const run = source.slice(runStart, runEnd)
+            assert.ok(run.includes('if (prog.error)'), 'Spawn failures must be reported explicitly')
+            assert.ok(run.includes('Failed to spawn command:'), 'Spawn diagnostics must include command and cwd')
+            assert.ok(run.includes('Command failed:'), 'Non-zero exits must include command and status')
+            assert.ok(!run.includes('process.exit'), 'util.run must throw rather than truncate phase diagnostics')
+            assert.ok(!run.includes('console.log(prog.stdout && prog.stdout.toString())'),
+              'Inherited stdio must never print undefined as the failure reason')
+            assert.ok(source.includes('SANDIUM_OVERRIDE_RECONCILIATION_FAILED='),
+              'Per-file Chromium overlay diagnostics must remain enabled')
+            const build = fs.readFileSync('src/brave/build/commands/lib/build.ts', 'utf8')
+            assert.ok(build.includes('writeSync(fd, message + \'\\n\')'),
+              'Build phase markers must be written synchronously before process termination')
+            console.log('SANDIUM_RUNNER_FAILURE_DIAGNOSTICS=PASS')
+            console.log('SANDIUM_SYNCHRONOUS_PHASE_MARKERS=PASS')
+            console.log('SANDIUM_OVERRIDE_RECONCILIATION_DIAGNOSTICS=PASS')
             NODE
       - restore-sandium-pnpm-cache
       - run:
@@ -486,6 +494,24 @@ jobs:
             echo "SANDIUM_OVERRIDE_CLEANUP_REGRESSION_TESTS=PASS"
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
+      - run:
+          name: Prepare source overlay and branding before GN
+          no_output_timeout: 10m
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics
+            cd src/brave
+            set +e
+            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "$status" > "$HOME/project/build-diagnostics/prepare-only-exit.txt"
+            if [[ "$status" -ne 0 ]]; then
+              echo "PREPARE_ONLY_FAILED=$status; refusing to enter GN/compile before source preparation succeeds"
+              exit "$status"
+            fi
+            echo "SANDIUM_PREPARE_ONLY=PASS"
+            cd "$HOME/project"
       - run:
           name: Validate fingerprint, configure GN and compile window 1
           no_output_timeout: 45m
