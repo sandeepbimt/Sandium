@@ -51,6 +51,11 @@ export function writeSisoRc() {
         '-re_cache_enable_write=false',
         '-re_cache_enable_read',
       )
+    } else if (process.env.SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE === 'true') {
+      // Explicit opt-in for the isolated, protected Sandium CI build. Siso
+      // defaults this flag to false, so local/fallback actions otherwise do
+      // not seed the remote action cache for later stages and runs.
+      ninjaFlags.push('-re_cache_enable_write=true')
     }
 
     // Configure local disk cache.
