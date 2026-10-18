@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -123,6 +124,18 @@ class ManualChromiumPinTests(unittest.TestCase):
         before = self.sync_info_path.read_text(encoding="utf-8")
         self.assertFalse(chromium_pin.prepare_reuse(self.workspace, self.core))
         self.assertEqual(self.sync_info_path.read_text(encoding="utf-8"), before)
+
+    def test_require_reusable_fails_closed_on_pin_mismatch(self):
+        new_pin = "156.1.100.0"
+        (self.core / "ci/pins/chromium-tag.txt").write_text(new_pin + "\n", encoding="utf-8")
+        argv = [
+            "chromium_pin.py",
+            "--workspace", str(self.workspace),
+            "--core", str(self.core),
+            "--require-reusable",
+        ]
+        with patch.object(sys, "argv", argv):
+            self.assertEqual(chromium_pin.main(), 3)
 
     def test_invalid_manual_pin_is_rejected(self):
         (self.core / "ci/pins/chromium-tag.txt").write_text("latest\n", encoding="utf-8")
