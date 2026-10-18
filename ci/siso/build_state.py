@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +207,85 @@ def _remote_backend_proven(metrics: dict[str, int]) -> bool:
     ) > 0
 
 
+def _valid_artifact_cache(expected_commit: str | None) -> dict[str, Any]:
+    """Validate the lightweight packaged APK cache without restoring Chromium."""
+    if expected_commit and _git_head(CORE_DIR) != expected_commit:
+        raise StateError("Checked-out Brave Core SHA does not match CIRCLE_SHA1")
+
+    package_path = CORE_DIR / "package.json"
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        pinned_version = package["config"]["projects"]["chrome"]["tag"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise StateError(f"Cannot read pinned Chromium tag from package.json: {exc}") from exc
+
+    project_dir = CORE_DIR.parent
+    output_dir = project_dir / "sandium-output"
+    state_path = output_dir / "build-state.json"
+    manifest_path = output_dir / "build-manifest.json"
+    apk_path = output_dir / "Brave-debug-arm64.apk"
+    badging_path = output_dir / "apk-badging.txt"
+    signature_path = output_dir / "apksigner-verify.txt"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise StateError(f"Packaged APK cache metadata is missing or invalid: {exc}") from exc
+
+    expected = {
+        "schema": 1,
+        "target": TARGET,
+        "build_config": "Debug",
+        "chromium_version": pinned_version,
+        "build_input_fingerprint": _build_input_fingerprint(),
+    }
+    if any(state.get(key) != value for key, value in expected.items()):
+        raise StateError("Packaged APK cache does not match current browser inputs and Chromium pin")
+    if state.get("compile_complete") is not True or state.get("artifact_verified") is not True:
+        raise StateError("Packaged APK cache is not marked complete and verified")
+
+    if not apk_path.is_file() or apk_path.stat().st_size < 1_000_000:
+        raise StateError("Packaged APK cache is missing or unexpectedly small")
+    digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+    size = apk_path.stat().st_size
+    if digest != state.get("apk_sha256") or size != state.get("apk_bytes"):
+        raise StateError("Packaged APK hash or size does not match build-state metadata")
+    if digest != manifest.get("apk_sha256") or size != manifest.get("apk_bytes"):
+        raise StateError("Packaged APK hash or size does not match build manifest")
+    if (
+        manifest.get("artifact_verified") is not True
+        or manifest.get("apk_zip_integrity") != "PASS"
+        or manifest.get("dalvik_bytecode_present") is not True
+        or manifest.get("apksigner_verification") != "PASS"
+    ):
+        raise StateError("Build manifest lacks successful APK integrity/signature verification")
+    if not badging_path.is_file() or not signature_path.is_file():
+        raise StateError("Cached APK badging or signature-verification evidence is missing")
+    try:
+        with zipfile.ZipFile(apk_path) as archive:
+            if archive.testzip() is not None:
+                raise StateError("Cached APK ZIP CRC integrity failed")
+            entries = set(archive.namelist())
+            if "AndroidManifest.xml" not in entries:
+                raise StateError("Cached APK is missing AndroidManifest.xml")
+            if not any(name.startswith("classes") and name.endswith(".dex") for name in entries):
+                raise StateError("Cached APK is missing DEX bytecode")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise StateError(f"Cached APK is not a valid ZIP/APK: {exc}") from exc
+
+    badging = badging_path.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"^package: name='([^']+)'", badging, re.M)
+    if not match or match.group(1) != manifest.get("app_package_name"):
+        raise StateError("Cached APK package metadata does not match the build manifest")
+    if manifest.get("build_input_fingerprint") != expected["build_input_fingerprint"]:
+        raise StateError("Cached build manifest has a stale browser-input fingerprint")
+    return state
+
+
 def _valid_state(mode: str, expected_commit: str | None) -> dict[str, Any]:
+    if mode == "artifact-cache":
+        return _valid_artifact_cache(expected_commit)
+
     context = _context(expected_commit)
     state = _read_state()
     if not state:
@@ -367,7 +446,7 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("check", help="validate a restored build state")
-    check.add_argument("--mode", choices=("cache", "compiled", "verified"), required=True)
+    check.add_argument("--mode", choices=("artifact-cache", "cache", "compiled", "verified"), required=True)
     check.add_argument("--commit", default=None, help="expected Brave Core commit SHA")
     check.set_defaults(func=command_check)
 
