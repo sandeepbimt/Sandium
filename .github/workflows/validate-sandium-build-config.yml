@@ -110,7 +110,7 @@ jobs:
               raise SystemExit("Stage 1 must sync pinned source and record a validated cache save")
           if "build_state.py fingerprint" not in raw:
               raise SystemExit("GN inputs are not fingerprinted by the shared build-state helper")
-          if "restore-sandium-apk-cache" not in raw or "sandium-apk-v3-" not in raw or "VERIFIED_APK_CACHE=HIT" not in raw:
+          if "restore-sandium-apk-cache" not in raw or "sandium-apk-v4-" not in raw or "VERIFIED_APK_CACHE=HIT" not in raw:
               raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
           if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("Revision pinning or APK verification evidence is missing")
@@ -124,7 +124,7 @@ jobs:
               raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
           if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
-          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage") < 4:
+          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage") < 4:
               raise SystemExit("Compiled output is not restored and checkpointed between all compile stages and runs")
           if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
@@ -146,8 +146,16 @@ jobs:
               raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
-          if "sandium-src-v5-chromium-156.1.100.0-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw:
-              raise SystemExit("Chromium source cache must be revision-pinned and exclude the separate Brave Core checkout")
+          if "sandium-src-v6-{{ .Branch }}-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw or "CHROMIUM_VERSION_POLICY=RESOLVE_FROM_SYNCED_SOURCE" not in raw:
+              raise SystemExit("Chromium source cache must use source-derived versioning and exclude the separate Brave Core checkout")
+          if "PINNED_CHROMIUM_VERSION" in Path("ci/siso/build_state.py").read_text() or "CHROMIUM_VERSION_PIN" in Path("ci/siso/package_apk.py").read_text():
+              raise SystemExit("A fixed Chromium version remains in a build-state or APK verification helper")
+          if "156.1.100.0" in raw or "156.0.8078.39" in raw:
+              raise SystemExit("The active CircleCI config must not hard-code a Chromium release version")
+          state_source = Path("ci/siso/build_state.py").read_text()
+          package_source = Path("ci/siso/package_apk.py").read_text()
+          if '--exact-match' not in state_source or '--exact-match' not in package_source:
+              raise SystemExit("Build-state and APK verification must use the synced Chromium source tag")
           if "src/brave/src" in raw:
               raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
           if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
