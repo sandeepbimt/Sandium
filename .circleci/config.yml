@@ -558,6 +558,23 @@ jobs:
             echo "SANDIUM_PREPARE_ONLY=PASS"
             cd "$HOME/project"
       - run:
+          name: Generate Brave version.gni prerequisite before GN
+          command: |
+            set -euo pipefail
+            cd src/brave
+            test -s ../chrome/VERSION || { echo "Missing synced Chromium chrome/VERSION"; exit 1; }
+            test -s ../chrome/VERSION.chromium || { echo "Missing Brave-managed upstream VERSION.chromium sidecar; refusing to fabricate version metadata"; exit 1; }
+            # Reproduce Brave's own DEPS hook exactly. The source sync intentionally
+            # uses --nohooks, so this required generated GN input must be materialized
+            # explicitly before invoking gn gen.
+            python3 build/util/version.py gen ../chrome/VERSION
+            test -s build/version.gni
+            grep -q '^brave_version = ' build/version.gni
+            grep -q '^chrome_version_string = ' build/version.gni
+            echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED"
+            grep -E '^(brave_version|chrome_version_string) = ' build/version.gni
+            cd "$HOME/project"
+      - run:
           name: Validate fingerprint, configure GN and compile window 1
           no_output_timeout: 45m
           command: |
