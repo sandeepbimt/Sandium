@@ -45,6 +45,27 @@ jobs:
               -o "circleci-status/jobs-$workflow_id.json"
             echo "=== JOBS: $workflow_name ($workflow_status) ==="
             jq -r '.items[]? | [.name,.status,(.job_number|tostring),(.started_at//""),(.stopped_at//"")] | @tsv' "circleci-status/jobs-$workflow_id.json"
+            jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
+              curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+                "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/job/$job_number" \
+                -o "circleci-status/job-$job_number.json"
+              echo "=== JOB DETAIL: $job_number ==="
+              jq '{name,status,started_at,stopped_at,web_url,resource_class,executor}' "circleci-status/job-$job_number.json"
+              if curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+                  "https://circleci.com/api/v1.1/project/$CIRCLECI_PROJECT_SLUG/$job_number" \
+                  -o "circleci-status/legacy-job-$job_number.json"; then
+                jq -r '.steps[]?.actions[]? | select(.has_output == true) | [.step,.name,.output_url] | @tsv' \
+                  "circleci-status/legacy-job-$job_number.json" > "circleci-status/output-urls-$job_number.tsv"
+                while IFS="$(printf '\t')" read -r step_index step_name output_url; do
+                  [[ -n "$output_url" ]] || continue
+                  curl --fail --silent --show-error "$output_url" -o "circleci-status/step-$job_number-$step_index.json"
+                  echo "=== LAST LOG LINES: job $job_number step $step_index ($step_name) ==="
+                  jq -r '.[].message // empty' "circleci-status/step-$job_number-$step_index.json" | tail -n 20
+                done < "circleci-status/output-urls-$job_number.tsv"
+              else
+                echo "Legacy log endpoint unavailable for CircleCI job $job_number"
+              fi
+            done
           done < circleci-status/workflow-summary.tsv
           echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
       - name: Save inspection results
