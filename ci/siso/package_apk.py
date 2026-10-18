@@ -108,11 +108,19 @@ def package(commit: str, stage: str) -> dict[str, Any]:
         )
 
     state = load_state()
-    if state.get("source_commit") != commit:
-        raise PackageError(
-            "Compile-state source SHA does not match this run. Refusing to package "
-            f"({state.get('source_commit')} != {commit})."
-        )
+    # A CI-only commit may change CIRCLE_SHA1 without changing browser build inputs.
+    # Require the live Git checkout to match this run and compare the actual
+    # build-input/GN fingerprints instead of rejecting reusable Chromium output.
+    fingerprint_text = run([
+        sys.executable, str(BUILD_STATE_TOOL), "fingerprint", "--commit", commit
+    ])
+    fingerprint_values = dict(
+        line.split("=", 1) for line in fingerprint_text.splitlines() if "=" in line
+    )
+    if state.get("build_input_fingerprint") != fingerprint_values.get("BUILD_INPUT_FINGERPRINT"):
+        raise PackageError("Cached compile output was built from different browser inputs")
+    if state.get("gn_args_sha256") != fingerprint_values.get("GN_ARGS_SHA256"):
+        raise PackageError("Cached compile output has different effective GN arguments")
     if state.get("compile_complete") is not True:
         raise PackageError("Compile-state record does not indicate a completed build")
 
