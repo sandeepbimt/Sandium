@@ -31,7 +31,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-src-v4-chromium-156.1.100.0-
+            - sandium-src-v5-chromium-156.1.100.0-
       - run:
           name: Validate restored Chromium source cache or record cold start
           command: |
@@ -75,7 +75,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-out-v2-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-
+            - sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-
       - run:
           name: Validate cached Android build output against source and GN inputs
           command: |
@@ -109,7 +109,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-apk-v2-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-
+            - sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-
       - run:
           name: Verify reusable APK artifact without checking out Brave source
           command: |
@@ -324,7 +324,7 @@ jobs:
             test ! -e src/brave
             echo "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true"
       - save_cache:
-          key: sandium-src-v4-chromium-156.1.100.0-{{ .BuildNum }}
+          key: sandium-src-v5-chromium-156.1.100.0-{{ .BuildNum }}
           paths:
             - src
             - .gclient
@@ -463,11 +463,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-2"
             fi
       - save_cache:
-          key: sandium-out-v2-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v2-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -579,11 +579,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-3"
             fi
       - save_cache:
-          key: sandium-out-v2-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v2-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -703,11 +703,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-out-v2-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v2-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
@@ -859,11 +859,11 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
             fi
       - save_cache:
-          key: sandium-out-v2-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-out-v3-{{ .Branch }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v2-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-apk-v3-{{ .Branch }}-{{ .Revision }}-chromium-156.1.100.0-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - sandium-output
       - run:
