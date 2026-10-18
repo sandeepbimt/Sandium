@@ -190,6 +190,24 @@ class BuildStateTests(unittest.TestCase):
         with self.assertRaises(state_module.StateError):
             state_module._valid_artifact_cache(self.commit)
 
+    def test_remote_metrics_parser_handles_siso_counters_split_across_lines(self):
+        log = self.root / "split-siso-stats.log"
+        log.write_text(
+            "noexec:751 local:5637 remote:16659 cache:7 skip:19128\\n"
+            "cache-write:9(err:2) fallback:5 retry:4\\n",
+            encoding="utf-8",
+        )
+        metrics, found = state_module._remote_metrics(str(log))
+        self.assertTrue(found)
+        self.assertEqual(metrics["local_actions"], 5637)
+        self.assertEqual(metrics["remote_actions"], 16659)
+        self.assertEqual(metrics["remote_cache_hits"], 7)
+        self.assertEqual(metrics["remote_cache_writes"], 9)
+        self.assertEqual(metrics["remote_cache_write_errors"], 2)
+        self.assertEqual(metrics["local_fallbacks"], 5)
+        self.assertEqual(metrics["remote_retries"], 4)
+        self.assertEqual(metrics["skipped_actions"], 19128)
+
     def test_remoteexec_cli_option_is_not_required_in_generated_gn_file(self):
         # Brave exposes --use_remoteexec as a build/runtime option, not a
         # required GN argument. The checkpoint must accept args.gn that has
