@@ -233,7 +233,7 @@ jobs:
             from pathlib import Path
             p=json.loads(Path("package.json").read_text())
             actual=(p["version"],p["config"]["projects"]["chrome"]["tag"])
-            expected=("1.100.10","156.1.100.0")
+            expected=("1.100.10","156.0.8078.39")
             print("BRAVE_CORE_VERSION="+actual[0])
             print("CHROMIUM_PIN="+actual[1])
             if actual != expected: raise SystemExit(f"Expected {expected}, got {actual}")
