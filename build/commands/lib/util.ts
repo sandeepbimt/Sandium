@@ -165,32 +165,92 @@ function updateFileUTimesIfOverrideIsNewer(original: string, override: string) {
   return false
 }
 
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === code
+  )
+}
+
+function describeFileError(error: unknown): string {
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error)
+}
+
 function deleteFileIfOverrideIsNewer(original: string, override: string) {
-  if (!fs.existsSync(original) || !isOverrideNewer(original, override)) {
+  let originalLstat: ReturnType<typeof fs.lstatSync>
+  try {
+    // lstat (not existsSync) also sees a stale, dangling symlink in a restored
+    // generated-output cache.
+    originalLstat = fs.lstatSync(original)
+  } catch (error) {
+    if (isNodeErrorCode(error, 'ENOENT')) {
+      return false
+    }
+    throw new Error(
+      `Unable to inspect generated output "${original}": ${describeFileError(error)}`,
+    )
+  }
+
+  let originalStat: ReturnType<typeof fs.statSync> | undefined
+  try {
+    originalStat = fs.statSync(original)
+  } catch (error) {
+    // A dangling symlink is stale output. Remove the link itself below, without
+    // following or deleting its target.
+    if (
+      !(originalLstat.isSymbolicLink() && isNodeErrorCode(error, 'ENOENT'))
+    ) {
+      if (isNodeErrorCode(error, 'ENOENT')) {
+        return false
+      }
+      throw new Error(
+        `Unable to inspect generated output "${original}": ${describeFileError(error)}`,
+      )
+    }
+  }
+
+  let overrideStat: ReturnType<typeof fs.statSync>
+  try {
+    overrideStat = fs.statSync(override)
+  } catch (error) {
+    throw new Error(
+      `Unable to inspect Chromium override "${override}" while checking generated output "${original}": ${describeFileError(error)}`,
+    )
+  }
+
+  const currentStats = originalStat ?? originalLstat
+  const generatedPathIsDirectory = currentStats.isDirectory()
+  const danglingSymlink = originalLstat.isSymbolicLink() && !originalStat
+
+  // A directory at a generated-file path is structurally incompatible with
+  // the current source regardless of its mtime. Cached directories commonly
+  // get a newer timestamp when their children are restored, so an mtime-only
+  // comparison can preserve the exact stale path that made unlinkSync fail.
+  // A dangling symlink is likewise not usable output and must be removed.
+  if (
+    !generatedPathIsDirectory
+    && !danglingSymlink
+    && overrideStat.mtimeMs <= currentStats.mtimeMs
+  ) {
     return false
   }
 
   try {
-    // A restored incremental output cache can contain a directory at a path
-    // which the current Chromium source now treats as a generated file. The
-    // old unlinkSync-only path exited immediately and could lose the diagnostic
-    // on CI pipes. Remove only this stale path inside the generated output tree.
-    const stats = fs.lstatSync(original)
-    if (stats.isDirectory() && !stats.isSymbolicLink()) {
+    if (generatedPathIsDirectory && !originalLstat.isSymbolicLink()) {
       fs.rmSync(original, { recursive: true, force: true })
     } else {
+      // Remove symlinks as links; never recursively follow their targets.
       fs.rmSync(original, { force: true })
     }
     console.log(original + ' has been deleted.')
     return true
-  } catch (err) {
-    const detail = err instanceof Error
-      ? `${err.name}: ${err.message}`
-      : String(err)
+  } catch (error) {
     const message =
-      `Unable to remove stale generated output "${original}" for Chromium override "${override}": ${detail}`
-    // Do not call process.exit() from the helper: immediate exit can truncate
-    // piped stderr and reduce the actionable error to "undefined" in CI logs.
+      `Unable to remove stale generated output "${original}" for Chromium override "${override}": ${describeFileError(error)}`
     console.error(message)
     throw new Error(message)
   }
@@ -453,55 +513,62 @@ const util = {
     // Touch original files by updating mtime.
     let isDirty = false
     const chromiumSrcDirLen = chromiumSrcDir.length
-    sourceFiles.forEach((chromiumSrcFile) => {
+    for (const chromiumSrcFile of sourceFiles) {
       const relativeChromiumSrcFile = chromiumSrcFile.slice(chromiumSrcDirLen)
       let overriddenFile = path.join(config.srcDir, relativeChromiumSrcFile)
 
-      const additionalExtensions = [
-        // .lit_mangler.ts files are used to modify the upstream .html.ts file at
-        // build time.
-        '.lit_mangler.ts',
-      ]
+      try {
+        const additionalExtensions = [
+          // .lit_mangler.ts files are used to modify the upstream .html.ts file at
+          // build time.
+          '.lit_mangler.ts',
+        ]
 
-      const additionalExtension = additionalExtensions.find((key) =>
-        overriddenFile.endsWith(key),
-      )
-      if (additionalExtension) {
-        overriddenFile = overriddenFile.substring(
-          0,
-          overriddenFile.length - additionalExtension.length,
+        const additionalExtension = additionalExtensions.find((key) =>
+          overriddenFile.endsWith(key),
         )
-      }
+        if (additionalExtension) {
+          overriddenFile = overriddenFile.substring(
+            0,
+            overriddenFile.length - additionalExtension.length,
+          )
+        }
 
-      if (fs.existsSync(overriddenFile)) {
-        // If overriddenFile is older than file in chromium_src, touch it to trigger rebuild.
-        isDirty =
-          updateFileUTimesIfOverrideIsNewer(overriddenFile, chromiumSrcFile)
-          || isDirty
-      } else {
-        // If the original file doesn't exist, assume that it's in the gen dir.
-        overriddenFile = path.join(
-          config.outputDir,
-          'gen',
-          relativeChromiumSrcFile,
-        )
-        isDirty =
-          deleteFileIfOverrideIsNewer(overriddenFile, chromiumSrcFile)
-          || isDirty
-        // Also check the secondary gen dir, if exists
-        if (additionalGen) {
+        if (fs.existsSync(overriddenFile)) {
+          // If overriddenFile is older than file in chromium_src, touch it to trigger rebuild.
+          isDirty =
+            updateFileUTimesIfOverrideIsNewer(overriddenFile, chromiumSrcFile)
+            || isDirty
+        } else {
+          // If the original file doesn't exist, assume it's in the gen dir.
           overriddenFile = path.join(
             config.outputDir,
-            additionalGen,
             'gen',
             relativeChromiumSrcFile,
           )
           isDirty =
             deleteFileIfOverrideIsNewer(overriddenFile, chromiumSrcFile)
             || isDirty
+          // Also check the secondary gen dir, if exists
+          if (additionalGen) {
+            overriddenFile = path.join(
+              config.outputDir,
+              additionalGen,
+              'gen',
+              relativeChromiumSrcFile,
+            )
+            isDirty =
+              deleteFileIfOverrideIsNewer(overriddenFile, chromiumSrcFile)
+              || isDirty
+          }
         }
+      } catch (error) {
+        const message =
+          `Failed to reconcile Chromium override "${chromiumSrcFile}" against "${overriddenFile}": ${describeFileError(error)}`
+        console.error(`SANDIUM_OVERRIDE_RECONCILIATION_FAILED=${message}`)
+        throw new Error(message)
       }
-    })
+    }
     if (
       isDirty
       && config.rbeService
