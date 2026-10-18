@@ -117,6 +117,8 @@ def prepare_reuse(workspace: Path, core_dir: Path) -> bool:
             raise ValueError("source-cache manifest target mismatch")
         if manifest.get("chromium_tag") != pin or manifest.get("chromium_version") != pin:
             raise ValueError("source-cache manifest does not match the manual pin")
+        if manifest.get("manual_chromium_pin") not in (None, pin):
+            raise ValueError("source-cache manifest records a different manual pin")
         if manifest.get("chromium_commit") != commit:
             raise ValueError("source-cache manifest commit differs from the restored source")
         version_file = source / "chrome" / "VERSION"
