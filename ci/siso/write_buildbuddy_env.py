@@ -79,7 +79,7 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
         f"projects_chrome_custom_vars_reapi_instance={instance}",
         f"projects_chrome_custom_vars_reapi_backend_config_path={backend_path}",
         f"projects_chrome_custom_vars_reapi_credential_helper={helper_path}",
-        f"projects_chrome_tag={chromium_tag}",
+        f"sandium_chromium_tag={chromium_tag}",
         "siso_use_googlechrome_config=false",
         "use_remoteexec=false",
         END_MARKER,
