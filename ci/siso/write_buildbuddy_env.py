@@ -34,6 +34,19 @@ def validate_instance(instance: str) -> None:
         raise ValueError("SANDIUM_REAPI_INSTANCE contains an unsafe path component")
 
 
+def validate_siso_cache_dir(value: str) -> str:
+    """Validate a stable absolute Siso cache directory shared by CI."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("SANDIUM_SISO_CACHE_DIR is required")
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        raise ValueError("SANDIUM_SISO_CACHE_DIR must be an absolute path")
+    resolved = str(candidate.resolve())
+    if " " in resolved:
+        raise ValueError("SANDIUM_SISO_CACHE_DIR cannot contain spaces")
+    return resolved
+
+
 def read_manual_chromium_tag(core_dir: Path) -> str:
     """Read the explicitly approved Chromium source tag for Sandium."""
     pin_path = core_dir / CHROMIUM_PIN_RELATIVE
@@ -54,13 +67,19 @@ def read_manual_chromium_tag(core_dir: Path) -> str:
     return tags[0]
 
 
-def render_block(core_dir: Path, address: str, instance: str) -> str:
+def render_block(
+    core_dir: Path,
+    address: str,
+    instance: str,
+    siso_cache_dir: str,
+) -> str:
     if address != EXPECTED_ADDRESS:
         raise ValueError(
             "SANDIUM_REAPI_ADDRESS must equal the reviewed candidate "
             + EXPECTED_ADDRESS
         )
     validate_instance(instance)
+    siso_cache_dir = validate_siso_cache_dir(siso_cache_dir)
     chromium_tag = read_manual_chromium_tag(core_dir)
 
     helper_path = (core_dir / "ci/siso/buildbuddy-credential-helper.py").resolve()
@@ -80,6 +99,7 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
         f"projects_chrome_custom_vars_reapi_backend_config_path={backend_path}",
         f"projects_chrome_custom_vars_reapi_credential_helper={helper_path}",
         f"sandium_chromium_tag={chromium_tag}",
+        f"siso_cache_dir={siso_cache_dir}",
         "siso_use_googlechrome_config=false",
         "use_remoteexec=false",
         END_MARKER,
@@ -111,7 +131,8 @@ def apply_config(core_dir: Path, environ: Mapping[str, str]) -> Path:
     core_dir = core_dir.resolve()
     address = environ.get("SANDIUM_REAPI_ADDRESS", "")
     instance = environ.get("SANDIUM_REAPI_INSTANCE", "")
-    block = render_block(core_dir, address, instance)
+    siso_cache_dir = environ.get("SANDIUM_SISO_CACHE_DIR", "")
+    block = render_block(core_dir, address, instance, siso_cache_dir)
 
     env_file = core_dir / ".env"
     existing = env_file.read_text(encoding="utf-8") if env_file.exists() else (
@@ -138,6 +159,7 @@ def main() -> int:
     print(f"SANDIUM_RUNTIME_ENV={env_file}")
     print(f"SANDIUM_REAPI_ADDRESS={os.environ['SANDIUM_REAPI_ADDRESS']}")
     print(f"SANDIUM_REAPI_INSTANCE={os.environ['SANDIUM_REAPI_INSTANCE']}")
+    print(f"SANDIUM_SISO_CACHE_DIR={os.environ['SANDIUM_SISO_CACHE_DIR']}")
     print("SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=yes")
     print("SANDIUM_REMOTE_EXECUTION_ENABLED=no")
     return 0
