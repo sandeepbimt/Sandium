@@ -23,7 +23,7 @@ CHROMIUM_DIR = CORE_DIR.parent
 OUTPUT_DIR = CHROMIUM_DIR / "out" / "android_Debug_arm64"
 STATE_FILE = OUTPUT_DIR / ".sandium-build-state.json"
 APK_FILE = OUTPUT_DIR / "apks" / "Bravearm64.apk"
-PINNED_CHROMIUM_VERSION = "156.0.8078.39"
+PINNED_CHROMIUM_VERSION = "156.1.100.0"
 TARGET = "android-arm64-debug-apk"
 STATS_PATTERN = re.compile(
     r"local:(\d+)\s+remote:(\d+)\s+cache:(\d+)\s+"
