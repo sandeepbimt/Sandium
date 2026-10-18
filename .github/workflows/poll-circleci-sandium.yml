@@ -1,4 +1,4 @@
-name: Inspect existing Sandium CircleCI pipeline
+name: Inspect current Sandium CircleCI Stage 2 failure
 
 on:
   push:
