@@ -17,7 +17,7 @@ from typing import Any
 CORE_DIR = Path(__file__).resolve().parents[2]
 PROJECT_DIR = CORE_DIR.parent.parent
 BUILD_STATE_TOOL = CORE_DIR / "ci" / "siso" / "build_state.py"
-OUT_DIR = CORE_DIR / "src" / "out" / "android_Debug_arm64"
+OUT_DIR = CORE_DIR.parent / "out" / "android_Debug_arm64"
 APK_SOURCE = OUT_DIR / "apks" / "Bravearm64.apk"
 STATE_SOURCE = OUT_DIR / ".sandium-build-state.json"
 CHROMIUM_VERSION_PIN = "156.0.8078.39"
@@ -50,7 +50,7 @@ def run(command: list[str]) -> str:
 
 
 def find_tool(name: str) -> Path:
-    sdk = CORE_DIR / "src" / "third_party" / "android_sdk"
+    sdk = CORE_DIR.parent / "third_party" / "android_sdk"
     matches = sorted(path for path in sdk.rglob(name) if path.is_file() and path.stat().st_mode & 0o111)
     if not matches:
         raise PackageError(f"Required Android SDK tool not found: {name} under {sdk}")
@@ -58,7 +58,7 @@ def find_tool(name: str) -> Path:
 
 
 def parse_chromium_version() -> str:
-    version_file = CORE_DIR / "src" / "chrome" / "VERSION"
+    version_file = CORE_DIR.parent / "chrome" / "VERSION"
     if not version_file.is_file():
         raise PackageError(f"Chromium VERSION file missing: {version_file}")
     fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_file.read_text(), re.M))
