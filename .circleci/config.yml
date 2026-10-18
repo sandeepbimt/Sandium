@@ -249,7 +249,6 @@ jobs:
             pnpm run sync --target_os=android --target_arch=arm64 --no-history
             cd "$HOME/project"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
-            sudo ./src/brave/src/build/install-build-deps.sh --android
             python3 - \<<'PY'
             import re, shutil
             from pathlib import Path
