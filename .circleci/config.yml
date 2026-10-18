@@ -745,7 +745,7 @@ jobs:
               echo "VERIFIED_APK_CACHE=MISS; Stage 5 will perform the fourth bounded compile window"
               exit 0
             fi
-            python3 - \\<<'PY'
+            python3 - \<<'PY'
             import hashlib, json, re, zipfile
             from pathlib import Path
             out=Path("sandium-output")
@@ -822,16 +822,16 @@ jobs:
               remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
               if [[ "$remaining_compile_seconds" -gt 2400 ]]; then remaining_compile_seconds=2400; fi
               if [[ "$remaining_compile_seconds" -le 0 ]]; then
-                echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
-                echo "5" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
-                exit 5
+                echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; preserving state and handover time"
+                status=5
+              else
+                echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
+                echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
+                set +e
+                timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
+                status=${PIPESTATUS[0]}
+                set -e
               fi
-              echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
-              echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
-              set +e
-              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
-              status=${PIPESTATUS[0]}
-              set -e
             fi
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
             evidence="$HOME/project/build-diagnostics/compile-window-4-remote-cache-log-candidates.txt"
@@ -890,7 +890,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
               exit 23
             fi
-            python3 - \\<<'PY'
+            python3 - \<<'PY'
             import hashlib, json, zipfile
             from pathlib import Path
             out=Path("sandium-output")
