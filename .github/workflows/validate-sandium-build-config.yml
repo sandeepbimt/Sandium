@@ -9,9 +9,12 @@ on:
       - ".circleci/config.yml"
       - ".github/workflows/validate-sandium-build-config.yml"
       - "ci/siso/**"
+      - "ci/pins/**"
       - "tests/ci/**"
       - "build/commands/lib/build.ts"
       - "build/commands/lib/util.ts"
+      - "build/commands/lib/config.ts"
+      - "build/commands/lib/syncUtils.ts"
 
 permissions:
   contents: read
@@ -149,8 +152,25 @@ jobs:
               raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
-          if "sandium-src-v6-{{ .Branch }}-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw or "CHROMIUM_VERSION_POLICY=RESOLVE_FROM_SYNCED_SOURCE" not in raw:
-              raise SystemExit("Chromium source cache must use source-derived versioning and exclude the separate Brave Core checkout")
+          if "sandium-src-v6-{{ .Branch }}-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw or "CHROMIUM_UPDATE_POLICY=MANUAL_PIN" not in raw:
+              raise SystemExit("Chromium source cache must use the explicit manual pin and exclude the separate Brave Core checkout")
+          pins = [line.strip() for line in Path("ci/pins/chromium-tag.txt").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
+          if len(pins) != 1 or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", pins[0]):
+              raise SystemExit("Manual Chromium pin must be exactly one four-part numeric tag")
+          writer_source = Path("ci/siso/write_buildbuddy_env.py").read_text()
+          config_source = Path("build/commands/lib/config.ts").read_text()
+          sync_source = Path("build/commands/lib/syncUtils.ts").read_text()
+          pin_helper = Path("ci/siso/chromium_pin.py").read_text()
+          if "sandium_chromium_tag={chromium_tag}" not in writer_source or "getString(['sandium_chromium_tag'])" not in config_source:
+              raise SystemExit("Manual Chromium pin is not overriding Brave package metadata")
+          if "gclientTimestamp" in sync_source or "gclientHash: getGclientConfigHash()" not in sync_source:
+              raise SystemExit("Chromium sync decision must hash gclient content rather than unstable mtimes")
+          if "MIGRATED_TIMESTAMP_TO_CONTENT_HASH" not in pin_helper or "SOURCE_CACHE_FINGERPRINT=PASS" not in pin_helper:
+              raise SystemExit("Verified cached Chromium source does not have a safe legacy sync-metadata fast path")
+          if "python3 ci/siso/chromium_pin.py --workspace \\"$HOME/project\\"" not in raw:
+              raise SystemExit("Stage 1 does not run the offline manual-pin cache fast path")
+          if '"manual_chromium_pin": tag' not in raw:
+              raise SystemExit("Saved source-cache manifest does not record the approved manual Chromium pin")
           if "PINNED_CHROMIUM_VERSION" in Path("ci/siso/build_state.py").read_text() or "CHROMIUM_VERSION_PIN" in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("A fixed Chromium version remains in a build-state or APK verification helper")
           if "156.1.100.0" in raw or "156.0.8078.39" in raw:
@@ -253,6 +273,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py
+          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py ci/siso/write_buildbuddy_env.py ci/siso/chromium_pin.py
           python3 tests/ci/test_siso_buildbuddy_config.py
           python3 tests/ci/test_siso_build_state.py
+          python3 tests/ci/test_chromium_pin.py
