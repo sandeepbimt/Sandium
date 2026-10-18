@@ -502,17 +502,39 @@ const util = {
         }
       }
     })
-    if (isDirty && config.rbeService) {
-      // Cleanup Reproxy deps cache on chromium_src override change.
+    if (
+      isDirty
+      && config.rbeService
+      && config.extraGnArgs.use_reclient !== false
+    ) {
+      // Reproxy's dependency cache is only relevant when Reclient is enabled.
+      // SANDIUM uses Siso with use_reclient=false; deleting Reproxy cache files
+      // in that configuration is unrelated work and can abort source touching.
       const reproxyCacheDir = `${config.rootDir}/.reproxy_cache`
       if (fs.existsSync(reproxyCacheDir)) {
         const cacheFileFilter = (file: string) => {
           return file.endsWith('.cache') || file.endsWith('.cache.sha256')
         }
         for (const file of util.walkSync(reproxyCacheDir, cacheFileFilter)) {
-          fs.rmSync(file)
+          try {
+            fs.rmSync(file)
+          } catch (error) {
+            const detail = error instanceof Error
+              ? error.name + ': ' + error.message
+              : String(error)
+            throw new Error(
+              'Failed to remove Reproxy dependency-cache entry "' + file +
+              '": ' + detail,
+            )
+          }
         }
       }
+    } else if (
+      isDirty
+      && config.rbeService
+      && config.extraGnArgs.use_reclient === false
+    ) {
+      console.log('SANDIUM_REPROXY_CACHE_CLEANUP=SKIPPED_USE_RECLIENT_FALSE')
     }
     Log.progressFinish('touch original files overridden by chromium_src')
   },
