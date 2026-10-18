@@ -138,7 +138,7 @@ jobs:
               raise SystemExit(f"Expected four dynamically bounded compile windows (stages 2-5); got {len(compile_windows)}")
           if "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true" not in raw:
               raise SystemExit("Stage 5 must explicitly report if the APK is still missing")
-          if "resource_class: large" not in str(config["jobs"]["stage-5-verify-publish"]):
+          if config["jobs"]["stage-5-verify-publish"].get("resource_class") != "large":
               raise SystemExit("Stage 5 must use the large runner for the final compile window")
           if raw.count("Include verified APK in downloadable") < 4:
               raise SystemExit("Every stage with a compile window must expose an APK artifact if it appears")
