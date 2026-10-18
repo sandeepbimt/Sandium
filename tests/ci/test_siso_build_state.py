@@ -38,7 +38,7 @@ class BuildStateTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.chromium / "chrome" / "VERSION").write_text(
-            "MAJOR=156\nMINOR=0\nBUILD=8078\nPATCH=39\n",
+            "MAJOR=156\nMINOR=1\nBUILD=100\nPATCH=0\n",
             encoding="utf-8",
         )
         self._git_init(self.root)
