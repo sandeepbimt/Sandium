@@ -207,8 +207,6 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
-      - checkout:
-          path: src/brave
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -218,6 +216,8 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
               circleci-agent step halt
             fi
+      - checkout:
+          path: src/brave
       - run:
           name: Verify source pins before any expensive work
           command: |
@@ -325,8 +325,6 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
-      - checkout:
-          path: src/brave
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -336,6 +334,8 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
               circleci-agent step halt
             fi
+      - checkout:
+          path: src/brave
       - restore-sandium-source
       - restore-sandium-build-output
       - install-sandium-node
@@ -435,8 +435,6 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
-      - checkout:
-          path: src/brave
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -446,6 +444,8 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
               circleci-agent step halt
             fi
+      - checkout:
+          path: src/brave
       - restore-sandium-source
       - restore-sandium-build-output
       - install-sandium-node
@@ -512,7 +512,7 @@ jobs:
           paths:
             - src/brave/src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-apk-v1-{{ .Branch }}-{{ .Revision }}-chromium-156.0.8078.39-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - sandium-output
       - store_artifacts:
@@ -525,8 +525,6 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
-      - checkout:
-          path: src/brave
       - restore-sandium-apk-cache
       - run:
           name: Exit Stage 4 immediately when verified APK is reusable
@@ -536,6 +534,8 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; skipping Chromium checkout, dependencies and compilation"
               circleci-agent step halt
             fi
+      - checkout:
+          path: src/brave
       - restore-sandium-source
       - restore-sandium-build-output
       - install-sandium-node
@@ -610,7 +610,7 @@ jobs:
           paths:
             - src/brave/src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-apk-v1-{{ .Branch }}-{{ .Revision }}-chromium-156.0.8078.39-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-output
       - store_artifacts:
@@ -623,14 +623,11 @@ jobs:
     resource_class: medium
     working_directory: ~/project
     steps:
-      - checkout:
-          path: src/brave
       - restore-sandium-apk-cache
       - run:
           name: Independently verify the cached APK before publishing
           command: |
             set -euo pipefail
-            python3 src/brave/ci/siso/build_state.py check --mode artifact-cache --commit "$CIRCLE_SHA1"
             python3 - <<'PY'
             import hashlib, json, zipfile
             from pathlib import Path
