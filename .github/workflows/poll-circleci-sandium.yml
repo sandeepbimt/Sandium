@@ -1,4 +1,4 @@
-name: Inspect current Sandium CircleCI Stage 2 failure
+name: Inspect instrumented Sandium Stage 2 failure without a rebuild
 
 on:
   push:
