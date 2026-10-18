@@ -114,8 +114,8 @@ jobs:
               raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
           if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("Revision pinning or APK verification evidence is missing")
-          if raw.count("package_apk.py --commit") < 3:
-              raise SystemExit("Stages 2, 3 and 4 must package an APK immediately when it appears")
+          if raw.count("package_apk.py --commit") < 4:
+              raise SystemExit("Stages 2, 3, 4 and 5 must package an APK immediately when it appears")
           if "build-state.json" not in raw or "APK_ARTIFACT_VERIFIED=true" not in raw:
               raise SystemExit("The verified APK cache is missing its integrity state and manifest")
           if "use_siso:true" not in raw or "use_reclient:false" not in raw or "--use_remoteexec true" not in raw:
@@ -124,7 +124,7 @@ jobs:
               raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
           if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
-          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v2-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage") < 3:
+          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v2-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage") < 4:
               raise SystemExit("Compiled output is not restored and checkpointed between all compile stages and runs")
           if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
@@ -134,8 +134,16 @@ jobs:
           if "apksigner" not in package_helper or "APK_SIGNATURE_VERIFICATION=PASS" not in package_helper:
               raise SystemExit("Final APK signature verification is missing from the package helper")
           compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
-          if len(compile_windows) != 3:
-              raise SystemExit(f"Expected three dynamically bounded compile windows; got {len(compile_windows)}")
+          if len(compile_windows) != 4:
+              raise SystemExit(f"Expected four dynamically bounded compile windows (stages 2-5); got {len(compile_windows)}")
+          if "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true" not in raw:
+              raise SystemExit("Stage 5 must explicitly report if the APK is still missing")
+          if "resource_class: large" not in str(config["jobs"]["stage-5-verify-publish"]):
+              raise SystemExit("Stage 5 must use the large runner for the final compile window")
+          if raw.count("Include verified APK in downloadable") < 4:
+              raise SystemExit("Every stage with a compile window must expose an APK artifact if it appears")
+          if raw.count("remaining_compile_seconds=2400") < 4:
+              raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
           if "sandium-src-v4-chromium-156.0.8078.39-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw:
@@ -144,8 +152,8 @@ jobs:
               raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
           if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
               raise SystemExit("Stage 1 source sync must be time-bounded to preserve handover time")
-          if raw.count("no_output_timeout: 45m") != 3:
-              raise SystemExit("Each compile stage must permit up to 45 minutes without output before the no-output guard")
+          if raw.count("no_output_timeout: 45m") != 4:
+              raise SystemExit("All four compile stages must permit up to 45 minutes without output before the no-output guard")
 
           command_blocks = []
           def walk(value, label="$"):
