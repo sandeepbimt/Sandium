@@ -461,7 +461,7 @@ export class Config {
       if (manualChromiumTag) {
         assert.match(
           manualChromiumTag,
-          /^\\d+\\.\\d+\\.\\d+\\.\\d+$/,
+          /^\d+\.\d+\.\d+\.\d+$/,
           'sandium_chromium_tag must be a four-part numeric Chromium tag',
         )
         return `refs/tags/${manualChromiumTag}`
