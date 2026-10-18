@@ -183,6 +183,7 @@ jobs:
               "--sync_chromium=false",
               "SANDIUM_CHROMIUM_PIN_PRESERVATION=PASS",
               "SANDIUM_GCLIENT_MANIFEST_MATCH=PASS",
+              "SANDIUM_SOURCE_MANIFEST_MATCH=PASS",
               "src/brave/vendor/bat-native-tweetnacl/BUILD.gn",
               "src/brave/build/version.gni",
           ):
