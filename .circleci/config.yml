@@ -207,6 +207,7 @@ jobs:
             python3 ci/siso/write_buildbuddy_env.py
             pnpm run sync --target_os=android --target_arch=arm64 --no-history
             cd "$HOME/project"
+            sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             sudo ./src/brave/src/build/install-build-deps.sh --android
             python3 - \<<'PY'
             import re, shutil
@@ -255,6 +256,7 @@ jobs:
           key: sandium-pnpm-v1-{{ .Branch }}-{{ checksum "src/brave/pnpm-lock.yaml" }}-{{ .BuildNum }}
           paths:
             - src/brave/node_modules
+            - src/brave/.sandium-pnpm-lock.sha256
             - ~/.local/share/pnpm/store
       - save_cache:
           key: sandium-src-v3-chromium-156.0.8078.39-{{ .BuildNum }}
@@ -306,11 +308,19 @@ jobs:
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
-          name: Reuse the pinned Brave Node dependency tree
+          name: Reuse pinned Node dependencies; install only after lockfile change
           command: |
             set -euo pipefail
-            cd src/brave
-            pnpm install --frozen-lockfile --prefer-offline
+            LOCK_HASH="$(sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}')"
+            if [[ -d src/brave/node_modules && -s src/brave/.sandium-pnpm-lock.sha256 && "$(cat src/brave/.sandium-pnpm-lock.sha256)" == "$LOCK_HASH" ]]; then
+              echo "PNPM_DEPENDENCIES=REUSED"
+            else
+              cd src/brave
+              pnpm install --frozen-lockfile --prefer-offline
+              cd "$HOME/project"
+              sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
+              echo "PNPM_DEPENDENCIES=INSTALLED"
+            fi
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
@@ -416,11 +426,19 @@ jobs:
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
-          name: Reuse the pinned Brave Node dependency tree
+          name: Reuse pinned Node dependencies; install only after lockfile change
           command: |
             set -euo pipefail
-            cd src/brave
-            pnpm install --frozen-lockfile --prefer-offline
+            LOCK_HASH="$(sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}')"
+            if [[ -d src/brave/node_modules && -s src/brave/.sandium-pnpm-lock.sha256 && "$(cat src/brave/.sandium-pnpm-lock.sha256)" == "$LOCK_HASH" ]]; then
+              echo "PNPM_DEPENDENCIES=REUSED"
+            else
+              cd src/brave
+              pnpm install --frozen-lockfile --prefer-offline
+              cd "$HOME/project"
+              sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
+              echo "PNPM_DEPENDENCIES=INSTALLED"
+            fi
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
