@@ -119,6 +119,52 @@ jobs:
             done
           done < circleci-status/workflow-summary.tsv
           echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
+          # Keep the diagnostic run alive briefly to observe the current CircleCI
+          # pipeline advancing, instead of rapidly re-running this workflow.
+          # This is read-only status polling: it never invokes pipeline/run.
+          for poll_index in $(seq 1 12); do
+            sleep 20
+            curl --fail --silent --show-error --get --header "Circle-Token: $CIRCLECI_TOKEN" \
+              --data-urlencode "branch=$BRANCH" \
+              "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/pipeline" \
+              -o circleci-status/live-pipeline-list.json
+            LIVE_PIPELINE_ID="$(jq -r '.items[0].id // empty' circleci-status/live-pipeline-list.json)"
+            if [[ -z "$LIVE_PIPELINE_ID" ]]; then
+              echo "LIVE_POLL=$poll_index NO_PIPELINE_FOUND"
+              continue
+            fi
+            curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+              "https://circleci.com/api/v2/pipeline/$LIVE_PIPELINE_ID" \
+              -o circleci-status/live-pipeline.json
+            curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+              "https://circleci.com/api/v2/pipeline/$LIVE_PIPELINE_ID/workflow" \
+              -o circleci-status/live-workflows.json
+            {
+              echo "poll_index=$poll_index pipeline_id=$LIVE_PIPELINE_ID"
+              jq -r '.items[]? | [.id,.name,.status] | @tsv' circleci-status/live-workflows.json
+            } | tee "circleci-status/live-poll-$poll_index.txt"
+            rm -f circleci-status/live-job-summary.tsv
+            while IFS="$(printf '\t')" read -r live_workflow_id live_workflow_name live_workflow_status; do
+              [[ -n "$live_workflow_id" ]] || continue
+              live_jobs="circleci-status/live-jobs-$live_workflow_id.json"
+              if ! curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+                  "https://circleci.com/api/v2/workflow/$live_workflow_id/job" -o "$live_jobs"; then
+                echo "LIVE_JOB_LIST_UNAVAILABLE workflow=$live_workflow_name"
+                continue
+              fi
+              jq -r '.items[]? | [.name,.status,(.job_number|tostring)] | @tsv' "$live_jobs" \
+                >> circleci-status/live-job-summary.tsv
+            done < <(jq -r '.items[]? | [.id,.name,.status] | @tsv' circleci-status/live-workflows.json)
+            cat circleci-status/live-job-summary.tsv
+            if awk -F '\t' '$1=="stage-2-graph-and-compile-window" && ($2=="running" || $2=="success" || $2=="failed" || $2=="error" || $2=="canceled") {found=1} END {exit !found}' circleci-status/live-job-summary.tsv; then
+              echo "LIVE_POLL_STOP_REASON=stage-2-started-or-finished"
+              break
+            fi
+            if awk -F '\t' '$1=="stage-1-source-foundation" && ($2=="failed" || $2=="error" || $2=="canceled") {found=1} END {exit !found}' circleci-status/live-job-summary.tsv; then
+              echo "LIVE_POLL_STOP_REASON=stage-1-failed"
+              break
+            fi
+          done
       - name: Save inspection results
         if: always()
         uses: actions/upload-artifact@v4
