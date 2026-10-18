@@ -101,8 +101,10 @@ jobs:
               raise SystemExit("Stage 1 must sync pinned source and record a validated cache save")
           if "build_state.py fingerprint" not in raw:
               raise SystemExit("GN inputs are not fingerprinted by the shared build-state helper")
-          if "restore-sandium-apk-cache" not in raw or "sandium-apk-v1-" not in raw or 'check --mode artifact-cache' not in raw:
+          if "restore-sandium-apk-cache" not in raw or "sandium-apk-v1-" not in raw or "VERIFIED_APK_CACHE=HIT" not in raw:
               raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
+          if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
+              raise SystemExit("Revision pinning or APK verification evidence is missing")
           if raw.count("package_apk.py --commit") < 3:
               raise SystemExit("Stages 2, 3 and 4 must package an APK immediately when it appears")
           if "build-state.json" not in raw or "APK_ARTIFACT_VERIFIED=true" not in raw:
