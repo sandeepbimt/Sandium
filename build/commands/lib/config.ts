@@ -456,6 +456,18 @@ export class Config {
   }
 
   getProjectRef(projectName, defaultValue = 'origin/master') {
+    if (projectName === 'chrome') {
+      const manualChromiumTag = envConfig.getString(['sandium_chromium_tag'])
+      if (manualChromiumTag) {
+        assert.match(
+          manualChromiumTag,
+          /^\\d+\\.\\d+\\.\\d+\\.\\d+$/,
+          'sandium_chromium_tag must be a four-part numeric Chromium tag',
+        )
+        return `refs/tags/${manualChromiumTag}`
+      }
+    }
+
     const revision = envConfig.getString(['projects', projectName, 'revision'])
     if (revision) {
       return revision
