@@ -193,8 +193,8 @@ class BuildStateTests(unittest.TestCase):
     def test_remote_metrics_parser_handles_siso_counters_split_across_lines(self):
         log = self.root / "split-siso-stats.log"
         log.write_text(
-            "noexec:751 local:5637 remote:16659 cache:7 skip:19128\\n"
-            "cache-write:9(err:2) fallback:5 retry:4\\n",
+            "noexec:751 local:5637 remote:16659 cache:7 skip:19128\n"
+            "cache-write:9(err:2) fallback:5 retry:4\n",
             encoding="utf-8",
         )
         metrics, found = state_module._remote_metrics(str(log))
