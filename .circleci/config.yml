@@ -476,6 +476,14 @@ jobs:
               sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
+      - run:
+          name: Test Chromium override cleanup before compilation
+          command: |
+            set -euo pipefail
+            cd src/brave
+            pnpm test-unit build/commands/lib/util.test.ts --runInBand --coverage=false
+            cd "$HOME/project"
+            echo "SANDIUM_OVERRIDE_CLEANUP_REGRESSION_TESTS=PASS"
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
