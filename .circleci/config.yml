@@ -446,7 +446,7 @@ jobs:
             set -euo pipefail
             node --check src/brave/build/commands/lib/util.ts
             node --check src/brave/build/commands/lib/build.ts
-            node - <<'NODE'
+            node - \<<'NODE'
             const fs = require('node:fs')
             const assert = require('node:assert/strict')
             const source = fs.readFileSync('src/brave/build/commands/lib/util.ts', 'utf8')
@@ -600,7 +600,7 @@ jobs:
             export PATH="$GN_DIR:$PATH"
             echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
             cd src/brave
-            node --input-type=module - <<'NODE'
+            node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
