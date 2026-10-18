@@ -58,6 +58,15 @@ jobs:
           path = Path(".circleci/config.yml")
           raw = path.read_text()
           config = yaml.safe_load(raw)
+          bad_heredocs = [
+              line for line in raw.splitlines()
+              if ("python3 - <<'PY'" in line or "python - <<'PY'" in line or "python3 - <<'BUILD'" in line)
+          ]
+          if bad_heredocs:
+              raise SystemExit(
+                  "CircleCI heredoc markers must escape << as \\<<; found: "
+                  + repr(bad_heredocs)
+              )
 
           expected_jobs = [
               "stage-1-source-foundation",
