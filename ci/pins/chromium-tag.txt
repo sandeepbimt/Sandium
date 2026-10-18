@@ -1,0 +1,4 @@
+# SANDIUM MANUAL CHROMIUM PIN
+# Change this tag only when a Chromium update is explicitly approved for Sandium.
+# Normal Brave source updates must not silently advance this reference.
+156.0.8078.39
