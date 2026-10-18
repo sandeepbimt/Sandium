@@ -498,6 +498,20 @@ jobs:
           name: Preflight GN executable using the build environment
           command: |
             set -euo pipefail
+            GN_DIR="$HOME/project/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              echo "Searching source checkout for a GN executable to diagnose source/cache layout:"
+              find "$HOME/project/src" -type f -path '*/buildtools/linux64/gn' -o -type f -name gn 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            # Chromium's GN binary lives in buildtools/linux64; depot_tools alone
+            # does not guarantee that this source-built/pinned GN is on PATH.
+            echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
             cd src/brave
             node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
@@ -507,12 +521,12 @@ jobs:
               cwd: config.srcDir, env: options.env, encoding: 'utf8',
             })
             if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
-              throw new Error('GN executable is not resolvable with Brave build PATH: '
+              throw new Error('GN executable is not resolvable with Brave build PATH after adding Chromium buildtools/linux64: '
                 + (lookup.error?.message || lookup.stderr || 'command -v gn returned no path'))
             }
             const gnPath = lookup.stdout.trim()
             console.log('SANDIUM_GN_RESOLVED_PATH=' + gnPath)
-            const version = spawnSync('gn', ['--version'], {
+            const version = spawnSync(gnPath, ['--version'], {
               cwd: config.srcDir, env: options.env, encoding: 'utf8',
             })
             if (version.error) {
