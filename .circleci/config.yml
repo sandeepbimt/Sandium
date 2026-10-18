@@ -207,6 +207,9 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
+      - run:
+          name: Start stage budget clock before restoration and handover
+          command: date +%s > "$HOME/.sandium-stage-start-epoch"
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -239,14 +242,23 @@ jobs:
       - restore-sandium-pnpm-cache
       - run:
           name: Synchronize pinned source and dependencies with shallow history
-          no_output_timeout: 50m
+          no_output_timeout: 40m
           command: |
             set -euo pipefail
+            mkdir -p build-diagnostics
             cd src/brave
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
             export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
             python3 ci/siso/write_buildbuddy_env.py
-            pnpm run sync --target_os=android --target_arch=arm64 --no-history
+            set +e
+            timeout --signal=INT --kill-after=30s 32m pnpm run sync --target_os=android --target_arch=arm64 --no-history 2>&1 | tee "$HOME/project/build-diagnostics/source-sync.log"
+            sync_status=${PIPESTATUS[0]}
+            set -e
+            echo "$sync_status" > "$HOME/project/build-diagnostics/source-sync-exit.txt"
+            if [[ "$sync_status" -ne 0 ]]; then
+              echo "SOURCE_SYNC_FAILED_OR_TIMED_OUT=$sync_status; preserve diagnostics and do not start compilation"
+              exit "$sync_status"
+            fi
             cd "$HOME/project"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             python3 - \<<'PY'
@@ -345,6 +357,9 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
+      - run:
+          name: Start stage budget clock before restoration and handover
+          command: date +%s > "$HOME/.sandium-stage-start-epoch"
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -398,8 +413,18 @@ jobs:
             },indent=2)+"\n")
             PY
             cd src/brave
+            started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
+            elapsed_seconds="$(( $(date +%s) - started_at ))"
+            remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
+            if [[ "$remaining_compile_seconds" -gt 2100 ]]; then remaining_compile_seconds=2100; fi
+            if [[ "$remaining_compile_seconds" -le 0 ]]; then
+              echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
+              exit 5
+            fi
+            echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
+            echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
             set +e
-            timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
+            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -455,6 +480,9 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
+      - run:
+          name: Start stage budget clock before restoration and handover
+          command: date +%s > "$HOME/.sandium-stage-start-epoch"
       - restore-sandium-apk-cache
       - run:
           name: Exit this stage when a verified APK cache exists
@@ -494,8 +522,18 @@ jobs:
             mkdir -p build-diagnostics
             python3 src/brave/ci/siso/build_state.py fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
             cd src/brave
+            started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
+            elapsed_seconds="$(( $(date +%s) - started_at ))"
+            remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
+            if [[ "$remaining_compile_seconds" -gt 2100 ]]; then remaining_compile_seconds=2100; fi
+            if [[ "$remaining_compile_seconds" -le 0 ]]; then
+              echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
+              exit 5
+            fi
+            echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
+            echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
             set +e
-            timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
+            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
@@ -545,6 +583,9 @@ jobs:
     resource_class: large
     working_directory: ~/project
     steps:
+      - run:
+          name: Start stage budget clock before restoration and handover
+          command: date +%s > "$HOME/.sandium-stage-start-epoch"
       - restore-sandium-apk-cache
       - run:
           name: Exit Stage 4 immediately when verified APK is reusable
@@ -594,7 +635,17 @@ jobs:
               python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
               cd src/brave
               set +e
-              timeout --signal=INT --kill-after=30s 38m pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
+            started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
+            elapsed_seconds="$(( $(date +%s) - started_at ))"
+            remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
+            if [[ "$remaining_compile_seconds" -gt 2100 ]]; then remaining_compile_seconds=2100; fi
+            if [[ "$remaining_compile_seconds" -le 0 ]]; then
+              echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
+              exit 5
+            fi
+            echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
+            echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
+              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false 2>&1 | tee "$LOG"
               status=${PIPESTATUS[0]}
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
@@ -643,6 +694,9 @@ jobs:
     resource_class: medium
     working_directory: ~/project
     steps:
+      - run:
+          name: Start stage budget clock before restoration and handover
+          command: date +%s > "$HOME/.sandium-stage-start-epoch"
       - restore-sandium-apk-cache
       - run:
           name: Independently verify the cached APK before publishing
