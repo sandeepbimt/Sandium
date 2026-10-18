@@ -533,7 +533,7 @@ jobs:
               echo "CHROMIUM_AFTER=$after_tag@$after_commit"
               exit 32
             fi
-            python3 - "$ROOT" <<'PY'
+            python3 - "$ROOT" \<<'PY'
             import hashlib, json, subprocess, sys
             from pathlib import Path
             root = Path(sys.argv[1])
