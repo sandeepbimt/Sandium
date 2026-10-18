@@ -105,6 +105,26 @@ commands:
           keys:
             - sandium-pnpm-v1-{{ .Branch }}-{{ checksum "src/brave/pnpm-lock.yaml" }}-
 
+  restore-sandium-apk-cache:
+    steps:
+      - restore_cache:
+          keys:
+            - sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-
+      - run:
+          name: Validate reusable, already-verified APK before doing any build work
+          command: |
+            set -euo pipefail
+            mkdir -p sandium-output
+            if python3 src/brave/ci/siso/build_state.py check --mode artifact-cache --commit "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"; then
+              echo "VERIFIED_APK_CACHE=HIT"
+              echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=true' >> "$BASH_ENV"
+            else
+              echo "VERIFIED_APK_CACHE=MISS"
+              rm -rf sandium-output
+              mkdir -p sandium-output
+              echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=false' >> "$BASH_ENV"
+            fi
+
   install-sandium-android-build-deps:
     steps:
       - run:
@@ -148,6 +168,15 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - restore-sandium-apk-cache
+      - run:
+          name: Exit this stage when a verified APK cache exists
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
+              echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
+              circleci-agent step halt
+            fi
       - run:
           name: Verify source pins before any expensive work
           command: |
@@ -255,6 +284,15 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - restore-sandium-apk-cache
+      - run:
+          name: Exit this stage when a verified APK cache exists
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
+              echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
+              circleci-agent step halt
+            fi
       - restore-sandium-source
       - restore-sandium-build-output
       - run:
@@ -346,6 +384,15 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - restore-sandium-apk-cache
+      - run:
+          name: Exit this stage when a verified APK cache exists
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
+              echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
+              circleci-agent step halt
+            fi
       - restore-sandium-source
       - restore-sandium-build-output
       - run:
@@ -417,6 +464,15 @@ jobs:
     steps:
       - checkout:
           path: src/brave
+      - restore-sandium-apk-cache
+      - run:
+          name: Exit this stage when a verified APK cache exists
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
+              echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
+              circleci-agent step halt
+            fi
       - restore-sandium-source
       - restore-sandium-build-output
       - install-sandium-node
