@@ -6,7 +6,7 @@ version: 2.1
 parameters:
   run_sandium_android_apk_build:
     type: boolean
-    default: false
+    default: true
 
 commands:
   install-sandium-node:
