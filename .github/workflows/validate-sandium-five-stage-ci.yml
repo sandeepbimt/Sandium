@@ -97,13 +97,27 @@ jobs:
           source_text = str(config["jobs"]["stage-1-source-foundation"])
           if "--no-history" not in source_text or "save_cache" not in source_text or "SOURCE_CACHE_BYTES=" not in raw:
               raise SystemExit("Stage 1 must sync pinned source and record a validated cache save")
-          if "gn_args_sha256" not in raw or "GN_ARGS_FINGERPRINT_MATCH=PASS" not in raw:
-              raise SystemExit("GN arguments are not fingerprinted across compile stages")
+          if "build_state.py fingerprint" not in raw or "GN_ARGS_SHA256=" not in raw:
+              raise SystemExit("GN arguments are not fingerprinted by the shared build-state helper")
+          if "use_siso:true" not in raw or "use_reclient:false" not in raw or "--use_remoteexec true" not in raw:
+              raise SystemExit("Compile commands must explicitly enable remote execution and Siso, and disable reclient")
+          if "src/brave/src/out/android_Debug_arm64/args.gn" not in raw or "src/brave/src/out/Debug/args.gn" in raw:
+              raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
+          if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
+              raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
+          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage") < 3:
+              raise SystemExit("Compiled output is not restored and checkpointed between all compile stages and runs")
+          if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
+              raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
+          if "circleci-agent step halt" not in raw:
+              raise SystemExit("A completed APK must short-circuit unnecessary later-stage work")
           if "apksigner" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in raw:
               raise SystemExit("Final APK signature verification is missing")
-          compile_windows = re.findall(r"timeout --signal=INT --kill-after=30s 30m pnpm run build", raw)
+          compile_windows = re.findall(r"timeout --signal=INT --kill-after=30s 38m pnpm run build", raw)
           if len(compile_windows) != 3:
-              raise SystemExit(f"Expected three bounded compile windows; got {len(compile_windows)}")
+              raise SystemExit(f"Expected three 38-minute bounded compile windows; got {len(compile_windows)}")
+          if raw.count("no_output_timeout: 45m") != 3:
+              raise SystemExit("Each compile stage must permit up to 45 minutes without output before the no-output guard")
 
           command_blocks = []
           def walk(value, label="$"):
@@ -175,3 +189,9 @@ jobs:
           print(f"SHELL_COMMANDS_SYNTAX_CHECKED={counts['shell']}")
           print("APK_BUILD=NOT_RUN")
           PY
+
+      - name: Run offline Siso and resumable-output unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest -v tests.ci.test_siso_buildbuddy_config tests.ci.test_siso_build_state
