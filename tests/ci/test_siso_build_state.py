@@ -34,7 +34,7 @@ class BuildStateTests(unittest.TestCase):
         self.out = self.chromium / "out" / "android_Debug_arm64"
         (self.chromium / "chrome").mkdir(parents=True)
         (self.root / "package.json").write_text(
-            json.dumps({"config": {"projects": {"chrome": {"tag": "156.0.8078.39"}}}}),
+            json.dumps({"config": {"projects": {"chrome": {"tag": "156.1.100.0"}}}}),
             encoding="utf-8",
         )
         (self.chromium / "chrome" / "VERSION").write_text(
@@ -151,7 +151,7 @@ class BuildStateTests(unittest.TestCase):
             "schema": 1,
             "target": state_module.TARGET,
             "build_config": "Debug",
-            "chromium_version": "156.0.8078.39",
+            "chromium_version": "156.1.100.0",
             "build_input_fingerprint": fingerprint,
             "compile_complete": True,
             "artifact_verified": True,
