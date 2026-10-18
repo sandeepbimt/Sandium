@@ -45,13 +45,6 @@ jobs:
               -o "circleci-status/jobs-$workflow_id.json"
             echo "=== JOBS: $workflow_name ($workflow_status) ==="
             jq -r '.items[]? | [.name,.status,(.job_number|tostring),(.started_at//""),(.stopped_at//"")] | @tsv' "circleci-status/jobs-$workflow_id.json"
-            jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
-              curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
-                "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/$job_number/steps" \
-                -o "circleci-status/steps-$job_number.json"
-              echo "=== STEPS: CircleCI job $job_number ==="
-              jq -r '.. | objects | select((.name? != null) and (.status? != null)) | [.name,.status] | @tsv' "circleci-status/steps-$job_number.json" | sort -u
-            done
           done < circleci-status/workflow-summary.tsv
           echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
       - name: Save inspection results
