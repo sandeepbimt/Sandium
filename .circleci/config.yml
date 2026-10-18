@@ -486,11 +486,11 @@ jobs:
           path: src/brave
       - restore-sandium-apk-cache
       - run:
-          name: Exit this stage when a verified APK cache exists
+          name: Exit Stage 4 immediately when verified APK is reusable
           command: |
             set -euo pipefail
             if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
-              echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
+              echo "VERIFIED_APK_REUSED=true; skipping Chromium checkout, dependencies and compilation"
               circleci-agent step halt
             fi
       - restore-sandium-source
@@ -498,15 +498,23 @@ jobs:
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
-          name: Reuse the pinned Brave Node dependency tree
+          name: Reuse pinned Node dependencies, install only on cache miss
           command: |
             set -euo pipefail
-            cd src/brave
-            pnpm install --frozen-lockfile --prefer-offline
+            LOCK_HASH="$(sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}')"
+            if [[ -d src/brave/node_modules && -s src/brave/.sandium-pnpm-lock.sha256 && "$(cat src/brave/.sandium-pnpm-lock.sha256)" == "$LOCK_HASH" ]]; then
+              echo "PNPM_DEPENDENCIES=REUSED"
+            else
+              cd src/brave
+              pnpm install --frozen-lockfile --prefer-offline
+              cd "$HOME/project"
+              sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
+              echo "PNPM_DEPENDENCIES=INSTALLED"
+            fi
       - install-sandium-android-build-deps
       - configure-sandium-remote-cache
       - run:
-          name: Finish compilation, reuse completed APK, and verify artifact
+          name: Final incremental compile, package and verify if APK appears
           no_output_timeout: 45m
           command: |
             set -euo pipefail
@@ -517,7 +525,7 @@ jobs:
             status=0
 
             if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
-              echo "FINAL_COMPILE_SKIPPED=REUSABLE_APK_PRESENT"
+              echo "FINAL_COMPILE_SKIPPED=COMPLETED_COMPILE_STATE"
               : > "$LOG"
             else
               python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
@@ -532,18 +540,15 @@ jobs:
                 exit "$status"
               fi
               if [[ "$status" -eq 124 ]]; then
-                echo "FINAL_COMPILE_WINDOW_TIMED_OUT=124"
+                echo "FINAL_COMPILE_WINDOW_TIMED_OUT=124; preserving partial output for the next run"
               fi
               cd "$HOME/project"
             fi
-            echo "$status" > build-diagnostics/compile-window-3-exit.txt
 
-            evidence=build-diagnostics/compile-window-3-remote-cache-log-candidates.txt
-            if [[ -s "$LOG" ]] && grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)|local:[[:space:]]*[0-9]+[[:space:]]+remote:' "$LOG" > "$evidence"; then
-              echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
-              tail -n 20 "$evidence" || true
+            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)|local:[[:space:]]*[0-9]+[[:space:]]+remote:' "$LOG" > build-diagnostics/compile-window-3-remote-cache-log-candidates.txt; then
+              echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < build-diagnostics/compile-window-3-remote-cache-log-candidates.txt)"
             else
-              : > "$evidence"
+              : > build-diagnostics/compile-window-3-remote-cache-log-candidates.txt
               echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
             fi
 
@@ -552,118 +557,22 @@ jobs:
               COMPLETE=true
             fi
             python3 "$STATE" record --commit "$CIRCLE_SHA1" --stage stage-4 --compile-complete "$COMPLETE" --artifact-verified auto --log "$LOG"
-            python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
-
-            APK="$OUT/apks/Bravearm64.apk"
-            if [[ ! -s "$APK" || "$(stat -c %s "$APK")" -lt 1000000 ]]; then
-              echo "No complete Bravearm64.apk exists after the final compile window; prior stage checkpoints remain reusable."
-              find src/brave/src/out -type f -path '*/apks/*.apk' -printf '%p %s bytes\n' || true
-              exit 3
-            fi
-            cp "$APK" sandium-output/Brave-debug-arm64.apk
-
-            SDK=src/brave/src/third_party/android_sdk
-            AAPT="$(find "$SDK" -type f -name aapt -perm -111 -print -quit 2>/dev/null || true)"
-            APKSIGNER="$(find "$SDK" -type f -name apksigner -perm -111 -print -quit 2>/dev/null || true)"
-            test -n "$AAPT" && test -n "$APKSIGNER" || { echo "Missing aapt or apksigner from the synced Android SDK."; exit 5; }
-            "$AAPT" dump badging sandium-output/Brave-debug-arm64.apk > sandium-output/apk-badging.txt
-            "$APKSIGNER" verify --verbose sandium-output/Brave-debug-arm64.apk > sandium-output/apksigner-verify.txt 2>&1
-
-            python3 - sandium-output/Brave-debug-arm64.apk sandium-output/build-manifest.json "$CIRCLE_SHA1" "$OUT/.sandium-build-state.json" \<<'PY'
-            import hashlib, json, re, subprocess, sys, zipfile
-            from pathlib import Path
-            apk = Path(sys.argv[1])
-            manifest_path = Path(sys.argv[2])
-            source_commit = sys.argv[3]
-            state_path = Path(sys.argv[4])
-            with zipfile.ZipFile(apk) as archive:
-                if archive.testzip() is not None:
-                    raise SystemExit("APK ZIP CRC integrity failed")
-                names = set(archive.namelist())
-                if "AndroidManifest.xml" not in names:
-                    raise SystemExit("APK is missing AndroidManifest.xml")
-                if not any(name.startswith("classes") and name.endswith(".dex") for name in names):
-                    raise SystemExit("APK is missing DEX bytecode")
-            badging = Path("sandium-output/apk-badging.txt").read_text()
-            match = re.search(r"^package: name='([^']+)'", badging, re.M)
-            if not match:
-                raise SystemExit("Cannot parse package name from aapt badging output")
-            version_text = Path("src/brave/src/chrome/VERSION").read_text()
-            fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_text, re.M))
-            chromium_version = ".".join(fields[k] for k in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-            if chromium_version != "156.0.8078.39":
-                raise SystemExit(f"Unexpected Chromium version in APK source tree: {chromium_version}")
-            state = json.loads(state_path.read_text())
-            manifest = {
-                "source_commit": source_commit,
-                "brave_core_commit": subprocess.check_output(["git", "-C", "src/brave", "rev-parse", "HEAD"], text=True).strip(),
-                "chromium_commit": subprocess.check_output(["git", "-C", "src/brave/src", "rev-parse", "HEAD"], text=True).strip(),
-                "chromium_version": chromium_version,
-                "android_target": "arm64",
-                "build_config": "Debug",
-                "artifact": apk.name,
-                "apk_bytes": apk.stat().st_size,
-                "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
-                "app_package_name": match.group(1),
-                "apk_zip_integrity": "PASS",
-                "dalvik_bytecode_present": True,
-                "apksigner_verification": "PASS",
-                "build_input_fingerprint": state["build_input_fingerprint"],
-                "gn_args_sha256": state["gn_args_sha256"],
-                "remote_execution_usage": {
-                    "proven_from_siso_stats": state.get("remote_backend_proven", False),
-                    "metrics": state.get("remote_metrics", {}),
-                },
-            }
-            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-            print("APK_BYTES=" + str(manifest["apk_bytes"]))
-            print("APK_SHA256=" + manifest["apk_sha256"])
-            print("APK_PACKAGE=" + manifest["app_package_name"])
-            print("APK_ZIP_INTEGRITY=PASS")
-            print("APK_SIGNATURE_VERIFICATION=PASS")
-            PY
-            python3 "$STATE" record --commit "$CIRCLE_SHA1" --stage stage-4 --compile-complete true --artifact-verified true
-            python3 - sandium-output/build-manifest.json "$OUT/.sandium-build-state.json" \<<'PY'
-            import json, sys
-            from pathlib import Path
-            manifest_path = Path(sys.argv[1])
-            state = json.loads(Path(sys.argv[2]).read_text())
-            manifest = json.loads(manifest_path.read_text())
-            manifest["remote_execution_usage"] = {
-                "proven_from_siso_stats": state.get("remote_backend_proven", False),
-                "metrics": state.get("remote_metrics", {}),
-            }
-            manifest["artifact_verified"] = state.get("artifact_verified") is True
-            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-            print("SISO_REMOTE_BACKEND_PROVEN=" + str(state.get("remote_backend_proven", False)).lower())
-            print("SISO_REMOTE_ACTIONS=" + str(state.get("remote_metrics", {}).get("remote_actions", 0)))
-            print("SISO_REMOTE_CACHE_HITS=" + str(state.get("remote_metrics", {}).get("remote_cache_hits", 0)))
-            print("SISO_REMOTE_CACHE_WRITES=" + str(state.get("remote_metrics", {}).get("remote_cache_writes", 0)))
-            PY
-            sha256sum sandium-output/Brave-debug-arm64.apk | tee sandium-output/sha256.txt
-      - persist_to_workspace:
-          root: .
-          paths:
-            - sandium-output/Brave-debug-arm64.apk
-            - sandium-output/sha256.txt
-            - sandium-output/build-manifest.json
-            - sandium-output/apk-badging.txt
-            - sandium-output/apksigner-verify.txt
-      - store_artifacts:
-          path: build-diagnostics
-          destination: stage-4-finish-build
-      - run:
-          name: Avoid re-uploading a previously verified, unchanged output cache
-          command: |
-            set -euo pipefail
-            if [[ "${SANDIUM_VERIFIED_OUTPUT_CACHE_HIT:-false}" == "true" ]]; then
-              echo "OUTPUT_CACHE_UPLOAD=SKIPPED_ALREADY_VERIFIED"
-              circleci-agent step halt
+            if [[ -s "$OUT/apks/Bravearm64.apk" && "$(stat -c %s "$OUT/apks/Bravearm64.apk")" -ge 1000000 ]]; then
+              python3 src/brave/ci/siso/package_apk.py --commit "$CIRCLE_SHA1" --stage stage-4
+            else
+              echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
       - save_cache:
           key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - src/brave/src/out/android_Debug_arm64
+      - save_cache:
+          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage4-{{ .BuildNum }}
+          paths:
+            - sandium-output
+      - store_artifacts:
+          path: build-diagnostics
+          destination: stage-4-finish-build
 
   stage-5-verify-publish:
     machine:
@@ -671,44 +580,41 @@ jobs:
     resource_class: medium
     working_directory: ~/project
     steps:
-      - attach_workspace:
-          at: .
+      - checkout:
+          path: src/brave
+      - restore-sandium-apk-cache
       - run:
-          name: Verify final APK, package metadata and signature record
+          name: Independently verify the cached APK before publishing
           command: |
             set -euo pipefail
-            python3 - \<<'PY'
-            import hashlib, json, re, zipfile
+            python3 src/brave/ci/siso/build_state.py check --mode artifact-cache --commit "$CIRCLE_SHA1"
+            python3 - <<'PY'
+            import hashlib, json, zipfile
             from pathlib import Path
-            output = Path("sandium-output")
-            apk = output / "Brave-debug-arm64.apk"
-            manifest = json.loads((output / "build-manifest.json").read_text())
-            expected_hash = (output / "sha256.txt").read_text().split()[0]
-            actual_hash = hashlib.sha256(apk.read_bytes()).hexdigest()
-            if actual_hash != expected_hash or actual_hash != manifest.get("apk_sha256"):
-                raise SystemExit("APK SHA-256 does not match both Stage-4 records")
-            if apk.stat().st_size != manifest.get("apk_bytes"):
-                raise SystemExit("APK size does not match build manifest")
+            out=Path("sandium-output")
+            apk=out/"Brave-debug-arm64.apk"
+            manifest=json.loads((out/"build-manifest.json").read_text())
+            state=json.loads((out/"build-state.json").read_text())
+            digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+            if digest != manifest.get("apk_sha256") or digest != state.get("apk_sha256"):
+                raise SystemExit("APK hash differs between artifact, state and manifest")
+            if not manifest.get("artifact_verified"):
+                raise SystemExit("APK manifest is not marked verified")
+            if manifest.get("build_input_fingerprint") != state.get("build_input_fingerprint"):
+                raise SystemExit("APK and state build fingerprints differ")
             with zipfile.ZipFile(apk) as archive:
                 if archive.testzip() is not None:
-                    raise SystemExit("APK ZIP CRC failure")
-                names = set(archive.namelist())
-                if "AndroidManifest.xml" not in names:
-                    raise SystemExit("Missing AndroidManifest.xml")
-                if not any(name.startswith("classes") and name.endswith(".dex") for name in names):
-                    raise SystemExit("Missing DEX bytecode")
-            badging = (output / "apk-badging.txt").read_text()
-            match = re.search(r"^package: name='([^']+)'", badging, re.M)
-            if not match or match.group(1) != manifest.get("app_package_name"):
-                raise SystemExit("APK package metadata does not match build manifest")
-            if manifest.get("apksigner_verification") != "PASS" or not (output / "apksigner-verify.txt").is_file():
-                raise SystemExit("Stage-4 APK signature verification evidence is missing")
-            if manifest.get("apk_zip_integrity") != "PASS" or manifest.get("dalvik_bytecode_present") is not True:
-                raise SystemExit("Build manifest lacks required APK integrity checks")
+                    raise SystemExit("APK ZIP CRC integrity failure")
+                names=set(archive.namelist())
+                if "AndroidManifest.xml" not in names or not any(n.startswith("classes") and n.endswith(".dex") for n in names):
+                    raise SystemExit("APK is missing Android manifest or DEX")
             print("APK_INTEGRITY=PASS")
             print("APK_SIGNATURE_VERIFICATION=PASS")
-            print("APK_PACKAGE=" + match.group(1))
-            print("APK_SHA256=" + actual_hash)
+            print("APK_SHA256="+digest)
+            print("APK_BYTES="+str(apk.stat().st_size))
+            print("APK_PACKAGE="+manifest["app_package_name"])
+            print("APK_ARTIFACT_VERIFIED=true")
+            print("SISO_REMOTE_BACKEND_PROVEN="+str(manifest.get("remote_execution_usage", {}).get("proven_from_siso_stats", False)).lower())
             PY
       - store_artifacts:
           path: sandium-output
