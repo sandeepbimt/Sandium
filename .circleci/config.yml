@@ -443,7 +443,7 @@ jobs:
           name: Guard stale generated-output cleanup in the actual Brave build checkout
           command: |
             set -euo pipefail
-            python3 - <<'PY'
+            python3 - \<<'PY'
             from pathlib import Path
             path = Path("src/brave/build/commands/lib/util.ts")
             text = path.read_text()
