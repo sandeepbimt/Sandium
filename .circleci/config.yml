@@ -610,6 +610,18 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-4-finish-build
+      - run:
+          name: Avoid re-uploading a previously verified, unchanged output cache
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_OUTPUT_CACHE_HIT:-false}" == "true" ]]; then
+              echo "OUTPUT_CACHE_UPLOAD=SKIPPED_ALREADY_VERIFIED"
+              circleci-agent step halt
+            fi
+      - save_cache:
+          key: sandium-out-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage4-{{ .BuildNum }}
+          paths:
+            - src/brave/src/out/android_Debug_arm64
 
   stage-5-verify-publish:
     machine:
