@@ -352,21 +352,56 @@ describe('util', () => {
       expect(prog.stdout).toBe('hi\n')
     })
 
-    it('run exits on failure, dumping the output', () => {
+    it('run reports non-zero status and captured output without exiting', () => {
       expect(() =>
-        util.run(node, [
-          script('console.log("out"); console.error("err"); process.exit(3)'),
-        ]),
-      ).toThrow('process.exit(1) called')
-      expect(exit).toHaveBeenCalledWith(1)
-      expect(consoleLog).toHaveBeenCalledWith('out\n')
-      expect(consoleError).toHaveBeenCalledWith('err\n')
+        util.run(
+          node,
+          [script('console.log("out"); console.error("err"); process.exit(3)')],
+          { encoding: 'utf8' },
+        ),
+      ).toThrow(/Command failed:[\s\S]*exit status: 3[\s\S]*stdout:\n\s*out[\s\S]*stderr:\n\s*err/)
+      expect(exit).not.toHaveBeenCalled()
     })
 
-    it('run also dumps the command when it was not logged', () => {
+    it('run reports inherited-stdio failures without printing undefined', () => {
+      jest.spyOn(util, 'runProcess').mockReturnValue({
+        status: 1,
+        signal: null,
+        stdout: null,
+        stderr: null,
+        error: undefined,
+      } as never)
+
+      expect(() =>
+        util.run('gn', ['gen', '/tmp/out'], { cwd: tmpDir, stdio: 'inherit' }),
+      ).toThrow(/Command failed:[\s\S]*"gn" "gen" "\/tmp\/out"[\s\S]*exit status: 1/)
+      expect(exit).not.toHaveBeenCalled()
+      expect(consoleLog).not.toHaveBeenCalledWith(undefined)
+      expect(consoleError).not.toHaveBeenCalledWith(undefined)
+    })
+
+    it('run reports a spawn failure with executable and working directory', () => {
+      jest.spyOn(util, 'runProcess').mockReturnValue({
+        status: null,
+        signal: null,
+        stdout: null,
+        stderr: null,
+        error: Object.assign(new Error('spawn gn ENOENT'), {
+          code: 'ENOENT',
+          path: 'gn',
+        }),
+      } as never)
+
+      expect(() => util.run('gn', ['gen', '/tmp/out'], { cwd: tmpDir })).toThrow(
+        /Failed to spawn command:[\s\S]*"gn" "gen" "\/tmp\/out"[\s\S]*working directory:[\s\S]*spawn error: spawn gn ENOENT \[ENOENT\]/,
+      )
+      expect(exit).not.toHaveBeenCalled()
+    })
+
+    it('run includes the command when logging was disabled', () => {
       const args = [script('process.exit(2)')]
       expect(() => util.run(node, args, { skipLogging: true })).toThrow(
-        'process.exit(1) called',
+        /Command failed:[\s\S]*exit status: 2/,
       )
       expect(consoleLog).toHaveBeenCalledWith(
         node,
@@ -396,7 +431,7 @@ describe('util', () => {
       )
       expect(() =>
         util.runGit(repo, ['rev-parse', '--verify', 'nope']),
-      ).toThrow('process.exit(1) called')
+      ).toThrow(/Command failed:[\s\S]*git[\s\S]*exit status: 128/)
     })
 
     it('getGitReadableLocalRef describes HEAD', () => {
