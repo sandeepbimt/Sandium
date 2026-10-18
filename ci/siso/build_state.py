@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 CORE_DIR = Path(__file__).resolve().parents[2]
-CHROMIUM_DIR = CORE_DIR / "src"
+CHROMIUM_DIR = CORE_DIR.parent
 OUTPUT_DIR = CHROMIUM_DIR / "out" / "android_Debug_arm64"
 STATE_FILE = OUTPUT_DIR / ".sandium-build-state.json"
 APK_FILE = OUTPUT_DIR / "apks" / "Bravearm64.apk"
