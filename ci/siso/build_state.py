@@ -74,8 +74,11 @@ def _gn_fingerprint() -> str:
         raise StateError(f"Required GN arguments missing or empty: {args_file}")
 
     arguments = args_file.read_text(encoding="utf-8")
+    # use_remoteexec is Brave's build-command/runtime option (passed as
+    # --use_remoteexec true), not a required GN arg in args.gn. Requiring it
+    # here rejects otherwise correctly configured builds after compilation.
+    # Siso itself is controlled through the real GN args below.
     expected_flags = {
-        "use_remoteexec": "true",
         "use_siso": "true",
         "use_reclient": "false",
     }
