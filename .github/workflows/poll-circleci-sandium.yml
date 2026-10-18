@@ -1,0 +1,56 @@
+name: Inspect existing Sandium CircleCI pipeline
+
+on:
+  push:
+    branches:
+      - build/sandium-android-debug-apk-2026-10-17
+    paths:
+      - .github/workflows/poll-circleci-sandium.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-existing-circleci-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read CircleCI pipeline, workflow and job state (no new build)
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          PIPELINE_ID: a76493ff-16c6-4a20-96c6-e9d804520940
+          CIRCLECI_PROJECT_SLUG: circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${CIRCLECI_TOKEN:?Missing GitHub Actions secret CIRCLECI_TOKEN}"
+          mkdir -p circleci-status
+          curl --fail --silent --show-error \
+            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+            "https://circleci.com/api/v2/pipeline/${PIPELINE_ID}" \
+            -o circleci-status/pipeline.json
+          curl --fail --silent --show-error \
+            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+            "https://circleci.com/api/v2/pipeline/${PIPELINE_ID}/workflow" \
+            -o circleci-status/workflows.json
+          echo "=== CIRCLECI PIPELINE ==="
+          jq '{id,number,state,created_at,trigger,project_slug,errors}' circleci-status/pipeline.json
+          echo "=== CIRCLECI WORKFLOWS ==="
+          jq -r '.items[]? | [.id,.name,.status,.created_at,.stopped_at] | @tsv' circleci-status/workflows.json | tee circleci-status/workflow-summary.tsv
+          while IFS=$'\t' read -r workflow_id workflow_name status created stopped; do
+            [[ -n "${workflow_id:-}" ]] || continue
+            curl --fail --silent --show-error \
+              --header "Circle-Token: ${CIRCLECI_TOKEN}" \
+              "https://circleci.com/api/v2/workflow/${workflow_id}/job" \
+              -o "circleci-status/jobs-${workflow_id}.json"
+            echo "=== JOBS: ${workflow_name} (${status}) ==="
+            jq -r '.items[]? | [.name,.status,(.job_number|tostring),(.started_at//""),(.stopped_at//"")] | @tsv' "circleci-status/jobs-${workflow_id}.json"
+          done < circleci-status/workflow-summary.tsv
+          echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
+      - name: Save inspection results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: circleci-pipeline-10-status
+          path: circleci-status/
+          if-no-files-found: ignore
