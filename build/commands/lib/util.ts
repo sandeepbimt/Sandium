@@ -297,16 +297,46 @@ const util = {
   run: (cmd: string, args: string[] = [], options: RunOptions = {}) => {
     const { continueOnFail, skipLogging, ...cmdOptions } = options
     const prog = util.runProcess(cmd, args, cmdOptions, skipLogging)
-    if (prog.status !== 0) {
-      if (!continueOnFail) {
-        if (skipLogging) {
-          console.log(cmd, args, 'exited with status', prog.status, cmdOptions)
-        }
+    if (continueOnFail) {
+      return prog
+    }
 
-        console.log(prog.stdout && prog.stdout.toString())
-        console.error(prog.stderr && prog.stderr.toString())
-        process.exit(1)
+    const workingDirectory = cmdOptions.cwd
+      ? path.resolve(cmdOptions.cwd.toString())
+      : process.cwd()
+    const commandText = [cmd, ...args]
+      .map((part) => JSON.stringify(part))
+      .join(' ')
+
+    // spawnSync reports a spawn failure through prog.error and status: null.
+    // With inherited stdio, stdout/stderr are null, so the old printing path
+    // emitted the literal "undefined" then exited before phase diagnostics.
+    if (prog.error) {
+      const spawnError = prog.error as NodeJS.ErrnoException
+      const errorCode = spawnError.code ? ` [${spawnError.code}]` : ''
+      throw new Error(
+        `Failed to spawn command: ${commandText}\n`
+          + `working directory: ${workingDirectory}\n`
+          + `spawn error: ${spawnError.message}${errorCode}`,
+      )
+    }
+
+    if (prog.status !== 0) {
+      if (skipLogging) {
+        console.log(cmd, args, 'exited with status', prog.status, cmdOptions)
       }
+      const stdout = prog.stdout?.toString().trim()
+      const stderr = prog.stderr?.toString().trim()
+      const status = prog.status === null ? 'null' : String(prog.status)
+      const details = [
+        `Command failed: ${commandText}`,
+        `working directory: ${workingDirectory}`,
+        `exit status: ${status}`,
+        prog.signal ? `termination signal: ${prog.signal}` : '',
+        stdout ? `stdout:\n${stdout}` : '',
+        stderr ? `stderr:\n${stderr}` : '',
+      ].filter(Boolean)
+      throw new Error(details.join('\n'))
     }
     return prog
   },
