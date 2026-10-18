@@ -129,7 +129,7 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertIn("projects_chrome_custom_vars_reapi_credential_helper=", content)
         self.assertIn("siso_use_googlechrome_config=false", content)
         self.assertIn("use_remoteexec=false", content)
-        self.assertIn("projects_chrome_tag=156.0.8078.39", content)
+        self.assertIn("sandium_chromium_tag=156.0.8078.39", content)
         self.assertNotIn("MUST-NEVER-BE-WRITTEN", content)
         mode = (self.core / "ci/siso/buildbuddy-credential-helper.py").stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
