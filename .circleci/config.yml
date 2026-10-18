@@ -38,7 +38,7 @@ commands:
             set -euo pipefail
             valid_cache=false
             if [[ -d src/.git && -f src/chrome/VERSION ]]; then
-              if python3 - \<<'PY'
+              if python3 - <<'PY'
             import hashlib, json, re, subprocess, sys
             from pathlib import Path
             try:
@@ -133,7 +133,7 @@ commands:
           name: Verify reusable APK artifact without checking out Brave source
           command: |
             set -euo pipefail
-            if python3 - "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}" \<<'PY'
+            if python3 - "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}" <<'PY'
             import hashlib, json, re, sys, zipfile
             from pathlib import Path
             output=Path("sandium-output")
@@ -252,7 +252,7 @@ jobs:
             set -euo pipefail
             cd src/brave
             test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1"
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import json, re
             from pathlib import Path
             p=json.loads(Path("package.json").read_text())
@@ -302,7 +302,7 @@ jobs:
             fi
             cd "$HOME/project"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import re, shutil, subprocess
             from pathlib import Path
             # Brave downstream patches rewrite chrome/VERSION to its own product
@@ -333,7 +333,7 @@ jobs:
             PY
             mkdir -p build-diagnostics
             git -C src rev-parse HEAD > build-diagnostics/chromium-commit.txt
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import hashlib, json, re, subprocess
             from pathlib import Path
             p = Path("src/chrome/VERSION")
@@ -446,7 +446,7 @@ jobs:
             set -euo pipefail
             node --check src/brave/build/commands/lib/util.ts
             node --check src/brave/build/commands/lib/build.ts
-            node - \<<'NODE'
+            node - <<'NODE'
             const fs = require('node:fs')
             const assert = require('node:assert/strict')
             const source = fs.readFileSync('src/brave/build/commands/lib/util.ts', 'utf8')
@@ -533,7 +533,7 @@ jobs:
               echo "CHROMIUM_AFTER=$after_tag@$after_commit"
               exit 32
             fi
-            python3 - "$ROOT" \<<'PY'
+            python3 - "$ROOT" <<'PY'
             import hashlib, json, subprocess, sys
             from pathlib import Path
             root = Path(sys.argv[1])
@@ -600,7 +600,7 @@ jobs:
             export PATH="$GN_DIR:$PATH"
             echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
             cd src/brave
-            node --input-type=module - \<<'NODE'
+            node --input-type=module - <<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
@@ -667,7 +667,7 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p build-diagnostics
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import json, re, subprocess
             from pathlib import Path
             v=subprocess.check_output(
@@ -1016,7 +1016,7 @@ jobs:
               echo "VERIFIED_APK_CACHE=MISS; Stage 5 will perform the fourth bounded compile window"
               exit 0
             fi
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import hashlib, json, re, zipfile
             from pathlib import Path
             out=Path("sandium-output")
@@ -1161,7 +1161,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
               exit 23
             fi
-            python3 - \<<'PY'
+            python3 - <<'PY'
             import hashlib, json, zipfile
             from pathlib import Path
             out=Path("sandium-output")
