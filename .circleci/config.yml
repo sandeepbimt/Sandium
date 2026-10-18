@@ -109,14 +109,54 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-
+            - sandium-apk-v1-{{ .Branch }}-{{ .Revision }}-chromium-156.0.8078.39-android-debug-arm64-
       - run:
-          name: Validate reusable, already-verified APK before doing any build work
+          name: Verify reusable APK artifact without checking out Brave source
           command: |
             set -euo pipefail
-            mkdir -p sandium-output
-            if python3 src/brave/ci/siso/build_state.py check --mode artifact-cache --commit "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}"; then
-              echo "VERIFIED_APK_CACHE=HIT"
+            if python3 - "${CIRCLE_SHA1:?CIRCLE_SHA1 is required}" \<<'PY'
+            import hashlib, json, re, sys, zipfile
+            from pathlib import Path
+            output=Path("sandium-output")
+            apk=output/"Brave-debug-arm64.apk"
+            try:
+                state=json.loads((output/"build-state.json").read_text())
+                manifest=json.loads((output/"build-manifest.json").read_text())
+            except (OSError, json.JSONDecodeError):
+                raise SystemExit("Cached APK metadata is missing")
+            expected_commit=sys.argv[1]
+            if state.get("source_commit") != expected_commit or manifest.get("source_commit") != expected_commit:
+                raise SystemExit("Cached APK was built from a different source revision")
+            if state.get("target") != "android-arm64-debug-apk" or state.get("build_config") != "Debug":
+                raise SystemExit("Cached APK target/config mismatch")
+            if state.get("compile_complete") is not True or state.get("artifact_verified") is not True:
+                raise SystemExit("Cached APK state is not marked complete and verified")
+            if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS" or manifest.get("apk_zip_integrity") != "PASS":
+                raise SystemExit("Cached APK lacks successful signature/integrity evidence")
+            if not apk.is_file() or apk.stat().st_size < 1_000_000:
+                raise SystemExit("Cached APK is absent or unexpectedly small")
+            digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+            size=apk.stat().st_size
+            if digest != state.get("apk_sha256") or digest != manifest.get("apk_sha256") or size != state.get("apk_bytes") or size != manifest.get("apk_bytes"):
+                raise SystemExit("Cached APK does not match its SHA-256/size records")
+            with zipfile.ZipFile(apk) as archive:
+                if archive.testzip() is not None:
+                    raise SystemExit("Cached APK ZIP CRC integrity failed")
+                names=set(archive.namelist())
+                if "AndroidManifest.xml" not in names or not any(n.startswith("classes") and n.endswith(".dex") for n in names):
+                    raise SystemExit("Cached APK lacks Android manifest or DEX")
+            badging=(output/"apk-badging.txt").read_text()
+            match=re.search(r"^package: name='([^']+)'", badging, re.M)
+            if not match or match.group(1) != manifest.get("app_package_name"):
+                raise SystemExit("Cached APK package metadata mismatch")
+            if not (output/"apksigner-verify.txt").is_file() or not (output/"sha256.txt").is_file():
+                raise SystemExit("Cached APK handover evidence is incomplete")
+            if manifest.get("build_input_fingerprint") != state.get("build_input_fingerprint"):
+                raise SystemExit("Cached APK build-input fingerprint mismatch")
+            print("VERIFIED_APK_CACHE=HIT")
+            print("APK_SHA256="+digest)
+            PY
+            then
               echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=true' >> "$BASH_ENV"
             else
               echo "VERIFIED_APK_CACHE=MISS"
@@ -124,6 +164,7 @@ commands:
               mkdir -p sandium-output
               echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=false' >> "$BASH_ENV"
             fi
+
 
   install-sandium-android-build-deps:
     steps:
@@ -381,7 +422,7 @@ jobs:
           paths:
             - src/brave/src/out/android_Debug_arm64
       - save_cache:
-          key: sandium-apk-v1-{{ .Branch }}-chromium-156.0.8078.39-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-apk-v1-{{ .Branch }}-{{ .Revision }}-chromium-156.0.8078.39-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - sandium-output
       - store_artifacts:
