@@ -18,6 +18,8 @@ BEGIN_MARKER = "# BEGIN SANDIUM BUILDBUDDY RUNTIME CONFIG"
 END_MARKER = "# END SANDIUM BUILDBUDDY RUNTIME CONFIG"
 EXPECTED_ADDRESS = "remote.buildbuddy.io:443"
 BACKEND_CONFIG_RELATIVE = Path("ci/siso/buildbuddy_backend.star")
+CHROMIUM_PIN_RELATIVE = Path("ci/pins/chromium-tag.txt")
+CHROMIUM_TAG_PATTERN = re.compile(r"^\\d+\\.\\d+\\.\\d+\\.\\d+$")
 
 
 def validate_instance(instance: str) -> None:
@@ -32,6 +34,26 @@ def validate_instance(instance: str) -> None:
         raise ValueError("SANDIUM_REAPI_INSTANCE contains an unsafe path component")
 
 
+def read_manual_chromium_tag(core_dir: Path) -> str:
+    """Read the explicitly approved Chromium source tag for Sandium."""
+    pin_path = core_dir / CHROMIUM_PIN_RELATIVE
+    if not pin_path.is_file():
+        raise FileNotFoundError(
+            f"Manual Chromium pin file is missing: {pin_path}"
+        )
+    tags = [
+        line.strip()
+        for line in pin_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if len(tags) != 1 or not CHROMIUM_TAG_PATTERN.fullmatch(tags[0]):
+        raise ValueError(
+            f"Manual Chromium pin must contain exactly one four-part numeric "
+            f"tag in {pin_path}"
+        )
+    return tags[0]
+
+
 def render_block(core_dir: Path, address: str, instance: str) -> str:
     if address != EXPECTED_ADDRESS:
         raise ValueError(
@@ -39,6 +61,7 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
             + EXPECTED_ADDRESS
         )
     validate_instance(instance)
+    chromium_tag = read_manual_chromium_tag(core_dir)
 
     helper_path = (core_dir / "ci/siso/buildbuddy-credential-helper.py").resolve()
     if not helper_path.is_file():
@@ -56,6 +79,7 @@ def render_block(core_dir: Path, address: str, instance: str) -> str:
         f"projects_chrome_custom_vars_reapi_instance={instance}",
         f"projects_chrome_custom_vars_reapi_backend_config_path={backend_path}",
         f"projects_chrome_custom_vars_reapi_credential_helper={helper_path}",
+        f"projects_chrome_tag={chromium_tag}",
         "siso_use_googlechrome_config=false",
         "use_remoteexec=false",
         END_MARKER,
