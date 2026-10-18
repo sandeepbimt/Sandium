@@ -61,31 +61,25 @@ def _chromium_version() -> str:
 
 
 def _gn_fingerprint() -> str:
+    # GN's args.gn is the actual input generated and read by Brave's GN helper.
+    # Do not depend on args_generated.gni, which is not a standard GN output.
     args_file = OUTPUT_DIR / "args.gn"
-    generated_file = OUTPUT_DIR / "args_generated.gni"
-    for path in (args_file, generated_file):
-        if not path.is_file() or path.stat().st_size == 0:
-            raise StateError(f"Required GN argument file missing or empty: {path}")
+    if not args_file.is_file() or args_file.stat().st_size == 0:
+        raise StateError(f"Required GN arguments missing or empty: {args_file}")
 
-    generated = generated_file.read_text(encoding="utf-8")
+    arguments = args_file.read_text(encoding="utf-8")
     expected_flags = {
         "use_remoteexec": "true",
         "use_siso": "true",
         "use_reclient": "false",
     }
     for name, value in expected_flags.items():
-        if not re.search(rf"(?m)^\s*{re.escape(name)}\s*=\s*{value}\s*$", generated):
+        if not re.search(rf"(?m)^\s*{re.escape(name)}\s*=\s*{value}\s*$", arguments):
             raise StateError(
-                f"Effective generated GN arguments must contain {name}={value}"
+                f"Effective GN args.gn must contain {name}={value}"
             )
 
-    digest = hashlib.sha256()
-    for path in (args_file, generated_file):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+    return hashlib.sha256(args_file.read_bytes()).hexdigest()
 
 
 def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
