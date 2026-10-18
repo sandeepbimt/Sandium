@@ -97,7 +97,7 @@ class RuntimeConfigTests(unittest.TestCase):
         (self.core / "ci/pins").mkdir(parents=True)
         self.pin_path = self.core / "ci/pins/chromium-tag.txt"
         self.pin_path.write_text(
-            "# Manual Sandium Chromium pin\\n156.0.8078.39\\n",
+            "# Manual Sandium Chromium pin\n156.0.8078.39\n",
             encoding="utf-8",
         )
         shutil.copy2(HELPER, self.core / "ci/siso/buildbuddy-credential-helper.py")
@@ -157,7 +157,7 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertFalse((self.core / ".env").exists())
 
     def test_manual_chromium_pin_is_required_and_must_be_numeric(self):
-        self.pin_path.write_text("# manual\\nnot-a-tag\\n", encoding="utf-8")
+        self.pin_path.write_text("# manual\nnot-a-tag\n", encoding="utf-8")
         with self.assertRaises(ValueError):
             writer.apply_config(self.core, self.make_env())
 
