@@ -133,20 +133,20 @@ def _build_input_fingerprint() -> str:
     excluded_exact = {"docs/SANDIUM_PERSISTENT_CACHE_IMPLEMENTATION.md"}
     excluded_prefixes = (".circleci/", ".github/", "ci/siso/", "tests/ci/")
     digest = hashlib.sha256()
-    for record in entries.split(b"\\0"):
+    for record in entries.split(b"\0"):
         if not record:
             continue
         try:
-            metadata, raw_path = record.split(b"\\t", 1)
+            metadata, raw_path = record.split(b"\t", 1)
             path = raw_path.decode("utf-8", errors="strict")
         except (ValueError, UnicodeDecodeError) as exc:
             raise StateError("Unexpected git ls-tree record while fingerprinting build inputs") from exc
         if path in excluded_exact or path.startswith(excluded_prefixes):
             continue
         digest.update(metadata)
-        digest.update(b"\\t")
+        digest.update(b"\t")
         digest.update(raw_path)
-        digest.update(b"\\0")
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
