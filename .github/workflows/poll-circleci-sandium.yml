@@ -23,43 +23,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${CIRCLECI_TOKEN:?Missing GitHub Actions secret CIRCLECI_TOKEN}"
+          if [[ -z "$CIRCLECI_TOKEN" ]]; then
+            echo "CIRCLECI_TOKEN is missing"
+            exit 1
+          fi
           mkdir -p circleci-status
-          curl --fail --silent --show-error \
-            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
-            "https://circleci.com/api/v2/pipeline/${PIPELINE_ID}" \
-            -o circleci-status/pipeline.json
-          curl --fail --silent --show-error \
-            --header "Circle-Token: ${CIRCLECI_TOKEN}" \
-            "https://circleci.com/api/v2/pipeline/${PIPELINE_ID}/workflow" \
-            -o circleci-status/workflows.json
+          curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+            "https://circleci.com/api/v2/pipeline/$PIPELINE_ID" -o circleci-status/pipeline.json
+          curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+            "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow" -o circleci-status/workflows.json
           echo "=== CIRCLECI PIPELINE ==="
-          jq '{id,number,state,created_at,trigger,project_slug,errors}' circleci-status/pipeline.json
+          jq '{id,number,state,created_at,trigger,project_slug,errors,vcs}' circleci-status/pipeline.json
           echo "=== CIRCLECI WORKFLOWS ==="
           jq -r '.items[]? | [.id,.name,.status,.created_at,.stopped_at] | @tsv' circleci-status/workflows.json | tee circleci-status/workflow-summary.tsv
-          while IFS=          echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
-      - name: Save inspection results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: circleci-pipeline-11-status
-          path: circleci-status/
-          if-no-files-found: ignore
-\t' read -r workflow_id workflow_name status created stopped; do
-            [[ -n "${workflow_id:-}" ]] || continue
-            curl --fail --silent --show-error \
-              --header "Circle-Token: ${CIRCLECI_TOKEN}" \
-              "https://circleci.com/api/v2/workflow/${workflow_id}/job" \
-              -o "circleci-status/jobs-${workflow_id}.json"
-            echo "=== JOBS: ${workflow_name} (${status}) ==="
-            jq -r '.items[]? | [.name,.status,(.job_number|tostring),(.started_at//""),(.stopped_at//"")] | @tsv' "circleci-status/jobs-${workflow_id}.json"
-            jq -r '.items[]? | .job_number // empty' "circleci-status/jobs-${workflow_id}.json" | while read -r job_number; do
-              curl --fail --silent --show-error \
-                --header "Circle-Token: ${CIRCLECI_TOKEN}" \
-                "https://circleci.com/api/v2/project/${CIRCLECI_PROJECT_SLUG}/${job_number}/steps" \
-                -o "circleci-status/steps-${job_number}.json"
-              echo "=== STEPS: CircleCI job ${job_number} ==="
-              jq -r '.. | objects | select((.name? != null) and (.status? != null)) | [.name,.status] | @tsv' "circleci-status/steps-${job_number}.json" | sort -u
+          while IFS="$(printf '\t')" read -r workflow_id workflow_name workflow_status created stopped; do
+            if [[ -z "$workflow_id" ]]; then
+              continue
+            fi
+            curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+              "https://circleci.com/api/v2/workflow/$workflow_id/job" \
+              -o "circleci-status/jobs-$workflow_id.json"
+            echo "=== JOBS: $workflow_name ($workflow_status) ==="
+            jq -r '.items[]? | [.name,.status,(.job_number|tostring),(.started_at//""),(.stopped_at//"")] | @tsv' "circleci-status/jobs-$workflow_id.json"
+            jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
+              curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" \
+                "https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG/$job_number/steps" \
+                -o "circleci-status/steps-$job_number.json"
+              echo "=== STEPS: CircleCI job $job_number ==="
+              jq -r '.. | objects | select((.name? != null) and (.status? != null)) | [.name,.status] | @tsv' "circleci-status/steps-$job_number.json" | sort -u
             done
           done < circleci-status/workflow-summary.tsv
           echo "NO_NEW_CIRCLECI_PIPELINE_TRIGGERED=true"
@@ -67,6 +58,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: circleci-pipeline-10-status
+          name: circleci-pipeline-11-status
           path: circleci-status/
           if-no-files-found: ignore
