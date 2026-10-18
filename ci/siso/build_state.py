@@ -23,7 +23,7 @@ CHROMIUM_DIR = CORE_DIR.parent
 OUTPUT_DIR = CHROMIUM_DIR / "out" / "android_Debug_arm64"
 STATE_FILE = OUTPUT_DIR / ".sandium-build-state.json"
 APK_FILE = OUTPUT_DIR / "apks" / "Bravearm64.apk"
-PINNED_CHROMIUM_VERSION = "156.1.100.0"
+CHROMIUM_TAG_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 TARGET = "android-arm64-debug-apk"
 STATS_PATTERN = re.compile(
     r"local:(\d+)\s+remote:(\d+)\s+cache:(\d+)\s+"
@@ -49,17 +49,23 @@ def _git_head(path: Path) -> str:
 
 
 def _chromium_version() -> str:
-    version_file = CHROMIUM_DIR / "chrome" / "VERSION"
-    if not version_file.is_file():
-        raise StateError(f"Chromium version file missing: {version_file}")
-    values = dict(
-        re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_file.read_text(), re.M)
-    )
-    if set(values) != {"MAJOR", "MINOR", "BUILD", "PATCH"}:
-        raise StateError(f"Could not parse Chromium version from {version_file}")
-    return ".".join(values[key] for key in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+    """Return the version of the synced Chromium checkout, not Brave's pre-sync declaration.
 
-
+    Brave's sync process may update the Chromium checkout independently of the
+    initial package.json tag. The exact tag on the synced source commit is the
+    build/cache identity; chrome/VERSION can be rewritten by downstream patches.
+    """
+    try:
+        version = subprocess.check_output(
+            ["git", "-C", str(CHROMIUM_DIR), "describe", "--tags", "--exact-match", "HEAD"],
+            text=True,
+            stderr=subprocess.PIPE,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise StateError(f"Cannot identify the synced Chromium source tag: {exc}") from exc
+    if not CHROMIUM_TAG_PATTERN.fullmatch(version):
+        raise StateError(f"Chromium source tag is not a four-part numeric version: {version!r}")
+    return version
 def _gn_fingerprint() -> str:
     # GN's args.gn is the actual input generated and read by Brave's GN helper.
     # Do not depend on args_generated.gni, which is not a standard GN output.
@@ -160,10 +166,6 @@ def _context(expected_commit: str | None = None) -> dict[str, Any]:
 
     chromium_commit = _git_head(CHROMIUM_DIR)
     chromium_version = _chromium_version()
-    if chromium_version != PINNED_CHROMIUM_VERSION:
-        raise StateError(
-            f"Expected Chromium {PINNED_CHROMIUM_VERSION}, found {chromium_version}"
-        )
     return {
         "schema": 1,
         "source_commit": source_commit,
@@ -206,13 +208,6 @@ def _valid_artifact_cache(expected_commit: str | None) -> dict[str, Any]:
     if expected_commit and _git_head(CORE_DIR) != expected_commit:
         raise StateError("Checked-out Brave Core SHA does not match CIRCLE_SHA1")
 
-    package_path = CORE_DIR / "package.json"
-    try:
-        package = json.loads(package_path.read_text(encoding="utf-8"))
-        pinned_version = package["config"]["projects"]["chrome"]["tag"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise StateError(f"Cannot read pinned Chromium tag from package.json: {exc}") from exc
-
     project_dir = CORE_DIR.parent.parent
     output_dir = project_dir / "sandium-output"
     state_path = output_dir / "build-state.json"
@@ -226,15 +221,22 @@ def _valid_artifact_cache(expected_commit: str | None) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise StateError(f"Packaged APK cache metadata is missing or invalid: {exc}") from exc
 
+    state_version = state.get("chromium_version")
+    manifest_version = manifest.get("chromium_version")
+    if (
+        not isinstance(state_version, str)
+        or not CHROMIUM_TAG_PATTERN.fullmatch(state_version)
+        or state_version != manifest_version
+    ):
+        raise StateError("Packaged APK cache has missing or inconsistent synced Chromium version metadata")
     expected = {
         "schema": 1,
         "target": TARGET,
         "build_config": "Debug",
-        "chromium_version": pinned_version,
         "build_input_fingerprint": _build_input_fingerprint(),
     }
     if any(state.get(key) != value for key, value in expected.items()):
-        raise StateError("Packaged APK cache does not match current browser inputs and Chromium pin")
+        raise StateError("Packaged APK cache does not match current browser inputs and Chromium build metadata")
     if state.get("compile_complete") is not True or state.get("artifact_verified") is not True:
         raise StateError("Packaged APK cache is not marked complete and verified")
 

@@ -20,7 +20,7 @@ BUILD_STATE_TOOL = CORE_DIR / "ci" / "siso" / "build_state.py"
 OUT_DIR = CORE_DIR.parent / "out" / "android_Debug_arm64"
 APK_SOURCE = OUT_DIR / "apks" / "Bravearm64.apk"
 STATE_SOURCE = OUT_DIR / ".sandium-build-state.json"
-CHROMIUM_VERSION_PIN = "156.1.100.0"
+CHROMIUM_TAG_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 TARGET = "android-arm64-debug-apk"
 OUTPUT_DIR = PROJECT_DIR / "sandium-output"
 APK_DEST = OUTPUT_DIR / "Brave-debug-arm64.apk"
@@ -58,16 +58,19 @@ def find_tool(name: str) -> Path:
 
 
 def parse_chromium_version() -> str:
-    version_file = CORE_DIR.parent / "chrome" / "VERSION"
-    if not version_file.is_file():
-        raise PackageError(f"Chromium VERSION file missing: {version_file}")
-    fields = dict(re.findall(r"^(MAJOR|MINOR|BUILD|PATCH)=(\d+)$", version_file.read_text(), re.M))
-    if set(fields) != {"MAJOR", "MINOR", "BUILD", "PATCH"}:
-        raise PackageError("Could not parse Chromium VERSION file")
-    return ".".join(fields[key] for key in ("MAJOR", "MINOR", "BUILD", "PATCH"))
-
-
-def load_state() -> dict[str, Any]:
+    """Read the exact tag on the synced Chromium source commit."""
+    try:
+        version = subprocess.check_output(
+            ["git", "-C", str(CORE_DIR.parent), "describe", "--tags", "--exact-match", "HEAD"],
+            text=True,
+            stderr=subprocess.PIPE,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise PackageError(f"Cannot identify the synced Chromium source tag: {exc}") from exc
+    if not CHROMIUM_TAG_PATTERN.fullmatch(version):
+        raise PackageError(f"Chromium source tag is not a four-part numeric version: {version!r}")
+    return version
+def load_state(chromium_version: str) -> dict[str, Any]:
     try:
         state = json.loads(STATE_SOURCE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -76,8 +79,8 @@ def load_state() -> dict[str, Any]:
         raise PackageError("Compile-state record must be a JSON object")
     if state.get("schema") != 1 or state.get("target") != TARGET:
         raise PackageError("Compile-state record is for an unsupported target")
-    if state.get("chromium_version") != CHROMIUM_VERSION_PIN:
-        raise PackageError("Compile-state record has an unexpected Chromium version")
+    if state.get("chromium_version") != chromium_version:
+        raise PackageError("Compile-state record does not match the synced Chromium source tag")
     if not state.get("build_input_fingerprint") or not state.get("gn_args_sha256"):
         raise PackageError("Compile-state record lacks source/GN fingerprints")
     return state
@@ -102,12 +105,7 @@ def package(commit: str, stage: str) -> dict[str, Any]:
     if not APK_SOURCE.is_file() or APK_SOURCE.stat().st_size < 1_000_000:
         raise PackageError(f"Expected complete APK not present at {APK_SOURCE}")
     chromium_version = parse_chromium_version()
-    if chromium_version != CHROMIUM_VERSION_PIN:
-        raise PackageError(
-            f"Expected Chromium {CHROMIUM_VERSION_PIN}, found {chromium_version}"
-        )
-
-    state = load_state()
+    state = load_state(chromium_version)
     # A CI-only commit may change CIRCLE_SHA1 without changing browser build inputs.
     # Require the live Git checkout to match this run and compare the actual
     # build-input/GN fingerprints instead of rejecting reusable Chromium output.
