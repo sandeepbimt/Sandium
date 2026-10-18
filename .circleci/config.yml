@@ -627,7 +627,7 @@ jobs:
           name: Independently verify the cached APK before publishing
           command: |
             set -euo pipefail
-            python3 - <<'PY'
+            python3 - \<<'PY'
             import hashlib, json, zipfile
             from pathlib import Path
             out=Path("sandium-output")
