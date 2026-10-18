@@ -194,4 +194,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m unittest -v tests.ci.test_siso_buildbuddy_config tests.ci.test_siso_build_state
+          python3 tests/ci/test_siso_buildbuddy_config.py
+          python3 tests/ci/test_siso_build_state.py
