@@ -147,6 +147,11 @@ commands:
                 raise SystemExit("Cached APK was built from a different source revision")
             if state.get("target") != "android-arm64-debug-apk" or state.get("build_config") != "Debug":
                 raise SystemExit("Cached APK target/config mismatch")
+            chromium_version = state.get("chromium_version")
+            if not isinstance(chromium_version, str) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", chromium_version):
+                raise SystemExit("Cached APK lacks a valid resolved Chromium source tag")
+            if manifest.get("chromium_version") != chromium_version:
+                raise SystemExit("Cached APK manifest/state Chromium tags disagree")
             if state.get("compile_complete") is not True or state.get("artifact_verified") is not True:
                 raise SystemExit("Cached APK state is not marked complete and verified")
             if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS" or manifest.get("apk_zip_integrity") != "PASS":
