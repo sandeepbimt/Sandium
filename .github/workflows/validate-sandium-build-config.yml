@@ -10,6 +10,8 @@ on:
       - ".github/workflows/validate-sandium-build-config.yml"
       - "ci/siso/**"
       - "tests/ci/**"
+      - "build/commands/lib/build.ts"
+      - "build/commands/lib/util.ts"
 
 permissions:
   contents: read
@@ -157,6 +159,18 @@ jobs:
           package_source = Path("ci/siso/package_apk.py").read_text()
           if '--exact-match' not in state_source or '--exact-match' not in package_source:
               raise SystemExit("Build-state and APK verification must use the synced Chromium source tag")
+          build_impl = Path("build/commands/lib/build.ts").read_text()
+          util_impl = Path("build/commands/lib/util.ts").read_text()
+          for phase in ("touch-overridden-chromium-files", "update-branding", "generate-ninja-files", "build-targets-siso-autoninja"):
+              if phase not in build_impl:
+                  raise SystemExit(f"Missing phase-level build diagnostics: {phase}")
+          if "SANDIUM_BUILD_PHASE_FAILED=" not in build_impl:
+              raise SystemExit("Build-phase failure details are not logged")
+          delete_helper = util_impl.split("function deleteFileIfOverrideIsNewer(", 1)[1].split("\\nfunction getAdditionalGenLocation()", 1)[0]
+          if "process.exit(1)" in delete_helper or "Unable to remove stale generated output" not in delete_helper:
+              raise SystemExit("Stale generated-output cleanup can still exit without preserving the error")
+          if "fs.rmSync(original, { recursive: true, force: true })" not in delete_helper:
+              raise SystemExit("Stale generated-output directories are not safely removed")
           if "src/brave/src" in raw:
               raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
           if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
