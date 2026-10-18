@@ -163,6 +163,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", required=True, type=Path)
     parser.add_argument(
+        "--require-reusable",
+        action="store_true",
+        help="Fail closed unless the restored Chromium source exactly matches the manual pin and cache manifest",
+    )
+    parser.add_argument(
         "--core",
         type=Path,
         default=Path(__file__).resolve().parents[2],
@@ -170,10 +175,16 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        prepare_reuse(args.workspace, args.core)
+        reusable = prepare_reuse(args.workspace, args.core)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print("CHROMIUM_PIN_POLICY_ERROR=" + str(exc), file=sys.stderr)
         return 2
+    if args.require_reusable and not reusable:
+        print(
+            "CHROMIUM_REUSE_REQUIRED_FAILED=true; refusing to run Brave dependency sync because it could refresh Chromium",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 
