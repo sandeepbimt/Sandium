@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import hashlib
+import zipfile
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
@@ -26,10 +28,15 @@ spec.loader.exec_module(state_module)
 class BuildStateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name) / "brave-core"
+        self.project = Path(self.temp.name) / "project"
+        self.root = self.project / "src" / "brave-core"
         self.chromium = self.root / "src"
         self.out = self.chromium / "out" / "android_Debug_arm64"
         (self.chromium / "chrome").mkdir(parents=True)
+        (self.root / "package.json").write_text(
+            json.dumps({"config": {"projects": {"chrome": {"tag": "156.0.8078.39"}}}}),
+            encoding="utf-8",
+        )
         (self.chromium / "chrome" / "VERSION").write_text(
             "MAJOR=156\nMINOR=0\nBUILD=8078\nPATCH=39\n",
             encoding="utf-8",
@@ -132,6 +139,53 @@ class BuildStateTests(unittest.TestCase):
         state = json.loads(self.state_file.read_text(encoding="utf-8"))
         self.assertTrue(state["artifact_verified"])
         self.assertFalse(state["remote_backend_proven"])
+
+    def test_artifact_cache_reuses_only_a_verified_matching_apk(self):
+        output = self.project / "sandium-output"
+        output.mkdir(parents=True)
+        apk = output / "Brave-debug-arm64.apk"
+        with zipfile.ZipFile(apk, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("AndroidManifest.xml", b"manifest")
+            archive.writestr("classes.dex", b"D" * 1_100_000)
+
+        digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+        size = apk.stat().st_size
+        fingerprint = state_module._build_input_fingerprint()
+        state = {
+            "schema": 1,
+            "target": state_module.TARGET,
+            "build_config": "Debug",
+            "chromium_version": "156.0.8078.39",
+            "build_input_fingerprint": fingerprint,
+            "compile_complete": True,
+            "artifact_verified": True,
+            "apk_sha256": digest,
+            "apk_bytes": size,
+        }
+        manifest = {
+            "apk_sha256": digest,
+            "apk_bytes": size,
+            "artifact_verified": True,
+            "apk_zip_integrity": "PASS",
+            "dalvik_bytecode_present": True,
+            "apksigner_verification": "PASS",
+            "build_input_fingerprint": fingerprint,
+            "app_package_name": "com.brave.browser",
+        }
+        (output / "build-state.json").write_text(json.dumps(state), encoding="utf-8")
+        (output / "build-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (output / "apk-badging.txt").write_text(
+            "package: name='com.brave.browser' versionCode='1' versionName='1.0'\n",
+            encoding="utf-8",
+        )
+        (output / "apksigner-verify.txt").write_text("Verified using v2 scheme: true\n", encoding="utf-8")
+
+        cached = state_module._valid_artifact_cache(self.commit)
+        self.assertTrue(cached["artifact_verified"])
+
+        apk.write_bytes(apk.read_bytes() + b"tamper")
+        with self.assertRaises(state_module.StateError):
+            state_module._valid_artifact_cache(self.commit)
 
     def test_required_gn_flags_are_checked_in_generated_file(self):
         (self.out / "args_generated.gni").write_text(
