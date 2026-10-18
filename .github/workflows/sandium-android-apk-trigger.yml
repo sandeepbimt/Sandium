@@ -2,7 +2,7 @@ name: Sandium Android Debug APK Build Trigger
 # Trigger only after validated five-stage persistent-cache config and helpers are staged.
 # Requires GitHub Actions secret CIRCLECI_TOKEN and CircleCI BUILDBUDDY_API_KEY context.
 # The CircleCI pipeline is the source of truth for build success and APK publication.
-# Trigger one five-stage APK run after Stage 2 TypeScript syntax fix and pre-compile validation.
+# Trigger one fresh five-stage APK run after the Reproxy/Siso cache guard and source-level cleanup validation.
 
 on:
   push:
