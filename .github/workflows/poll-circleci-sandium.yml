@@ -58,9 +58,13 @@ jobs:
                   "circleci-status/legacy-job-$job_number.json" > "circleci-status/output-urls-$job_number.tsv"
                 while IFS="$(printf '\t')" read -r step_index step_name output_url; do
                   [[ -n "$output_url" ]] || continue
-                  curl --fail --silent --show-error "$output_url" -o "circleci-status/step-$job_number-$step_index.json"
-                  echo "=== LAST LOG LINES: job $job_number step $step_index ($step_name) ==="
-                  jq -r '.[].message // empty' "circleci-status/step-$job_number-$step_index.json" | tail -n 20
+                  if curl --fail --silent --show-error "$output_url" -o "circleci-status/step-$job_number-$step_index.json"; then
+                    echo "=== LAST LOG LINES: job $job_number step $step_index ($step_name) ==="
+                    jq -r '.[].message // empty' "circleci-status/step-$job_number-$step_index.json" | tail -n 20
+                  else
+                    echo "LOG_OUTPUT_UNAVAILABLE: job=$job_number step=$step_index name=$step_name; continuing to collect remaining pipeline state."
+                    continue
+                  fi
                 done < "circleci-status/output-urls-$job_number.tsv"
               else
                 echo "Legacy log endpoint unavailable for CircleCI job $job_number"
@@ -72,6 +76,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: circleci-pipeline-11-status
+          name: circleci-pipeline-11-status-${{ github.run_id }}-${{ github.run_attempt }}
           path: circleci-status/
           if-no-files-found: ignore
