@@ -7,6 +7,8 @@ on:
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-sandium-five-stage-ci.yml"
+      - "ci/siso/**"
+      - "tests/ci/**"
 
 permissions:
   contents: read
