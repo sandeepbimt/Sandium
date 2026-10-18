@@ -161,8 +161,8 @@ jobs:
           config_source = Path("build/commands/lib/config.ts").read_text()
           sync_source = Path("build/commands/lib/syncUtils.ts").read_text()
           pin_helper = Path("ci/siso/chromium_pin.py").read_text()
-          if "sandium_chromium_tag={chromium_tag}" not in writer_source or "getString(['sandium_chromium_tag'])" not in config_source:
-              raise SystemExit("Manual Chromium pin is not overriding Brave package metadata")
+          if "sandium_chromium_tag={chromium_tag}" not in writer_source or config_source.count("getString(['sandium_chromium_tag'])") < 2 or config_source.count("return manualChromiumTag") != 1:
+              raise SystemExit("Manual Chromium pin is not controlling both the reported version and actual source reference")
           if "gclientTimestamp" in sync_source or "gclientHash: getGclientConfigHash()" not in sync_source:
               raise SystemExit("Chromium sync decision must hash gclient content rather than unstable mtimes")
           if "MIGRATED_TIMESTAMP_TO_CONTENT_HASH" not in pin_helper or "SOURCE_CACHE_FINGERPRINT=PASS" not in pin_helper:
