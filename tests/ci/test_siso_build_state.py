@@ -38,7 +38,7 @@ class BuildStateTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.chromium / "chrome" / "VERSION").write_text(
-            "MAJOR=156\nMINOR=1\nBUILD=100\nPATCH=0\n",
+            "MAJOR=1\nMINOR=100\nBUILD=10\nPATCH=0\n",
             encoding="utf-8",
         )
         self._git_init(self.root)
@@ -89,6 +89,9 @@ class BuildStateTests(unittest.TestCase):
                 log=log,
             )
         )
+
+    def test_chromium_identity_uses_synced_git_tag_not_declared_package_tag_or_VERSION(self):
+        self.assertEqual(state_module._chromium_version(), "156.1.100.0")
 
     def test_compiled_state_requires_exact_source_and_apk_hash(self):
         with contextlib.redirect_stdout(io.StringIO()):
