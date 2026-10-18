@@ -118,6 +118,20 @@ commands:
               rm -rf "$OUT"
             fi
 
+  restore-sandium-siso-cache:
+    steps:
+      - restore_cache:
+          keys:
+            - sandium-siso-v1-{{ .Branch }}-android-debug-arm64-
+      - run:
+          name: Validate persistent Siso local action cache
+          command: |
+            set -euo pipefail
+            mkdir -p sandium-siso-cache
+            du -sb sandium-siso-cache | awk '{print "SISO_LOCAL_CACHE_BYTES=" $1}'
+            echo "SISO_LOCAL_CACHE_DIRECTORY=$HOME/project/sandium-siso-cache"
+            echo "SISO_LOCAL_CACHE_RESTORE_COMPLETED=true"
+
   restore-sandium-pnpm-cache:
     steps:
       - restore_cache:
@@ -210,6 +224,8 @@ commands:
             : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
             export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
+            export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
+            export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             cd src/brave
             python3 ci/siso/write_buildbuddy_env.py
             if grep -Fq "$BUILDBUDDY_API_KEY" .env; then
@@ -221,8 +237,15 @@ commands:
             grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
             grep -Fxq 'projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci' src/brave/.env
             grep -Fxq 'use_remoteexec=false' src/brave/.env
+            grep -Fxq "siso_cache_dir=$HOME/project/sandium-siso-cache" src/brave/.env
+            SISORC="$HOME/project/src/build/config/siso/.sisorc"
+            grep -Fq -- '-local_cache_enable' "$SISORC"
+            grep -Fq -- "-cache_dir \"$HOME/project/sandium-siso-cache\"" "$SISORC"
+            grep -Fq -- '-re_cache_enable_write=true' "$SISORC"
+            echo "SISO_LOCAL_CACHE_CONFIGURED=true"
+            echo "SISO_TRUSTED_REMOTE_CACHE_WRITE_CONFIGURED=true"
             echo "REMOTE_EXECUTION_CONFIGURED_FOR_SYNC_ONLY=true"
-            echo "REMOTE_EXECUTION_AND_CACHE_USAGE=REQUIRES_GENERATED_ARGS_AND_SISO_STATS"
+            echo "REMOTE_EXECUTION_AND_CACHE_USAGE=VERIFY_FROM_SISO_STATS"
 
 jobs:
   stage-1-source-foundation:
@@ -289,6 +312,8 @@ jobs:
             cd src/brave
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
             export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
+            export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
+            export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             python3 ci/siso/write_buildbuddy_env.py
             python3 ci/siso/chromium_pin.py --workspace "$HOME/project"
             set +e
@@ -439,6 +464,7 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
+      - restore-sandium-siso-cache
       - install-sandium-node
       - run:
           name: Validate committed Brave build failure diagnostics before compilation
@@ -513,6 +539,8 @@ jobs:
               exit 31
             fi
             echo "CHROMIUM_PIN_BEFORE_BRAVE_DEPS_SYNC=$before_tag"
+            export SANDIUM_SISO_CACHE_DIR="$ROOT/sandium-siso-cache"
+            export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             set +e
             # Chromium reuse is mandatory here. The explicit false flag makes Brave's
             # sync code skip the Chromium solution and sync only Brave's own DEPS
@@ -710,6 +738,10 @@ jobs:
             fi
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+      - save_cache:
+          key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
+          paths:
+            - sandium-siso-cache
       - run:
           name: Validate effective GN flags and checkpoint Stage-2 output
           command: |
@@ -787,6 +819,7 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
+      - restore-sandium-siso-cache
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
@@ -830,7 +863,7 @@ jobs:
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
             log="$HOME/project/build-diagnostics/compile-window-2.log"
             evidence="$HOME/project/build-diagnostics/compile-window-2-remote-cache-log-candidates.txt"
-            if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+            if grep -Eai 'local:[[:space:]]*[0-9]+[[:space:]]+remote:|remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
               echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
               grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
             else
@@ -839,6 +872,10 @@ jobs:
             fi
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+      - save_cache:
+          key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
+          paths:
+            - sandium-siso-cache
       - run:
           name: Checkpoint Stage-3 output and capture validated Siso statistics
           command: |
@@ -903,6 +940,7 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
+      - restore-sandium-siso-cache
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
@@ -980,6 +1018,10 @@ jobs:
             else
               echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
+      - save_cache:
+          key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
+          paths:
+            - sandium-siso-cache
       - save_cache:
           key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
@@ -1061,6 +1103,7 @@ jobs:
       - checkout:
           path: src/brave
       - restore-sandium-build-output
+      - restore-sandium-siso-cache
       - install-sandium-node
       - restore-sandium-pnpm-cache
       - run:
@@ -1136,6 +1179,10 @@ jobs:
             else
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
             fi
+      - save_cache:
+          key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
+          paths:
+            - sandium-siso-cache
       - save_cache:
           key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
