@@ -305,13 +305,14 @@ def command_record(args: argparse.Namespace) -> int:
                 apk_info.get("apk_sha256") is not None
                 and old.get("apk_sha256") == apk_info.get("apk_sha256")
             )
-            if same_chromium_and_args and same_apk:
+            if same_chromium_and_args:
                 old_metrics = {
                     key: int(old["remote_metrics"].get(key, 0))
                     for key in parsed_metrics
                 }
                 can_preserve_remote_proof = (
-                    old.get("artifact_verified") is True
+                    same_apk
+                    and old.get("artifact_verified") is True
                     and _remote_backend_proven(old_metrics)
                 )
 
@@ -338,13 +339,11 @@ def command_record(args: argparse.Namespace) -> int:
             "remote_metrics": metrics,
             "remote_backend_proven": _remote_backend_proven(metrics),
         }
-        if args.artifact_verified == "true" and not state["remote_backend_proven"]:
-            state["artifact_verified"] = False
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        if args.artifact_verified == "true" and (
+            not compile_complete or apk_info.get("apk_sha256") is None
+        ):
             raise StateError(
-                "No Siso statistics proved remote actions, remote-cache hits, "
-                "or remote cache writes. APK is not marked verified."
+                "Cannot mark the APK verified without a complete build and a real APK file."
             )
 
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
