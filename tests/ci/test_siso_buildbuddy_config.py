@@ -94,6 +94,12 @@ class RuntimeConfigTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.core = Path(self.temp.name) / "src" / "brave"
         (self.core / "ci/siso").mkdir(parents=True)
+        (self.core / "ci/pins").mkdir(parents=True)
+        self.pin_path = self.core / "ci/pins/chromium-tag.txt"
+        self.pin_path.write_text(
+            "# Manual Sandium Chromium pin\\n156.0.8078.39\\n",
+            encoding="utf-8",
+        )
         shutil.copy2(HELPER, self.core / "ci/siso/buildbuddy-credential-helper.py")
         shutil.copy2(BACKEND_PATH, self.core / "ci/siso/buildbuddy_backend.star")
 
@@ -123,6 +129,7 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertIn("projects_chrome_custom_vars_reapi_credential_helper=", content)
         self.assertIn("siso_use_googlechrome_config=false", content)
         self.assertIn("use_remoteexec=false", content)
+        self.assertIn("projects_chrome_tag=156.0.8078.39", content)
         self.assertNotIn("MUST-NEVER-BE-WRITTEN", content)
         mode = (self.core / "ci/siso/buildbuddy-credential-helper.py").stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
@@ -148,6 +155,11 @@ class RuntimeConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             writer.apply_config(self.core, self.make_env(address="https://evil.example"))
         self.assertFalse((self.core / ".env").exists())
+
+    def test_manual_chromium_pin_is_required_and_must_be_numeric(self):
+        self.pin_path.write_text("# manual\\nnot-a-tag\\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            writer.apply_config(self.core, self.make_env())
 
     def test_malformed_existing_block_is_rejected(self):
         env_file = self.core / ".env"
