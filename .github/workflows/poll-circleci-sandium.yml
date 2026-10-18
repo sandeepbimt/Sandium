@@ -76,7 +76,7 @@ jobs:
           done < circleci-status/workflow-summary.tsv
           # Download the actual compile-window log from CircleCI's job artifacts.
           # This inspection workflow does not trigger or rerun CircleCI builds.
-          while IFS="$(printf '\\t')" read -r workflow_id workflow_name workflow_status created stopped; do
+          while IFS="$(printf '\t')" read -r workflow_id workflow_name workflow_status created stopped; do
             [[ -n "$workflow_id" ]] || continue
             jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
               [[ -n "$job_number" ]] || continue
@@ -87,7 +87,7 @@ jobs:
                 continue
               fi
               jq -r '.items[]? | select(.path | test("compile-window-[1-4]\\.log$|fingerprint\\.json$|args\\.gn$|remote.*log"; "i")) | [.path,.url] | @tsv' "$artifact_json" |
-              while IFS="$(printf '\\t')" read -r artifact_path artifact_url; do
+              while IFS="$(printf '\t')" read -r artifact_path artifact_url; do
                 [[ -n "$artifact_url" ]] || continue
                 safe_name="$(basename "$artifact_path")"
                 target="circleci-status/job-$job_number-$safe_name"
