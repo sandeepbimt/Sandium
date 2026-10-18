@@ -61,10 +61,11 @@ commands:
                     raise ValueError("cached Chromium commit does not match the source manifest")
                 if manifest.get("version_file_sha256") != version_sha256:
                     raise ValueError("cached VERSION file hash does not match the source manifest")
-                if Path(".gclient").is_file():
-                    gclient_sha256 = hashlib.sha256(Path(".gclient").read_bytes()).hexdigest()
-                    if manifest.get("gclient_sha256") != gclient_sha256:
-                        raise ValueError("cached .gclient file does not match the source manifest")
+                if not Path(".gclient").is_file():
+                    raise ValueError("cached .gclient file is missing")
+                gclient_sha256 = hashlib.sha256(Path(".gclient").read_bytes()).hexdigest()
+                if manifest.get("gclient_sha256") != gclient_sha256:
+                    raise ValueError("cached .gclient file does not match the source manifest")
                 print("RESTORED_CHROMIUM_SOURCE_TAG=" + tag)
                 print("SOURCE_CACHE_FINGERPRINT=PASS")
             except Exception as exc:
