@@ -131,7 +131,11 @@ def apply_config(core_dir: Path, environ: Mapping[str, str]) -> Path:
     core_dir = core_dir.resolve()
     address = environ.get("SANDIUM_REAPI_ADDRESS", "")
     instance = environ.get("SANDIUM_REAPI_INSTANCE", "")
-    siso_cache_dir = environ.get("SANDIUM_SISO_CACHE_DIR", "")
+    # Default to a stable project-root path so every CircleCI job resolves
+    # the same cache even if a caller omits the explicit override.
+    siso_cache_dir = environ.get("SANDIUM_SISO_CACHE_DIR") or str(
+        core_dir.parents[1] / "sandium-siso-cache"
+    )
     block = render_block(core_dir, address, instance, siso_cache_dir)
 
     env_file = core_dir / ".env"
@@ -159,7 +163,7 @@ def main() -> int:
     print(f"SANDIUM_RUNTIME_ENV={env_file}")
     print(f"SANDIUM_REAPI_ADDRESS={os.environ['SANDIUM_REAPI_ADDRESS']}")
     print(f"SANDIUM_REAPI_INSTANCE={os.environ['SANDIUM_REAPI_INSTANCE']}")
-    print(f"SANDIUM_SISO_CACHE_DIR={os.environ['SANDIUM_SISO_CACHE_DIR']}")
+    print(f"SANDIUM_SISO_CACHE_DIR={os.environ.get('SANDIUM_SISO_CACHE_DIR') or (core_dir.parents[1] / 'sandium-siso-cache')}")
     print("SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=yes")
     print("SANDIUM_REMOTE_EXECUTION_ENABLED=no")
     return 0
