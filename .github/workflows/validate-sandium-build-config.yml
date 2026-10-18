@@ -171,6 +171,28 @@ jobs:
               raise SystemExit("Stage 1 does not run the offline manual-pin cache fast path")
           if '"manual_chromium_pin": tag' not in raw:
               raise SystemExit("Saved source-cache manifest does not record the approved manual Chromium pin")
+          deps_step = raw.find("name: Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")
+          prepare_step = raw.find("name: Prepare source overlay and branding before GN")
+          version_step = raw.find("name: Generate Brave version.gni prerequisite before GN")
+          compile_step = raw.find("name: Validate fingerprint, configure GN and compile window 1")
+          if not (0 <= deps_step < prepare_step < version_step < compile_step):
+              raise SystemExit("Stage 2 must sync Brave-owned DEPS/hooks and verify generated inputs before GN")
+          deps_block = raw[deps_step:prepare_step]
+          for required in (
+              "--require-reusable",
+              "--sync_chromium=false",
+              "SANDIUM_CHROMIUM_PIN_PRESERVATION=PASS",
+              "SANDIUM_GCLIENT_MANIFEST_MATCH=PASS",
+              "src/brave/vendor/bat-native-tweetnacl/BUILD.gn",
+              "src/brave/build/version.gni",
+          ):
+              if required not in deps_block and required != "src/brave/build/version.gni":
+                  raise SystemExit(f"Stage 2 Brave DEPS restoration is missing guard: {required}")
+          if "src/brave/build/version.gni" not in raw[version_step:compile_step]:
+              raise SystemExit("GN compile window is not preceded by a generated Brave version.gni validation")
+          pin_helper_source = Path("ci/siso/chromium_pin.py").read_text()
+          if '"--require-reusable"' not in pin_helper_source or "CHROMIUM_REUSE_REQUIRED_FAILED=true" not in pin_helper_source:
+              raise SystemExit("Stage 2 must fail closed instead of allowing an unintended Chromium refresh")
           if "PINNED_CHROMIUM_VERSION" in Path("ci/siso/build_state.py").read_text() or "CHROMIUM_VERSION_PIN" in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("A fixed Chromium version remains in a build-state or APK verification helper")
           if "156.1.100.0" in raw or "156.0.8078.39" in raw:
