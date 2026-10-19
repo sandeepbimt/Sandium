@@ -95,6 +95,32 @@ class BuildStateTests(unittest.TestCase):
     def test_chromium_identity_uses_synced_git_tag_not_declared_package_tag_or_VERSION(self):
         self.assertEqual(state_module._chromium_version(), "156.1.100.0")
 
+    def test_gn_fingerprint_accepts_brave_imported_generated_args(self):
+        # The real Brave wrapper puts CLI --gn assignments in args_generated.gni
+        # and args.gn imports it rather than repeating the assignments.
+        (self.out / "args.gn").write_text(
+            'import("//out/android_Debug_arm64/args_generated.gni")\\n',
+            encoding="utf-8",
+        )
+        (self.out / "args_generated.gni").write_text(
+            "use_siso = true\\nuse_reclient = false\\n",
+            encoding="utf-8",
+        )
+        fingerprint = state_module._gn_fingerprint()
+        self.assertRegex(fingerprint, r"^[0-9a-f]{64}$")
+
+    def test_gn_fingerprint_rejects_missing_siso_in_imported_generated_args(self):
+        (self.out / "args.gn").write_text(
+            'import("//out/android_Debug_arm64/args_generated.gni")\\n',
+            encoding="utf-8",
+        )
+        (self.out / "args_generated.gni").write_text(
+            "use_reclient = false\\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(state_module.StateError, "use_siso=true"):
+            state_module._gn_fingerprint()
+
     def test_compiled_state_requires_exact_source_and_apk_hash(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(self._record(), 0)
