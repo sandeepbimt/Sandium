@@ -208,7 +208,6 @@ def main() -> int:
     prior_frontier_path.touch(exist_ok=True)
 
     objects_before, outputs_before = count_outputs(out_dir)
-    log_lines: set[str] = set()
     current_frontier: set[str] = set()
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
@@ -220,9 +219,35 @@ def main() -> int:
     started = time.monotonic()
     siso_info = out_dir / "siso.INFO"
     try:
-        siso_info_before = siso_info.read_text(encoding="utf-8", errors="replace")
+        initial_info_stat = siso_info.stat()
+        siso_info_identity: tuple[int, int] | None = (initial_info_stat.st_dev, initial_info_stat.st_ino)
+        siso_info_offset = initial_info_stat.st_size
     except OSError:
-        siso_info_before = ""
+        siso_info_identity = None
+        siso_info_offset = 0
+
+    def read_new_siso_info() -> str:
+        nonlocal siso_info_identity, siso_info_offset
+        try:
+            info_stat = siso_info.stat()
+        except OSError:
+            return ""
+        identity = (info_stat.st_dev, info_stat.st_ino)
+        if identity != siso_info_identity or info_stat.st_size < siso_info_offset:
+            # Siso can rotate/truncate its info log on startup; consume the new
+            # file from offset zero, never reuse lines from the old checkpoint.
+            siso_info_identity = identity
+            siso_info_offset = 0
+        if info_stat.st_size <= siso_info_offset:
+            return ""
+        try:
+            with siso_info.open("r", encoding="utf-8", errors="replace") as stream:
+                stream.seek(siso_info_offset)
+                appended = stream.read()
+                siso_info_offset = stream.tell()
+                return appended
+        except OSError:
+            return ""
 
     with log_path.open("w", encoding="utf-8", errors="replace") as log:
         emit(log, f"SANDIUM_STAGE={args.stage}")
@@ -292,6 +317,8 @@ def main() -> int:
         eof = False
         last_activity = time.monotonic()
         child_exit_seen_at: float | None = None
+        last_info_poll = 0.0
+        remote_gate_pass_logged = False
 
         def process_text(text: str) -> None:
             nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity
@@ -311,7 +338,6 @@ def main() -> int:
             partial += text
             while "\n" in partial:
                 line, partial = partial.split("\n", 1)
-                log_lines.add(line)
                 match = PROGRESS_LINE.match(line.strip())
                 if match:
                     label = match.group(1).strip()
@@ -351,21 +377,18 @@ def main() -> int:
                             process_text(tail)
                             continue
                         process_text(decoder.decode(chunk))
-                try:
-                    info_text = siso_info.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    info_text = ""
-                if info_text:
-                    info_delta = info_text[len(siso_info_before):] if info_text.startswith(siso_info_before) else info_text
-                    if has_remote_signature(info_delta):
-                        remote_seen = True
+                if now - last_info_poll >= max(1, args.remote_gate_interval_seconds):
+                    info_delta = read_new_siso_info()
+                    last_info_poll = now
+                    if info_delta:
+                        if has_remote_signature(info_delta):
+                            remote_seen = True
                         for line in info_delta.splitlines():
                             if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
                                 remote_signatures.add(line.strip())
-                if remote_seen and not gate_failed and not regeneration_seen:
-                    if not any(line.startswith("EARLY_REMOTE_EXECUTION_GATE=PASS") for line in log_lines):
-                        emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS seconds={int(time.monotonic()-started)}")
-                        log_lines.add("EARLY_REMOTE_EXECUTION_GATE=PASS")
+                if remote_seen and not gate_failed and not regeneration_seen and not remote_gate_pass_logged:
+                    emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS seconds={int(time.monotonic()-started)}")
+                    remote_gate_pass_logged = True
                 if proc.poll() is not None and child_exit_seen_at is None:
                     child_exit_seen_at = time.monotonic()
                 if proc.poll() is not None and eof:
@@ -381,7 +404,6 @@ def main() -> int:
 
         build_return_code = proc.returncode
         if partial:
-            log_lines.add(partial)
             match = PROGRESS_LINE.match(partial.strip())
             if match:
                 current_frontier.add(match.group(1).strip())
