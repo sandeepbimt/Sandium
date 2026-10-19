@@ -85,6 +85,30 @@ def parse_metrics(path: Path) -> dict[str, int]:
     return values
 
 
+def verify_source_timestamp_baseline(root: Path, out_dir: Path) -> None:
+    epoch = 946684800
+    source = root / "src"
+    inputs = (
+        source,
+        source / "DEPS",
+        source / "build" / "config" / "compiler" / "compiler.gni",
+        source / "chrome" / "VERSION",
+        source / "brave" / "build" / "commands" / "lib" / "build.ts",
+    )
+    for path in inputs:
+        if not path.exists():
+            raise ValueError(f"Source timestamp baseline input is missing: {path}")
+        actual = int(path.stat().st_mtime)
+        if actual != epoch:
+            raise ValueError(f"Source timestamp baseline is not normalized: {path} has {actual}, expected {epoch}")
+    stamp = out_dir / "build.ninja.stamp"
+    stamp_time = int(stamp.stat().st_mtime)
+    if stamp_time <= epoch:
+        raise ValueError(f"GN build.ninja.stamp must remain newer than normalized source: {stamp_time}")
+    print(f"SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1")
+    print(f"SOURCE_TIMESTAMP_VERIFY=PASS source_epoch={epoch} build_ninja_stamp_epoch={stamp_time}")
+
+
 def count_siso_processes() -> int:
     if not shutil.which("pgrep"):
         return 0
@@ -158,6 +182,11 @@ def main() -> int:
     if not (out_dir / "build.ninja.stamp").is_file():
         print("SANDIUM_COMPILE_SETUP=FAIL; GN build.ninja.stamp is missing", file=sys.stderr)
         return 23
+    try:
+        verify_source_timestamp_baseline(root, out_dir)
+    except (OSError, ValueError) as exc:
+        print(f"SANDIUM_SOURCE_TIMESTAMP_VERIFY=FAIL ({exc})", file=sys.stderr)
+        return 24
 
     try:
         stage_started = int(args.stage_start_epoch_file.read_text().strip())
