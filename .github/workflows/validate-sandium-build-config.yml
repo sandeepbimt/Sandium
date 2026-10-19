@@ -224,6 +224,30 @@ jobs:
               raise SystemExit("Stage 2 must validate Siso/remoteexec values from args_generated.gni imported by args.gn, not grep args.gn for values it does not contain")
           if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
+          build_impl = Path("build/commands/lib/build.ts").read_text()
+          for required_resume_fragment in (
+              "SANDIUM_CI_PREPARE_RESTORED_GRAPH",
+              "SANDIUM_CI_RESUME_PREPARED_GRAPH",
+              "SANDIUM_CI_STRICT_REMOTE",
+              "-strict_remote",
+              "-metrics_json",
+              "validate-prepared-ninja-graph",
+              "build-targets-siso-autoninja-resume",
+          ):
+              if required_resume_fragment not in build_impl:
+                  raise SystemExit(f"Brave wrapper lacks the validated no-GN-regeneration resume path: {required_resume_fragment}")
+          runner_source = Path("ci/siso/run_compile_window.py").read_text()
+          for required_runner_fragment in (
+              "EARLY_REMOTE_EXECUTION_GATE=FAIL",
+              "INCREMENTAL_HANDOVER_GATE=FAIL",
+              "ACTION_FRONTIER_NEW_UNIQUE_LABEL_COUNT",
+              "STAGE_START_OBJECT_COUNT",
+              "STAGE_END_OBJECT_COUNT",
+              "SISO_SHUTDOWN=CLEAN",
+              "SISO_REMOTE_EXECUTED_ACTION_RECORDS",
+          ):
+              if required_runner_fragment not in runner_source:
+                  raise SystemExit(f"Shared compile runner is missing SANDFOX-style gate/metric: {required_runner_fragment}")
           if (
               "restore-sandium-build-output" not in raw
               or "REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true" not in raw
@@ -247,9 +271,15 @@ jobs:
               raise SystemExit("Final APK signature verification is missing from the package helper")
           if 'choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
               raise SystemExit("APK packaging helper must accept a verified APK produced in Stage 5")
-          compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
-          if len(compile_windows) != 5:
-              raise SystemExit(f"Expected five dynamically bounded compile windows (stages 1-5); got {len(compile_windows)}")
+          compile_windows = raw.count('python3 "$HOME/project/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-')
+          if compile_windows != 5:
+              raise SystemExit(f"Expected five shared SANDFOX-style bounded Siso compile windows (stages 1-5); got {compile_windows}")
+          if raw.count("      - normalize-sandium-source-baseline") != 5:
+              raise SystemExit("Every stage must normalize source timestamps after preparing/restoring GN and before resuming Siso")
+          if raw.count("sandium-action-frontier.txt") < 5:
+              raise SystemExit("Every stage checkpoint must preserve the cumulative unique-action frontier")
+          if "SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1" not in raw or "SOURCE_TIMESTAMP_VERIFY=PASS" not in raw:
+              raise SystemExit("The SANDFOX source timestamp normalization policy/verification is missing")
           if "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true" not in raw:
               raise SystemExit("Stage 5 must explicitly report if the APK is still missing")
           if config["jobs"]["stage-5-verify-publish"].get("resource_class") != "large":
@@ -260,8 +290,20 @@ jobs:
               raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
-          if "sandium-src-v6-{{ .Branch }}-" not in raw or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw or "CHROMIUM_UPDATE_POLICY=MANUAL_PIN" not in raw:
-              raise SystemExit("Chromium source cache must use the explicit manual pin and exclude the separate Brave Core checkout")
+          if (
+              "sandium-src-v6-{{ .Branch }}-" not in raw
+              or "CHROMIUM_SOURCE_CACHE_EXCLUDES_BRAVE_CORE=true" not in raw
+              or "CHROMIUM_SOURCE_CACHE_EXCLUDES_ANDROID_BUILD_OUTPUT=true" not in raw
+              or "SOURCE_CACHE_CONTAINS_COMPILED_OUTPUT=false" not in raw
+              or "CHROMIUM_UPDATE_POLICY=MANUAL_PIN" not in raw
+          ):
+              raise SystemExit("Chromium source cache must exclude Brave Core and compiled output; build output belongs in resumable checkpoints")
+          restore_start = raw.find("name: Restore latest prior-workflow SANDIUM checkpoint from any stage")
+          if restore_start < 0:
+              raise SystemExit("Stage 1 must search for the latest prior-workflow checkpoint from any stage")
+          restore_section = raw[restore_start:restore_start + 650]
+          if "sandium-checkpoint-v7-{{ .Branch }}-\\n" not in restore_section or "stage-1-" in restore_section or "stage-5-" in restore_section:
+              raise SystemExit("Stage 1 checkpoint discovery must use one branch-wide prefix, not a stage-priority list")
           pins = [line.strip() for line in Path("ci/pins/chromium-tag.txt").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
           if len(pins) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", pins[0]):
               raise SystemExit("Manual Chromium pin must be exactly one four-part numeric tag")
@@ -436,8 +478,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py ci/siso/write_buildbuddy_env.py ci/siso/chromium_pin.py ci/siso/checkpoint.py
+          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py ci/siso/write_buildbuddy_env.py ci/siso/chromium_pin.py ci/siso/checkpoint.py ci/siso/run_compile_window.py
           python3 tests/ci/test_siso_buildbuddy_config.py
           python3 tests/ci/test_siso_build_state.py
           python3 tests/ci/test_chromium_pin.py
           python3 tests/ci/test_siso_checkpoint.py
+          python3 tests/ci/test_sandium_compile_window.py
