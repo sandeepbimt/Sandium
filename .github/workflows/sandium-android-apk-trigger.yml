@@ -5,6 +5,7 @@ name: Sandium Android Debug APK Build Trigger
 # Approved Mode 2 full build 2026-10-19: run the complete five-stage Android APK workflow after version.gni prerequisite repair.
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - build/sandium-android-debug-apk-2026-10-17
