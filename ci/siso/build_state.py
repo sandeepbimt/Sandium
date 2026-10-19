@@ -194,20 +194,17 @@ def _read_state() -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _build_input_fingerprint() -> str:
-    """Hash tracked browser/build inputs while excluding CI-only control files."""
+def _tree_records(ref: str) -> dict[str, bytes]:
+    """Return tracked tree entries keyed by path for an exact Git ref."""
     try:
-        entries = subprocess.check_output(
-            ["git", "-C", str(CORE_DIR), "ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+        raw = subprocess.check_output(
+            ["git", "-C", str(CORE_DIR), "ls-tree", "-r", "-z", "--full-tree", ref],
             stderr=subprocess.PIPE,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise StateError(f"Cannot enumerate tracked build inputs: {exc}") from exc
-
-    excluded_exact = {"docs/SANDIUM_PERSISTENT_CACHE_IMPLEMENTATION.md"}
-    excluded_prefixes = (".circleci/", ".github/", "ci/siso/", "tests/ci/")
-    digest = hashlib.sha256()
-    for record in entries.split(b"\0"):
+        raise StateError(f"Cannot enumerate tracked build inputs at {ref!r}: {exc}") from exc
+    records: dict[str, bytes] = {}
+    for record in raw.split(b"\0"):
         if not record:
             continue
         try:
@@ -215,13 +212,85 @@ def _build_input_fingerprint() -> str:
             path = raw_path.decode("utf-8", errors="strict")
         except (ValueError, UnicodeDecodeError) as exc:
             raise StateError("Unexpected git ls-tree record while fingerprinting build inputs") from exc
+        records[path] = metadata
+    return records
+
+
+def _build_input_fingerprint(
+    ref: str = "HEAD",
+    *,
+    canonical_build_ts_from: str | None = None,
+) -> str:
+    """Hash build inputs, optionally ignoring only the CI timestamp-resume hook.
+
+    The latter is a narrow migration bridge: an older cached state stores the
+    tracked-tree fingerprint from before the source timestamp hook was added to
+    build.ts. We may reuse it only when the historical build.ts blob can be
+    substituted and every other tracked build input is identical.
+    """
+    current = _tree_records(ref)
+    if canonical_build_ts_from:
+        previous = _tree_records(canonical_build_ts_from)
+        path = "build/commands/lib/build.ts"
+        old_metadata = previous.get(path)
+        new_metadata = current.get(path)
+        if old_metadata is None or new_metadata is None:
+            raise StateError("Cannot compare build.ts for the timestamp-hook cache migration")
+        old_kind = old_metadata.split(b" ", 2)[:2]
+        new_kind = new_metadata.split(b" ", 2)[:2]
+        if old_kind != new_kind:
+            raise StateError("build.ts mode/type changed; timestamp-hook cache migration is unsafe")
+        current[path] = old_metadata
+
+    excluded_exact = {"docs/SANDIUM_PERSISTENT_CACHE_IMPLEMENTATION.md"}
+    excluded_prefixes = (".circleci/", ".github/", "ci/siso/", "tests/ci/")
+    digest = hashlib.sha256()
+    for path in sorted(current):
         if path in excluded_exact or path.startswith(excluded_prefixes):
             continue
-        digest.update(metadata)
+        digest.update(current[path])
         digest.update(b"\t")
-        digest.update(raw_path)
+        digest.update(path.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _cache_input_compatible(state: dict[str, Any], context: dict[str, Any]) -> bool:
+    """Accept a previous checkpoint only when build inputs truly still match."""
+    if state.get("build_input_fingerprint") == context.get("build_input_fingerprint"):
+        return True
+    source_commit = state.get("source_commit")
+    saved_fingerprint = state.get("build_input_fingerprint")
+    if not isinstance(source_commit, str) or not isinstance(saved_fingerprint, str):
+        return False
+    try:
+        historical = _build_input_fingerprint(source_commit)
+        current_with_only_timestamp_hook_canonicalized = _build_input_fingerprint(
+            "HEAD", canonical_build_ts_from=source_commit
+        )
+    except StateError:
+        return False
+    return (
+        historical == saved_fingerprint
+        and current_with_only_timestamp_hook_canonicalized == saved_fingerprint
+    )
+
+
+def _source_timestamp_policy(log_path: str | None) -> str | None:
+    """Return the normalized source-time policy only when its pass marker is logged."""
+    if not log_path:
+        return None
+    log = Path(log_path)
+    if not log.is_file():
+        return None
+    text = log.read_text(encoding="utf-8", errors="replace")
+    policy = "epoch_946684800_full_tree_v1"
+    if (
+        f"SOURCE_TIMESTAMP_POLICY={policy}" in text
+        and "SOURCE_TIMESTAMP_VERIFY=PASS" in text
+    ):
+        return policy
+    return None
 
 
 def _context(expected_commit: str | None = None) -> dict[str, Any]:
@@ -361,11 +430,17 @@ def _valid_state(mode: str, expected_commit: str | None) -> dict[str, Any]:
             "target",
             "chromium_commit",
             "chromium_version",
-            "build_input_fingerprint",
             "gn_args_sha256",
         )
         if any(state.get(key) != context.get(key) for key in cache_keys):
-            raise StateError("Restored build-output cache does not match current source, Chromium, or GN arguments")
+            raise StateError("Restored build-output cache does not match current Chromium source, target, or GN arguments")
+        if not _cache_input_compatible(state, context):
+            raise StateError("Restored build-output cache does not match current browser/build inputs")
+        if state.get("build_input_fingerprint") != context.get("build_input_fingerprint"):
+            print("BUILD_INPUT_COMPATIBILITY=PASS reason=timestamp-hook-only")
+        policy = state.get("source_timestamp_policy")
+        if policy not in (None, "epoch_946684800_full_tree_v1"):
+            raise StateError(f"Unrecognized cached source timestamp policy: {policy!r}")
         return state
 
     state = _read_state()
@@ -433,17 +508,21 @@ def command_record(args: argparse.Namespace) -> int:
         apk_info = _apk_info(required=compile_complete)
         old = _read_state()
         parsed_metrics, _ = _remote_metrics(args.log)
+        timestamp_policy = _source_timestamp_policy(args.log)
 
         old_metrics: dict[str, int] = {}
         can_preserve_remote_proof = False
-        if old and isinstance(old.get("remote_metrics"), dict):
-            same_chromium_and_args = (
-                old.get("build_input_fingerprint") == context["build_input_fingerprint"]
-                and old.get("chromium_commit") == context["chromium_commit"]
+        old_input_compatible = False
+        if old:
+            old_input_compatible = (
+                old.get("chromium_commit") == context["chromium_commit"]
                 and old.get("chromium_version") == context["chromium_version"]
                 and old.get("gn_args_sha256") == context["gn_args_sha256"]
                 and old.get("target") == TARGET
+                and _cache_input_compatible(old, context)
             )
+        if old and isinstance(old.get("remote_metrics"), dict):
+            same_chromium_and_args = old_input_compatible
             same_apk = (
                 apk_info.get("apk_sha256") is not None
                 and old.get("apk_sha256") == apk_info.get("apk_sha256")
@@ -473,11 +552,18 @@ def command_record(args: argparse.Namespace) -> int:
         ):
             artifact_verified = True
 
+        if timestamp_policy is None and old_input_compatible and old:
+            # Stage 4 may deliberately skip Ninja because an earlier stage
+            # completed successfully. Preserve the prior policy only for this
+            # identical input/checkpoint case; an ordinary build log must prove
+            # the timestamp normalization itself.
+            timestamp_policy = old.get("source_timestamp_policy")
         state: dict[str, Any] = {
             **context,
             "last_stage": args.stage,
             "compile_complete": compile_complete,
             "artifact_verified": artifact_verified,
+            "source_timestamp_policy": timestamp_policy,
             **apk_info,
             "remote_metrics": metrics,
             "remote_backend_proven": _remote_backend_proven(metrics),
