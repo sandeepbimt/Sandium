@@ -81,14 +81,26 @@ jobs:
               "stage-4-finish-and-package",
               "stage-5-verify-publish",
           ]
+          smoke_jobs = [
+              "smoke-1-contract-and-foundation",
+              "smoke-2-build-state-tests",
+              "smoke-3-handover-continuity",
+              "smoke-4-cache-and-artifact-contract",
+              "smoke-5-independent-handover-verification",
+          ]
           jobs = list(config.get("jobs", {}))
-          if jobs != expected_jobs:
-              raise SystemExit(f"Expected exactly the five designed jobs in order; got {jobs}")
+          if jobs[:5] != expected_jobs:
+              raise SystemExit(f"Mode 2 full-build jobs/order changed: {jobs[:5]}")
+          if jobs[5:] != smoke_jobs:
+              raise SystemExit(f"Expected the five isolated smoke jobs after the unchanged full-build jobs; got {jobs[5:]}")
           if re.search(r"source-cache-only-test|run_sandium_source_cache_test", raw):
               raise SystemExit("Abandoned source-cache-only experiment remains in the active config")
           parameter = config.get("parameters", {}).get("run_sandium_android_apk_build", {})
           if parameter.get("default") is not False:
               raise SystemExit("APK build parameter must remain disabled by default")
+          smoke_parameter = config.get("parameters", {}).get("run_sandium_ci_smoke_test", {})
+          if smoke_parameter.get("default") is not False:
+              raise SystemExit("Lightweight smoke mode must remain opt-in by default")
 
           workflow = config.get("workflows", {}).get("sandium-android-debug-apk", {})
           if workflow.get("when") != "<< pipeline.parameters.run_sandium_android_apk_build >>":
@@ -110,6 +122,32 @@ jobs:
               workflow_ref = next((item for item in workflow_jobs if isinstance(item, dict) and job in item), None)
               if workflow_ref is None or workflow_ref[job].get("requires") != [upstream]:
                   raise SystemExit(f"Wrong dependency edge for {job}; expected after {upstream}")
+
+          smoke_workflow = config.get("workflows", {}).get("sandium-ci-smoke-test", {})
+          if smoke_workflow.get("when") != "<< pipeline.parameters.run_sandium_ci_smoke_test >>":
+              raise SystemExit("Smoke workflow must be separately gated by its own opt-in parameter")
+          smoke_workflow_jobs = smoke_workflow.get("jobs", [])
+          smoke_names = [item if isinstance(item, str) else next(iter(item)) for item in smoke_workflow_jobs]
+          if smoke_names != smoke_jobs:
+              raise SystemExit(f"Smoke workflow stage order changed: {smoke_names}")
+          smoke_requires = {
+              "smoke-2-build-state-tests": "smoke-1-contract-and-foundation",
+              "smoke-3-handover-continuity": "smoke-2-build-state-tests",
+              "smoke-4-cache-and-artifact-contract": "smoke-3-handover-continuity",
+              "smoke-5-independent-handover-verification": "smoke-4-cache-and-artifact-contract",
+          }
+          for job, upstream in smoke_requires.items():
+              workflow_ref = next((item for item in smoke_workflow_jobs if isinstance(item, dict) and job in item), None)
+              if workflow_ref is None or workflow_ref[job].get("requires") != [upstream]:
+                  raise SystemExit(f"Wrong smoke handover dependency for {job}; expected after {upstream}")
+          smoke_source = str({name: config["jobs"][name] for name in smoke_jobs})
+          for forbidden in ("pnpm run sync", "pnpm run build Debug", "restore-sandium-source", "configure-sandium-remote-cache", "timeout --signal=INT"):
+              if forbidden in smoke_source:
+                  raise SystemExit(f"Smoke mode must not run heavy build work: found {forbidden}")
+          if "sandium-smoke-checkpoint" not in config.get("commands", {}):
+              raise SystemExit("Smoke mode lacks its stage handover/checkpoint command")
+          if "production_apk_created" not in smoke_source or "SANDIUM_SMOKE_FIVE_STAGE_HANDOVER=PASS" not in smoke_source:
+              raise SystemExit("Smoke mode must prove five-stage handovers without claiming a production APK")
 
           source_text = str(config["jobs"]["stage-1-source-foundation"])
           if "--no-history" not in source_text or "save_cache" not in source_text or "SOURCE_CACHE_BYTES=" not in raw:
