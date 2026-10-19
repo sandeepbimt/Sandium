@@ -179,14 +179,16 @@ jobs:
           source_text = str(config["jobs"]["stage-1-source-foundation"])
           if "--no-history" not in source_text or "save_cache" not in source_text or "SOURCE_CACHE_BYTES=" not in raw:
               raise SystemExit("Stage 1 must sync pinned source and record a validated cache save")
+          if "Validate fingerprint, configure GN and compile window 1" not in source_text or "checkpoint.py pack --root" not in source_text:
+              raise SystemExit("Stage 1 must compile window 1 and save a reusable checkpoint")
           if "build_state.py fingerprint" not in raw:
               raise SystemExit("GN inputs are not fingerprinted by the shared build-state helper")
           if "restore-sandium-apk-cache" not in raw or "sandium-apk-v4-" not in raw or "VERIFIED_APK_CACHE=HIT" not in raw:
               raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
           if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("Revision pinning or APK verification evidence is missing")
-          if raw.count("package_apk.py --commit") < 4:
-              raise SystemExit("Stages 2, 3, 4 and 5 must package an APK immediately when it appears")
+          if raw.count("package_apk.py --commit") < 5:
+              raise SystemExit("All five stages must package an APK immediately when it appears")
           if "build-state.json" not in raw or "APK_ARTIFACT_VERIFIED=true" not in raw:
               raise SystemExit("The verified APK cache is missing its integrity state and manifest")
           if "use_siso:true" not in raw or "use_reclient:false" not in raw or "--use_remoteexec true" not in raw:
@@ -221,12 +223,11 @@ jobs:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
           if (
               "restore-sandium-build-output" not in raw
-              or "checkpoint.py restore --root" not in raw
-              or raw.count("checkpoint.py pack --root") != 4
-              or raw.count("sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-") < 4
-              or "sandium-checkpoint-v5-{{ .Branch }}-" not in raw
+              or "REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true" not in raw
+              or raw.count("checkpoint.py pack --root") != 5
+              or raw.count("sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-") < 5
           ):
-              raise SystemExit("Compiled output must restore a validated prior-run checkpoint and save a cumulative checkpoint after each compile window")
+              raise SystemExit("Every stage must checkpoint its output; stages 2–5 must restore and validate their immediate predecessor or fail closed")
           if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
           if "circleci-agent step halt" not in raw:
@@ -234,18 +235,18 @@ jobs:
           package_helper = Path("ci/siso/package_apk.py").read_text()
           if "apksigner" not in package_helper or "APK_SIGNATURE_VERIFICATION=PASS" not in package_helper:
               raise SystemExit("Final APK signature verification is missing from the package helper")
-          if 'choices=("stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
+          if 'choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
               raise SystemExit("APK packaging helper must accept a verified APK produced in Stage 5")
           compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
-          if len(compile_windows) != 4:
-              raise SystemExit(f"Expected four dynamically bounded compile windows (stages 2-5); got {len(compile_windows)}")
+          if len(compile_windows) != 5:
+              raise SystemExit(f"Expected five dynamically bounded compile windows (stages 1-5); got {len(compile_windows)}")
           if "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true" not in raw:
               raise SystemExit("Stage 5 must explicitly report if the APK is still missing")
           if config["jobs"]["stage-5-verify-publish"].get("resource_class") != "large":
               raise SystemExit("Stage 5 must use the large runner for the final compile window")
-          if raw.count("Include verified APK in downloadable") < 4:
+          if raw.count("Include verified APK in downloadable") < 5:
               raise SystemExit("Every stage with a compile window must expose an APK artifact if it appears")
-          if raw.count("remaining_compile_seconds=2400") < 4:
+          if raw.count("remaining_compile_seconds=2400") < 5:
               raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
@@ -285,7 +286,7 @@ jobs:
           deps_index = step_index(stage2_steps, "Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")
           generator_index = step_index(stage2_steps, "generate-sandium-brave-version-gni")
           prepare_index = step_index(stage2_steps, "Prepare source overlay and branding before GN")
-          compile_index = step_index(stage2_steps, "Validate fingerprint, configure GN and compile window 1")
+          compile_index = step_index(stage2_steps, "Compile window 2 using same target and remote action cache")
           if not (0 <= deps_index < generator_index < prepare_index < compile_index):
               raise SystemExit("Stage 2 must sync Brave-owned DEPS, generate version.gni, prepare GN inputs, then compile")
           deps_block = step_run(stage2_steps, "Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")["command"]
@@ -345,8 +346,8 @@ jobs:
               raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
           if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
               raise SystemExit("Stage 1 source sync must be time-bounded to preserve handover time")
-          if raw.count("no_output_timeout: 45m") != 4:
-              raise SystemExit("All four compile stages must permit up to 45 minutes without output before the no-output guard")
+          if raw.count("no_output_timeout: 45m") != 5:
+              raise SystemExit("All five compile stages must permit up to 45 minutes without output before the no-output guard")
 
           command_blocks = []
           def walk(value, label="$"):

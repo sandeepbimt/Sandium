@@ -193,7 +193,7 @@ def package(commit: str, stage: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--commit", required=True)
-    parser.add_argument("--stage", choices=("stage-2", "stage-3", "stage-4", "stage-5"), required=True)
+    parser.add_argument("--stage", choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5"), required=True)
     args = parser.parse_args()
     try:
         package(args.commit, args.stage)

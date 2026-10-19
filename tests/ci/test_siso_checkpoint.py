@@ -44,7 +44,7 @@ class CheckpointTests(unittest.TestCase):
         obj = self.output / "obj/sample/sample.o"
         expected_mtime = obj.stat().st_mtime_ns
         digest = hashlib.sha256(obj.read_bytes()).hexdigest()
-        packed = self.invoke("pack", "--stage", "stage-2")
+        packed = self.invoke("pack", "--stage", "stage-1")
         self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
         self.assertIn("SANDIUM_CHECKPOINT_PACK=PASS", packed.stdout)
         shutil.rmtree(self.output)
