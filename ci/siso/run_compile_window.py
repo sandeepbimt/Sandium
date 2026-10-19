@@ -218,10 +218,20 @@ def main() -> int:
     build_return_code: int | None = None
     started = time.monotonic()
     siso_info = out_dir / "siso.INFO"
+    if siso_info.exists():
+        if siso_info.is_symlink() or not siso_info.is_file():
+            print(f"SANDIUM_SISO_INFO_RESET=FAIL; expected a regular Siso info log: {siso_info}", file=sys.stderr)
+            return 23
+        # Preserve checkpoint-era Siso diagnostics, but do not let a previous
+        # run's remote signature satisfy the current window's remote gate.
+        shutil.copy2(siso_info, diagnostics / f"siso.INFO.before-{args.stage}")
+        siso_info.write_text("", encoding="utf-8")
+        print(f"SISO_INFO_PREVIOUS_STAGE_SAVED={diagnostics / f'siso.INFO.before-{args.stage}'}")
+    siso_info.write_text("", encoding="utf-8")
     try:
         initial_info_stat = siso_info.stat()
         siso_info_identity: tuple[int, int] | None = (initial_info_stat.st_dev, initial_info_stat.st_ino)
-        siso_info_offset = initial_info_stat.st_size
+        siso_info_offset = 0
     except OSError:
         siso_info_identity = None
         siso_info_offset = 0
