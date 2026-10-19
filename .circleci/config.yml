@@ -136,8 +136,8 @@ commands:
             - restore_cache:
                 name: Restore latest prior-workflow SANDIUM checkpoint for stage 1
                 keys:
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-
       - when:
           condition:
             equal: [2, << parameters.stage_index >>]
@@ -145,8 +145,8 @@ commands:
             - restore_cache:
                 name: Restore this workflow's stage 1 checkpoint
                 keys:
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
@@ -154,8 +154,8 @@ commands:
             - restore_cache:
                 name: Restore this workflow's stage 2 checkpoint
                 keys:
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-2-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
@@ -163,8 +163,8 @@ commands:
             - restore_cache:
                 name: Restore this workflow's stage 3 checkpoint
                 keys:
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-3-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
@@ -172,8 +172,8 @@ commands:
             - restore_cache:
                 name: Restore this workflow's stage 4 checkpoint
                 keys:
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
-                  - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-4-
       - run:
           name: Ensure zstd is available for compressed build checkpoints
           command: |
@@ -802,7 +802,7 @@ jobs:
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-1
       - save_cache:
           name: Save stage-1 resumable build checkpoint for the next stage or workflow
-          key: sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+          key: sandium-checkpoint-v7-{{ .Branch }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
           paths:
             - sandium-checkpoint.tar.zst
             - sandium-checkpoint.meta
@@ -1127,7 +1127,7 @@ jobs:
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2
       - save_cache:
           name: Save stage-2 resumable build checkpoint for the next stage or workflow
-          key: sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+          key: sandium-checkpoint-v7-{{ .Branch }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
           paths:
             - sandium-checkpoint.tar.zst
             - sandium-checkpoint.meta
@@ -1314,7 +1314,7 @@ jobs:
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3
       - save_cache:
           name: Save stage-3 resumable build checkpoint for the next stage or workflow
-          key: sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+          key: sandium-checkpoint-v7-{{ .Branch }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
           paths:
             - sandium-checkpoint.tar.zst
             - sandium-checkpoint.meta
@@ -1501,7 +1501,7 @@ jobs:
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4
       - save_cache:
           name: Save stage-4 resumable build checkpoint for the next stage or workflow
-          key: sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+          key: sandium-checkpoint-v7-{{ .Branch }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
           paths:
             - sandium-checkpoint.tar.zst
             - sandium-checkpoint.meta
@@ -1723,7 +1723,7 @@ jobs:
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5
       - save_cache:
           name: Save stage-5 resumable build checkpoint for the next stage or workflow
-          key: sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+          key: sandium-checkpoint-v7-{{ .Branch }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}
           paths:
             - sandium-checkpoint.tar.zst
             - sandium-checkpoint.meta
