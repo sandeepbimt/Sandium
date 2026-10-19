@@ -894,7 +894,7 @@ jobs:
             test -x "$GN_BIN"
             "$GN_BIN" --version
             cd "$ROOT/src/brave"
-            node --input-type=module - <<'NODE'
+            node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
@@ -1062,7 +1062,7 @@ jobs:
             test -x "$GN_BIN"
             "$GN_BIN" --version
             cd "$ROOT/src/brave"
-            node --input-type=module - <<'NODE'
+            node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
@@ -1272,7 +1272,7 @@ jobs:
             test -x "$GN_BIN"
             "$GN_BIN" --version
             cd "$ROOT/src/brave"
-            node --input-type=module - <<'NODE'
+            node --input-type=module - \<<'NODE'
             import { spawnSync } from 'node:child_process'
             import config from './build/commands/lib/config.ts'
             const options = config.defaultOptions
