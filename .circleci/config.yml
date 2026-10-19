@@ -873,6 +873,53 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - run:
+          name: Preflight GN executable in this stage's fresh environment
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            GN_DIR="$ROOT/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              echo "Checking restored source/buildtools layout:"
+              ls -la "$ROOT/src/buildtools" "$ROOT/src/buildtools/linux64" 2>&1 || true
+              find "$ROOT/src" -type f \( -path '*/buildtools/linux64/gn' -o -name gn \) 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
+            test -x "$GN_BIN"
+            "$GN_BIN" --version
+            cd "$ROOT/src/brave"
+            node --input-type=module - <<'NODE'
+            import { spawnSync } from 'node:child_process'
+            import config from './build/commands/lib/config.ts'
+            const options = config.defaultOptions
+            const lookup = spawnSync('bash', ['-c', 'command -v gn'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
+              throw new Error('GN executable is not resolvable with Brave build PATH: '
+                + (lookup.error?.message || lookup.stderr || 'command -v gn returned no path'))
+            }
+            const gnPath = lookup.stdout.trim()
+            console.log('SANDIUM_GN_RESOLVED_PATH=' + gnPath)
+            const version = spawnSync(gnPath, ['--version'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (version.error) {
+              throw new Error('GN failed to spawn at ' + gnPath + ': ' + version.error.message)
+            }
+            if (version.status !== 0) {
+              throw new Error('GN --version failed with status ' + version.status
+                + '; stdout=' + (version.stdout || '') + '; stderr=' + (version.stderr || ''))
+            }
+            console.log('SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS')
+            console.log('SANDIUM_GN_VERSION=' + version.stdout.trim())
+            NODE
       - configure-sandium-remote-cache
       - run:
           name: Compile window 2 using same target and remote action cache
@@ -994,6 +1041,53 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - run:
+          name: Preflight GN executable in this stage's fresh environment
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            GN_DIR="$ROOT/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              echo "Checking restored source/buildtools layout:"
+              ls -la "$ROOT/src/buildtools" "$ROOT/src/buildtools/linux64" 2>&1 || true
+              find "$ROOT/src" -type f \( -path '*/buildtools/linux64/gn' -o -name gn \) 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
+            test -x "$GN_BIN"
+            "$GN_BIN" --version
+            cd "$ROOT/src/brave"
+            node --input-type=module - <<'NODE'
+            import { spawnSync } from 'node:child_process'
+            import config from './build/commands/lib/config.ts'
+            const options = config.defaultOptions
+            const lookup = spawnSync('bash', ['-c', 'command -v gn'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
+              throw new Error('GN executable is not resolvable with Brave build PATH: '
+                + (lookup.error?.message || lookup.stderr || 'command -v gn returned no path'))
+            }
+            const gnPath = lookup.stdout.trim()
+            console.log('SANDIUM_GN_RESOLVED_PATH=' + gnPath)
+            const version = spawnSync(gnPath, ['--version'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (version.error) {
+              throw new Error('GN failed to spawn at ' + gnPath + ': ' + version.error.message)
+            }
+            if (version.status !== 0) {
+              throw new Error('GN --version failed with status ' + version.status
+                + '; stdout=' + (version.stdout || '') + '; stderr=' + (version.stderr || ''))
+            }
+            console.log('SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS')
+            console.log('SANDIUM_GN_VERSION=' + version.stdout.trim())
+            NODE
       - configure-sandium-remote-cache
       - run:
           name: Final incremental compile, package and verify if APK appears
@@ -1157,6 +1251,53 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - run:
+          name: Preflight GN executable in this stage's fresh environment
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            GN_DIR="$ROOT/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              echo "Checking restored source/buildtools layout:"
+              ls -la "$ROOT/src/buildtools" "$ROOT/src/buildtools/linux64" 2>&1 || true
+              find "$ROOT/src" -type f \( -path '*/buildtools/linux64/gn' -o -name gn \) 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
+            test -x "$GN_BIN"
+            "$GN_BIN" --version
+            cd "$ROOT/src/brave"
+            node --input-type=module - <<'NODE'
+            import { spawnSync } from 'node:child_process'
+            import config from './build/commands/lib/config.ts'
+            const options = config.defaultOptions
+            const lookup = spawnSync('bash', ['-c', 'command -v gn'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
+              throw new Error('GN executable is not resolvable with Brave build PATH: '
+                + (lookup.error?.message || lookup.stderr || 'command -v gn returned no path'))
+            }
+            const gnPath = lookup.stdout.trim()
+            console.log('SANDIUM_GN_RESOLVED_PATH=' + gnPath)
+            const version = spawnSync(gnPath, ['--version'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (version.error) {
+              throw new Error('GN failed to spawn at ' + gnPath + ': ' + version.error.message)
+            }
+            if (version.status !== 0) {
+              throw new Error('GN --version failed with status ' + version.status
+                + '; stdout=' + (version.stdout || '') + '; stderr=' + (version.stderr || ''))
+            }
+            console.log('SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS')
+            console.log('SANDIUM_GN_VERSION=' + version.stdout.trim())
+            NODE
       - configure-sandium-remote-cache
       - run:
           name: Final incremental compile window 4 with Siso remote execution
