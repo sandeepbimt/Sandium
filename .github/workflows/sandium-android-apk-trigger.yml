@@ -3,6 +3,7 @@ name: Sandium Android Debug APK Build Trigger
 # Requires GitHub Actions secret CIRCLECI_TOKEN and CircleCI BUILDBUDDY_API_KEY context.
 # The CircleCI pipeline is the source of truth for build success and APK publication.
 # Approved Mode 2 full build 2026-10-19: run the complete five-stage Android APK workflow after version.gni prerequisite repair.
+# Fresh run requested 2026-10-19: use v7 branch-wide checkpoint keys with build-input compatibility validation.
 
 on:
   workflow_dispatch:
