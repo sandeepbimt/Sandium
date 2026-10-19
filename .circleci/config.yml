@@ -713,8 +713,7 @@ jobs:
               set +e
               BUILD_FORCE_GN_GEN=()
               if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
-                BUILD_FORCE_GN_GEN=(--force_gn_gen)
-                echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+                echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
@@ -1076,8 +1075,7 @@ jobs:
             set +e
             BUILD_FORCE_GN_GEN=()
             if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
-              BUILD_FORCE_GN_GEN=(--force_gn_gen)
-              echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+              echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
             else
               echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
             fi
@@ -1267,8 +1265,7 @@ jobs:
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
               BUILD_FORCE_GN_GEN=()
               if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
-                BUILD_FORCE_GN_GEN=(--force_gn_gen)
-                echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+                echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
@@ -1455,8 +1452,7 @@ jobs:
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
               BUILD_FORCE_GN_GEN=()
               if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
-                BUILD_FORCE_GN_GEN=(--force_gn_gen)
-                echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+                echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
@@ -1677,8 +1673,7 @@ jobs:
                 set +e
                 BUILD_FORCE_GN_GEN=()
                 if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
-                  BUILD_FORCE_GN_GEN=(--force_gn_gen)
-                  echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+                  echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
                 else
                   echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
                 fi
