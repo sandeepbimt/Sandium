@@ -67,8 +67,8 @@ commands:
                 missing = [token for token in required if token not in config]
                 if missing:
                     raise SystemExit("Mode 2/full-build contract is missing: " + ", ".join(missing))
-                if config.count("run_sandium_android_apk_build:") < 2:
-                    raise SystemExit("Real APK build parameter/workflow must remain present")
+                if "when: << pipeline.parameters.run_sandium_android_apk_build >>" not in config:
+                    raise SystemExit("Real APK build workflow must remain independently gated")
                 print("SMOKE_MODE1_ISOLATION=PASS")
                 print("MODE2_FULL_CHROMIUM_BUILD_PRESERVED=PASS")
 
