@@ -25,98 +25,12 @@ commands:
           name: Run lightweight SANDIUM smoke checks and persist stage checkpoint
           command: |
             set -euo pipefail
-            mkdir -p smoke-state
-            python3 - \<<'PY'
-            import hashlib, json, os, sys
-            from pathlib import Path
+            if [[ "<< parameters.stage >>" == "2" ]]; then
+              python3 tests/ci/test_siso_build_state.py
+              python3 tests/ci/test_smoke_checkpoint.py
+            fi
+            python3 ci/smoke/checkpoint.py "<< parameters.stage >>" "<< parameters.previous_stage >>"
 
-            stage = int("<< parameters.stage >>")
-            previous_stage = int("<< parameters.previous_stage >>")
-            root = Path("smoke-state")
-            workflow_id = os.environ.get("CIRCLE_WORKFLOW_ID", "")
-            commit = os.environ.get("CIRCLE_SHA1", "")
-            if not workflow_id or not commit:
-                raise SystemExit("Smoke test requires CircleCI workflow and commit identity")
-            if stage not in range(1, 6) or previous_stage != stage - 1:
-                raise SystemExit("Invalid smoke stage dependency")
-
-            previous_digest = None
-            if previous_stage:
-                previous_path = root / f"stage-{previous_stage}.json"
-                if not previous_path.is_file():
-                    raise SystemExit(f"Missing prior smoke checkpoint: {previous_path}")
-                previous_bytes = previous_path.read_bytes()
-                previous = json.loads(previous_bytes)
-                if (previous.get("mode") != "smoke" or
-                    previous.get("stage") != previous_stage or
-                    previous.get("workflow_id") != workflow_id or
-                    previous.get("commit") != commit):
-                    raise SystemExit("Prior smoke checkpoint belongs to a different stage, workflow, or commit")
-                previous_digest = hashlib.sha256(previous_bytes).hexdigest()
-
-            if stage == 1:
-                config = Path(".circleci/config.yml").read_text(encoding="utf-8")
-                required = (
-                    "run_sandium_android_apk_build:",
-                    "run_sandium_ci_smoke_test:",
-                    "stage-1-source-foundation:",
-                    "stage-5-verify-publish:",
-                    "pnpm run build Debug",
-                    "default: false",
-                )
-                missing = [token for token in required if token not in config]
-                if missing:
-                    raise SystemExit("Mode 2/full-build contract is missing: " + ", ".join(missing))
-                if "when: << pipeline.parameters.run_sandium_android_apk_build >>" not in config:
-                    raise SystemExit("Real APK build workflow must remain independently gated")
-                print("SMOKE_MODE1_ISOLATION=PASS")
-                print("MODE2_FULL_CHROMIUM_BUILD_PRESERVED=PASS")
-
-            if stage == 2:
-                print("SMOKE_STAGE2=RUNNING_BUILD_STATE_UNIT_TESTS")
-                import subprocess
-                subprocess.run(
-                    [sys.executable, "tests/ci/test_siso_build_state.py"],
-                    check=True,
-                )
-                print("SMOKE_BUILD_STATE_UNIT_TESTS=PASS")
-
-            record = {
-                "schema": 1,
-                "mode": "smoke",
-                "stage": stage,
-                "workflow_id": workflow_id,
-                "commit": commit,
-                "previous_sha256": previous_digest,
-                "result": "PASS",
-                "real_chromium_sync": False,
-                "real_chromium_compile": False,
-                "production_apk_created": False,
-            }
-            path = root / f"stage-{stage}.json"
-            path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-            print(f"SANDIUM_SMOKE_STAGE_{stage}=PASS")
-            print("SANDIUM_SMOKE_MODE_ONLY=true")
-
-            if stage == 5:
-                prior_digest = None
-                for number in range(1, 6):
-                    checkpoint_path = root / f"stage-{number}.json"
-                    if not checkpoint_path.is_file():
-                        raise SystemExit(f"Missing required stage checkpoint: {checkpoint_path}")
-                    raw = checkpoint_path.read_bytes()
-                    saved = json.loads(raw)
-                    if (saved.get("mode") != "smoke" or saved.get("stage") != number or
-                        saved.get("workflow_id") != workflow_id or saved.get("commit") != commit or
-                        saved.get("result") != "PASS"):
-                        raise SystemExit(f"Invalid stage {number} checkpoint")
-                    if saved.get("previous_sha256") != prior_digest:
-                        raise SystemExit(f"Broken checkpoint handover chain at stage {number}")
-                    if saved.get("production_apk_created") is not False:
-                        raise SystemExit("Smoke fixture must never be represented as a production APK")
-                    prior_digest = hashlib.sha256(raw).hexdigest()
-                print("SANDIUM_SMOKE_FIVE_STAGE_HANDOVER=PASS")
-                print("SANDIUM_SMOKE_TEST_ONLY_NO_APK=PASS")
   install-sandium-node:
     steps:
       - run:
