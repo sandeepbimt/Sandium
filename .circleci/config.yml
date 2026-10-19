@@ -1000,6 +1000,10 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p build-diagnostics
+            if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" == "true" ]]; then
+              echo "SANDIUM_PREPARE_ONLY=SKIPPED_VALIDATED_GRAPH_REUSED"
+              exit 0
+            fi
             cd src/brave
             set +e
             pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
