@@ -228,9 +228,16 @@ jobs:
               "restore-sandium-build-output" not in raw
               or "REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true" not in raw
               or raw.count("checkpoint.py pack --root") != 5
-              or raw.count("sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-") < 5
+              or raw.count("sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-") < 5
           ):
               raise SystemExit("Every stage must checkpoint its output; stages 2–5 must restore and validate their immediate predecessor or fail closed")
+          if (
+              "sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-" not in raw
+              or "sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-" not in raw
+              or "sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-" not in raw
+              or "sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-" not in raw
+          ):
+              raise SystemExit("Checkpoint restore must fall back to a same-commit predecessor checkpoint from a prior workflow")
           if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
           if "circleci-agent step halt" not in raw:
