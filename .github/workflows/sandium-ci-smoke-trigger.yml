@@ -1,5 +1,5 @@
 name: Sandium Lightweight Five-Stage Smoke Test
-# MODE 1 only: this trigger must never enable the real Chromium/APK build.
+# MODE 1 only: smoke implementation validated; trigger the external-helper version. Never enable the real Chromium/APK build.
 # Requires repository secret CIRCLECI_TOKEN. No BuildBuddy credential is needed for this smoke test.
 
 on:
