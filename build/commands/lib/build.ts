@@ -95,6 +95,12 @@ export async function build(
   runBuildPhase('ensure-toolchain-mount', () => buildUtils.ensureVsFilesMount())
 
   if (options.prepare_only) {
+    // SANDIUM CI uses prepare_only as a pre-compilation gate. Generate GN
+    // files here so --gn values are materialized in args.gn and can be
+    // validated before any expensive compile window starts.
+    await runBuildPhaseAsync('generate-ninja-files-prepare-only', () =>
+      util.generateNinjaFiles(),
+    )
     return
   }
 
