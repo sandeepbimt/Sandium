@@ -133,10 +133,16 @@ commands:
           condition:
             equal: [1, << parameters.stage_index >>]
           steps:
+            # Restore the newest checkpoint from any completed stage of an earlier
+            # workflow first. Compatibility is checked after restore, in this job.
+            # Do not restrict discovery to stage-1 or the current source/config commit.
             - restore_cache:
-                name: Restore latest prior-workflow SANDIUM checkpoint for stage 1
+                name: Find prior-workflow build checkpoint from newest available stage
                 keys:
-                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-5-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-4-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-3-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-2-
                   - sandium-checkpoint-v7-{{ .Branch }}-stage-1-
       - when:
           condition:
