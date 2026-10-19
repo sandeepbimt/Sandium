@@ -139,20 +139,44 @@ commands:
   restore-sandium-build-output:
     steps:
       - restore_cache:
+          name: Restore latest matching SANDIUM Siso checkpoint from this workflow or a previous run
           keys:
+            - sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
+            - sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
+            - sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
+            - sandium-checkpoint-v5-{{ .Branch }}-
+            # Migration fallback: accept the prior raw-output checkpoint format once.
             - sandium-out-v4-{{ .Branch }}-android-debug-arm64-
       - run:
-          name: Validate cached Android build output against source and GN inputs
+          name: Ensure zstd is available for compressed build checkpoints
+          command: |
+            set -euo pipefail
+            if ! command -v zstd >/dev/null 2>&1; then
+              export DEBIAN_FRONTEND=noninteractive
+              sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+              sudo apt-get update
+              sudo apt-get install -y zstd
+            fi
+            zstd --version
+      - run:
+          name: Restore a matching timestamp-preserving Siso checkpoint archive
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
+      - run:
+          name: Validate restored Android build output against source and GN inputs
           command: |
             set -euo pipefail
             OUT=src/out/android_Debug_arm64
             STATE=src/brave/ci/siso/build_state.py
             if [[ ! -d "$OUT" ]]; then
               echo "BUILD_OUTPUT_CACHE=COLD_MISS"
+              echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=false' >> "$BASH_ENV"
               exit 0
             fi
             if python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
               echo "BUILD_OUTPUT_CACHE=COMPATIBLE"
+              echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
                 echo 'export SANDIUM_COMPILED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               fi
@@ -162,6 +186,7 @@ commands:
             else
               echo "BUILD_OUTPUT_CACHE=INCOMPATIBLE; discarding stale output directory"
               rm -rf "$OUT"
+              echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=false' >> "$BASH_ENV"
             fi
 
   restore-sandium-siso-cache:
@@ -209,7 +234,7 @@ commands:
             if state.get("target") != "android-arm64-debug-apk" or state.get("build_config") != "Debug":
                 raise SystemExit("Cached APK target/config mismatch")
             chromium_version = state.get("chromium_version")
-            if not isinstance(chromium_version, str) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", chromium_version):
+            if not isinstance(chromium_version, str) or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", chromium_version):
                 raise SystemExit("Cached APK lacks a valid resolved Chromium source tag")
             if manifest.get("chromium_version") != chromium_version:
                 raise SystemExit("Cached APK manifest/state Chromium tags disagree")
@@ -796,7 +821,14 @@ jobs:
               echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
               echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
               set +e
-              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
+              BUILD_FORCE_GN_GEN=()
+              if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
+                BUILD_FORCE_GN_GEN=(--force_gn_gen)
+                echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+              else
+                echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
+              fi
+              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk "${BUILD_FORCE_GN_GEN[@]}" --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
               status=${PIPESTATUS[0]}
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -870,10 +902,17 @@ jobs:
             else
               echo "APK_NOT_YET_AVAILABLE=stage-2"
             fi
+      - run:
+          name: Pack stage-2 cumulative Siso checkpoint
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2
       - save_cache:
-          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
+          name: Save stage-2 resumable build checkpoint for the next stage or workflow
+          key: sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
           paths:
-            - src/out/android_Debug_arm64
+            - sandium-checkpoint.tar.zst
+            - sandium-checkpoint.meta
       - save_cache:
           key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
@@ -1003,7 +1042,14 @@ jobs:
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
             set +e
-            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
+            BUILD_FORCE_GN_GEN=()
+            if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
+              BUILD_FORCE_GN_GEN=(--force_gn_gen)
+              echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+            else
+              echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
+            fi
+            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk "${BUILD_FORCE_GN_GEN[@]}" --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-2.log"
             status=${PIPESTATUS[0]}
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
@@ -1039,10 +1085,17 @@ jobs:
             else
               echo "APK_NOT_YET_AVAILABLE=stage-3"
             fi
+      - run:
+          name: Pack stage-3 cumulative Siso checkpoint
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3
       - save_cache:
-          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
+          name: Save stage-3 resumable build checkpoint for the next stage or workflow
+          key: sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
           paths:
-            - src/out/android_Debug_arm64
+            - sandium-checkpoint.tar.zst
+            - sandium-checkpoint.meta
       - save_cache:
           key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
@@ -1181,7 +1234,14 @@ jobs:
             fi
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
-              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
+              BUILD_FORCE_GN_GEN=()
+              if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
+                BUILD_FORCE_GN_GEN=(--force_gn_gen)
+                echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+              else
+                echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
+              fi
+              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk "${BUILD_FORCE_GN_GEN[@]}" --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
               status=${PIPESTATUS[0]}
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
@@ -1216,10 +1276,17 @@ jobs:
           key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
+      - run:
+          name: Pack stage-4 cumulative Siso checkpoint
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4
       - save_cache:
-          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
+          name: Save stage-4 resumable build checkpoint for the next stage or workflow
+          key: sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
           paths:
-            - src/out/android_Debug_arm64
+            - sandium-checkpoint.tar.zst
+            - sandium-checkpoint.meta
       - save_cache:
           key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
@@ -1391,7 +1458,14 @@ jobs:
                 echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
                 echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
                 set +e
-                timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
+                BUILD_FORCE_GN_GEN=()
+                if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
+                  BUILD_FORCE_GN_GEN=(--force_gn_gen)
+                  echo "GN_GRAPH_MODE=REGENERATE_AFTER_CACHE_MISS"
+                else
+                  echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
+                fi
+                timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk "${BUILD_FORCE_GN_GEN[@]}" --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$LOG"
                 status=${PIPESTATUS[0]}
                 set -e
               fi
@@ -1425,10 +1499,17 @@ jobs:
           key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
+      - run:
+          name: Pack stage-5 cumulative Siso checkpoint
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5
       - save_cache:
-          key: sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
+          name: Save stage-5 resumable build checkpoint for the next stage or workflow
+          key: sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-5
           paths:
-            - src/out/android_Debug_arm64
+            - sandium-checkpoint.tar.zst
+            - sandium-checkpoint.meta
       - save_cache:
           key: sandium-apk-v4-{{ .Branch }}-{{ .Revision }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:

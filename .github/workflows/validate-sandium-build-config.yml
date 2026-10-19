@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y python3-yaml shellcheck
+          sudo apt-get install -y python3-yaml shellcheck zstd
           curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh -o /tmp/install-circleci-cli.sh
           sudo bash /tmp/install-circleci-cli.sh
           circleci version
@@ -219,8 +219,14 @@ jobs:
               raise SystemExit("Stage 2 must validate Siso/remoteexec values from args_generated.gni imported by args.gn, not grep args.gn for values it does not contain")
           if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
-          if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage") < 4:
-              raise SystemExit("Compiled output is not restored and checkpointed between all compile stages and runs")
+          if (
+              "restore-sandium-build-output" not in raw
+              or "checkpoint.py restore --root" not in raw
+              or raw.count("checkpoint.py pack --root") != 4
+              or raw.count("sandium-checkpoint-v5-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-") < 4
+              or "sandium-checkpoint-v5-{{ .Branch }}-" not in raw
+          ):
+              raise SystemExit("Compiled output must restore a validated prior-run checkpoint and save a cumulative checkpoint after each compile window")
           if "sandium-pnpm-v1-" not in raw or "src/brave/node_modules" not in raw:
               raise SystemExit("Pinned Node dependencies do not have a reusable cross-run cache")
           if "circleci-agent step halt" not in raw:
@@ -228,6 +234,8 @@ jobs:
           package_helper = Path("ci/siso/package_apk.py").read_text()
           if "apksigner" not in package_helper or "APK_SIGNATURE_VERIFICATION=PASS" not in package_helper:
               raise SystemExit("Final APK signature verification is missing from the package helper")
+          if 'choices=("stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
+              raise SystemExit("APK packaging helper must accept a verified APK produced in Stage 5")
           compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
           if len(compile_windows) != 4:
               raise SystemExit(f"Expected four dynamically bounded compile windows (stages 2-5); got {len(compile_windows)}")
@@ -415,7 +423,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py ci/siso/write_buildbuddy_env.py ci/siso/chromium_pin.py
+          python3 -m py_compile ci/siso/build_state.py ci/siso/package_apk.py ci/siso/write_buildbuddy_env.py ci/siso/chromium_pin.py ci/siso/checkpoint.py
           python3 tests/ci/test_siso_buildbuddy_config.py
           python3 tests/ci/test_siso_build_state.py
           python3 tests/ci/test_chromium_pin.py
+          python3 tests/ci/test_siso_checkpoint.py
