@@ -381,6 +381,8 @@ jobs:
 
           def syntax_check(label, source):
               source = source.replace("\\\\<<", "<<").replace("\\<<", "<<")
+              # CircleCI substitutes these template values before running shell steps.
+              source = re.sub(r"<<\s*(?:parameters|pipeline\.parameters)\.[A-Za-z0-9_.]+\s*>>", "1", source)
               # Validate generated bash scripts nested inside cat-heredocs separately.
               for idx, match in enumerate(build_heredoc.finditer(source), 1):
                   syntax_check(label + f".generated-BUILD-{idx}", match.group("body"))
