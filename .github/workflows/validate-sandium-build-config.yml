@@ -125,8 +125,11 @@ jobs:
           preflight_names = [item if isinstance(item, str) else next(iter(item)) for item in preflight_jobs]
           if preflight_names != expected_jobs[:2]:
               raise SystemExit(f"Preflight must run exactly stages 1-2, not compile stages: {preflight_names}")
+          preflight_stage1_source = str(config["jobs"]["stage-1-source-foundation"])
+          if "SANDIUM_PREFLIGHT_ONLY=true" not in preflight_stage1_source or "COMPILE_WINDOW_1_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true" not in preflight_stage1_source:
+              raise SystemExit("Stage 1 lacks the compile-disabled preflight gate")
           preflight_source = str(config["jobs"]["stage-2-graph-and-compile-window"])
-          if "SANDIUM_PREFLIGHT_ONLY=true" not in preflight_source or "COMPILE_WINDOW_1_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true" not in preflight_source:
+          if "SANDIUM_PREFLIGHT_ONLY=true" not in preflight_source or "COMPILE_WINDOW_2_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true" not in preflight_source:
               raise SystemExit("Stage 2 lacks the compile-disabled preflight gate")
           if "run_sandium_compile_windows:" not in raw:
               raise SystemExit("The explicit compile-window safety parameter is missing")
