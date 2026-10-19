@@ -12,6 +12,7 @@ on:
       - build/sandium-android-debug-apk-2026-10-17
     paths:
       - .github/workflows/sandium-android-apk-trigger.yml
+      - .circleci/config.yml
 
 permissions:
   contents: read
