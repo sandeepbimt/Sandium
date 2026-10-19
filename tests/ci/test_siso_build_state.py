@@ -99,11 +99,11 @@ class BuildStateTests(unittest.TestCase):
         # The real Brave wrapper puts CLI --gn assignments in args_generated.gni
         # and args.gn imports it rather than repeating the assignments.
         (self.out / "args.gn").write_text(
-            'import("//out/android_Debug_arm64/args_generated.gni")\\n',
+            'import("//out/android_Debug_arm64/args_generated.gni")\n',
             encoding="utf-8",
         )
         (self.out / "args_generated.gni").write_text(
-            "use_siso = true\\nuse_reclient = false\\n",
+            "use_siso = true\nuse_reclient = false\n",
             encoding="utf-8",
         )
         fingerprint = state_module._gn_fingerprint()
@@ -111,11 +111,11 @@ class BuildStateTests(unittest.TestCase):
 
     def test_gn_fingerprint_rejects_missing_siso_in_imported_generated_args(self):
         (self.out / "args.gn").write_text(
-            'import("//out/android_Debug_arm64/args_generated.gni")\\n',
+            'import("//out/android_Debug_arm64/args_generated.gni")\n',
             encoding="utf-8",
         )
         (self.out / "args_generated.gni").write_text(
-            "use_reclient = false\\n",
+            "use_reclient = false\n",
             encoding="utf-8",
         )
         with self.assertRaisesRegex(state_module.StateError, "use_siso=true"):
