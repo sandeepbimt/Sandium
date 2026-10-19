@@ -128,6 +128,20 @@ jobs:
               raise SystemExit("Compile commands must explicitly enable remote execution and Siso, and disable reclient")
           if "src/out/android_Debug_arm64/args.gn" not in raw or "src/out/Debug/args.gn" in raw:
               raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
+          prepare_start = raw.find("name: Prepare source overlay and branding before GN")
+          version_start = raw.find("name: Generate Brave version.gni prerequisite before GN")
+          prepare_guard = raw[prepare_start:version_start] if 0 <= prepare_start < version_start else ""
+          required_gn_guard_fragments = (
+              'GENERATED_ARGS="$OUT/args_generated.gni"',
+              'import("//out/android_Debug_arm64/args_generated.gni")',
+              'GN_PREPARE_ARG_SOURCE=ARGS_GENERATED_GNI_IMPORTED',
+              'use_siso',
+              'use_reclient',
+              'use_remoteexec',
+              '"$GENERATED_ARGS"',
+          )
+          if not all(fragment in prepare_guard for fragment in required_gn_guard_fragments):
+              raise SystemExit("Stage 2 must validate Siso/remoteexec values from args_generated.gni imported by args.gn, not grep args.gn for values it does not contain")
           if "build_state.py record" not in raw or "SISO_REMOTE_BACKEND_PROVEN" not in raw:
               raise SystemExit("Resumable build-state checkpoint or honest Siso metrics reporting is missing")
           if "restore-sandium-build-output" not in raw or raw.count("sandium-out-v4-{{ .Branch }}-android-debug-arm64-stage") < 4:
