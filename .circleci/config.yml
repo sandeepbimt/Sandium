@@ -822,26 +822,42 @@ jobs:
           command: |
             set -euo pipefail
             ARGS=src/out/android_Debug_arm64/args.gn
+            GENERATED_ARGS=src/out/android_Debug_arm64/args_generated.gni
             if [[ ! -s "$ARGS" ]]; then
               echo "Expected generated GN arguments at $ARGS."
               find src/out -name args.gn -type f -print || true
               exit 4
             fi
-            GENERATED_ARGS=src/out/android_Debug_arm64/args_generated.gni
             if [[ ! -s "$GENERATED_ARGS" ]]; then
-              echo "Expected generated GN values at $GENERATED_ARGS"
+              echo "Expected generated GN values at $GENERATED_ARGS."
               exit 5
             fi
-            # args.gn is normally only an import wrapper; archive both files so
-            # downloaded artifacts expose the actual values GN consumes.
+            IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
+            if ! grep -Fqx "$IMPORT_LINE" "$ARGS"; then
+              echo "SANDIUM_GN_ARGS_IMPORT=FAIL"
+              exit 6
+            fi
+            if grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS"; then
+              echo "SANDIUM_GN_DIRECT_REMOTE_OVERRIDES=FAIL"
+              exit 7
+            fi
+            if ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS"; then
+              echo "SANDIUM_GN_EFFECTIVE_REMOTE_ARGS=FAIL"
+              grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
+              exit 8
+            fi
             cp -f "$ARGS" build-diagnostics/effective-args.gn
             cp -f "$GENERATED_ARGS" build-diagnostics/effective-args-generated.gni
             {
               echo "BRAVE_BUILD_OPTION_USE_REMOTEEXEC=--use_remoteexec true"
               echo "GN_ARGS_IMPORT_WRAPPER=$ARGS"
               echo "GN_ARGS_EFFECTIVE_SOURCE=$GENERATED_ARGS"
-              grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
-              if grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*            status="$(cat build-diagnostics/compile-window-1-exit.txt)"
+              grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS"
+            } > build-diagnostics/effective-build-mode.txt
+            echo "SANDIUM_GN_EFFECTIVE_REMOTE_ARGS=PASS"
+            status="$(cat build-diagnostics/compile-window-1-exit.txt)"
             COMPLETE=false
             if [[ "$status" == "0" || -s src/out/android_Debug_arm64/apks/Bravearm64.apk ]]; then
               COMPLETE=true
