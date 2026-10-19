@@ -12,6 +12,10 @@ parameters:
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
+  # MODE 2 gate: prepare and inspect GN/Siso first; compile windows require explicit opt-in.
+  run_sandium_compile_windows:
+    type: boolean
+    default: false
 
 commands:
   sandium-smoke-checkpoint:
@@ -770,32 +774,41 @@ jobs:
             },indent=2)+"\n")
             PY
             cd src/brave
-            started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
-            elapsed_seconds="$(( $(date +%s) - started_at ))"
-            remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
-            if [[ "$remaining_compile_seconds" -gt 2400 ]]; then remaining_compile_seconds=2400; fi
-            if [[ "$remaining_compile_seconds" -le 0 ]]; then
-              echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
-              exit 5
-            fi
-            echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
-            echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
-            set +e
-            timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
-            log="$HOME/project/build-diagnostics/compile-window-1.log"
-            evidence="$HOME/project/build-diagnostics/compile-window-1-remote-cache-log-candidates.txt"
-            if grep -Eai 'local:[[:space:]]*[0-9]+[[:space:]]+remote:|remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
-              echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
-              grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_PREFLIGHT_ONLY=true"
+              echo "COMPILE_WINDOW_1_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true"
+              echo "125" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
+              : > "$HOME/project/build-diagnostics/compile-window-1.log"
+              : > "$HOME/project/build-diagnostics/compile-window-1-remote-cache-log-candidates.txt"
             else
-              echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
-              : > "$evidence"
+              started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
+              elapsed_seconds="$(( $(date +%s) - started_at ))"
+              remaining_compile_seconds="$(( 3000 - elapsed_seconds - 600 ))"
+              if [[ "$remaining_compile_seconds" -gt 2400 ]]; then remaining_compile_seconds=2400; fi
+              if [[ "$remaining_compile_seconds" -le 0 ]]; then
+                echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
+                exit 5
+              fi
+              echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
+              echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
+              set +e
+              timeout --signal=INT --kill-after=30s "${remaining_compile_seconds}s" pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" 2>&1 | tee "$HOME/project/build-diagnostics/compile-window-1.log"
+              status=${PIPESTATUS[0]}
+              set -e
+              echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
+              log="$HOME/project/build-diagnostics/compile-window-1.log"
+              evidence="$HOME/project/build-diagnostics/compile-window-1-remote-cache-log-candidates.txt"
+              if grep -Eai 'local:[[:space:]]*[0-9]+[[:space:]]+remote:|remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)' "$log" > "$evidence"; then
+                echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < "$evidence")"
+                grep -Eai 'cache.*(hit|miss)|remote.*(cache|execution)' "$evidence" | tail -n 20 || true
+              else
+                echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
+                : > "$evidence"
+              fi
+              if [[ "$status" -ne 124 ]]; then exit "$status"; fi
+              echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+  
             fi
-            if [[ "$status" -ne 124 ]]; then exit "$status"; fi
-            echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - save_cache:
           key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
@@ -1527,8 +1540,23 @@ jobs:
             - smoke-state/stage-5.json
 
 workflows:
+  # First Mode 2 run: real source/dependency setup and GN/Siso preflight only.
+  sandium-android-preflight:
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_android_apk_build >>
+        - not: << pipeline.parameters.run_sandium_compile_windows >>
+    jobs:
+      - stage-1-source-foundation
+      - stage-2-graph-and-compile-window:
+          requires:
+            - stage-1-source-foundation
+  # Second Mode 2 run: enable only after reviewing the preflight artifacts.
   sandium-android-debug-apk:
-    when: << pipeline.parameters.run_sandium_android_apk_build >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_android_apk_build >>
+        - << pipeline.parameters.run_sandium_compile_windows >>
     jobs:
       - stage-1-source-foundation
       - stage-2-graph-and-compile-window:
