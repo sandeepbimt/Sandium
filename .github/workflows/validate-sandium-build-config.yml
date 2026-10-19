@@ -200,7 +200,8 @@ jobs:
                            and isinstance(step.get("run"), dict)
                            and step["run"].get("name") == name), -1)
           stage2_generator_index = next((i for i, step in enumerate(stage2_steps)
-                                         if isinstance(step, dict) and "generate-sandium-brave-version-gni" in step), -1)
+                                         if step == "generate-sandium-brave-version-gni"
+                                         or (isinstance(step, dict) and "generate-sandium-brave-version-gni" in step)), -1)
           prepare_index = run_step_index(stage2_steps, "Prepare source overlay and branding before GN")
           if stage2_generator_index < 0 or prepare_index < 0 or stage2_generator_index >= prepare_index:
               raise SystemExit("Stage 2 must generate and validate Brave version.gni before the first GN invocation")
@@ -267,11 +268,12 @@ jobs:
                            and step["run"].get("name") == name), None)
           def step_index(steps, key_or_run_name):
               return next((i for i, step in enumerate(steps)
-                           if isinstance(step, dict) and (
-                               key_or_run_name in step or (
-                                   isinstance(step.get("run"), dict)
-                                   and step["run"].get("name") == key_or_run_name
-                               ))), -1)
+                           if step == key_or_run_name or (
+                               isinstance(step, dict) and (
+                                   key_or_run_name in step or (
+                                       isinstance(step.get("run"), dict)
+                                       and step["run"].get("name") == key_or_run_name
+                                   )))), -1)
           deps_index = step_index(stage2_steps, "Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")
           generator_index = step_index(stage2_steps, "generate-sandium-brave-version-gni")
           prepare_index = step_index(stage2_steps, "Prepare source overlay and branding before GN")
