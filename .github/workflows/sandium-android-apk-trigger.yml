@@ -99,58 +99,69 @@ jobs:
             exit 1
           fi
           echo "BUILDBUDDY_CREDENTIAL_READY=true"
-      - name: Cancel superseded CircleCI pipeline 42 if it is still active
+      - name: Cancel active CircleCI workflows on this branch before triggering the corrected build
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
           CIRCLECI_PROJECT_SLUG: "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
-          SUPERSEDED_PIPELINE_ID: "bc7bd357-8fab-4a8e-95ac-973684f3addf"
         shell: bash
         run: |
           set -euo pipefail
           : "${CIRCLECI_TOKEN:?Missing CIRCLECI_TOKEN}"
+          : "${BRANCH:?Missing branch name}"
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
-          url="https://circleci.com/api/v2/pipeline/$SUPERSEDED_PIPELINE_ID/workflow"
-          status="$(curl --silent --show-error --output "$tmp/workflows.json" --write-out "%{http_code}" \
-            --header "Circle-Token: $CIRCLECI_TOKEN" "$url")"
-          if [[ "$status" != "200" ]]; then
-            echo "::error::Unable to inspect superseded pipeline $SUPERSEDED_PIPELINE_ID (HTTP $status); refusing to launch a duplicate full build."
-            cat "$tmp/workflows.json"
+          base="https://circleci.com/api/v2/project/$CIRCLECI_PROJECT_SLUG"
+          pipeline_status="$(curl --silent --show-error --get --output "$tmp/pipelines.json" --write-out "%{http_code}" \
+            --header "Circle-Token: $CIRCLECI_TOKEN" \
+            --data-urlencode "branch=$BRANCH" "$base/pipeline")"
+          if [[ "$pipeline_status" != "200" ]]; then
+            echo "::error::Cannot inspect existing CircleCI pipelines for $BRANCH (HTTP $pipeline_status); refusing to trigger a duplicate full build."
+            cat "$tmp/pipelines.json"
             exit 1
           fi
-          while IFS="$(printf '\t')" read -r workflow_id workflow_status; do
-            [[ -n "$workflow_id" ]] || continue
-            case "$workflow_status" in
-              success|failed|error|canceled|not_run|terminated)
-                echo "SUPERSEDED_WORKFLOW_ALREADY_TERMINAL=$workflow_id:$workflow_status"
-                ;;
-              *)
-                echo "Canceling superseded workflow $workflow_id (status=$workflow_status) before triggering the corrected run."
-                cancel_status="$(curl --silent --show-error --output "$tmp/cancel.json" --write-out "%{http_code}" \
-                  --request POST --header "Circle-Token: $CIRCLECI_TOKEN" \
-                  "https://circleci.com/api/v2/workflow/$workflow_id/cancel")"
-                if [[ "$cancel_status" != "200" && "$cancel_status" != "202" ]]; then
-                  # The workflow may have completed between GET and POST. Re-read its status
-                  # and continue only if the raced workflow is terminal; otherwise fail closed.
-                  curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" "$url" -o "$tmp/workflows-after-cancel.json"
-                  still_active="$(jq -r --arg id "$workflow_id" '.items[]? | select(.id == $id) | .status' "$tmp/workflows-after-cancel.json")"
-                  case "$still_active" in
-                    success|failed|error|canceled|not_run|terminated|"")
-                      echo "SUPERSEDED_WORKFLOW_TERMINAL_AFTER_RACE=$workflow_id:$still_active"
-                      ;;
-                    *)
-                      echo "::error::Unable to cancel active superseded workflow $workflow_id (HTTP $cancel_status); refusing to run two full builds."
-                      cat "$tmp/cancel.json"
-                      exit 1
-                      ;;
-                  esac
-                else
-                  echo "SUPERSEDED_WORKFLOW_CANCEL_ACCEPTED=$workflow_id"
-                fi
-                ;;
-            esac
-          done < <(jq -r '.items[]? | [.id,.status] | @tsv' "$tmp/workflows.json")
-          echo "SUPERSEDED_PIPELINE_CHECK=COMPLETE"
+          while IFS= read -r pipeline_id; do
+            [[ -n "$pipeline_id" ]] || continue
+            workflow_url="https://circleci.com/api/v2/pipeline/$pipeline_id/workflow"
+            workflow_status="$(curl --silent --show-error --output "$tmp/workflows-$pipeline_id.json" --write-out "%{http_code}" \
+              --header "Circle-Token: $CIRCLECI_TOKEN" "$workflow_url")"
+            if [[ "$workflow_status" != "200" ]]; then
+              echo "::error::Cannot inspect CircleCI pipeline $pipeline_id (HTTP $workflow_status); refusing to start a duplicate build."
+              cat "$tmp/workflows-$pipeline_id.json"
+              exit 1
+            fi
+            while IFS="$(printf '\t')" read -r workflow_id workflow_name status; do
+              [[ -n "$workflow_id" ]] || continue
+              case "$status" in
+                success|failed|error|canceled|not_run|terminated)
+                  echo "CIRCLECI_WORKFLOW_ALREADY_TERMINAL=$workflow_id:$status"
+                  ;;
+                *)
+                  echo "Canceling active workflow before corrected trigger: $workflow_id ($workflow_name, status=$status)"
+                  cancel_status="$(curl --silent --show-error --output "$tmp/cancel-$workflow_id.json" --write-out "%{http_code}" \
+                    --request POST --header "Circle-Token: $CIRCLECI_TOKEN" \
+                    "https://circleci.com/api/v2/workflow/$workflow_id/cancel")"
+                  if [[ "$cancel_status" != "200" && "$cancel_status" != "202" ]]; then
+                    curl --fail --silent --show-error --header "Circle-Token: $CIRCLECI_TOKEN" "$workflow_url" -o "$tmp/workflows-after-$pipeline_id.json"
+                    current="$(jq -r --arg id "$workflow_id" '.items[]? | select(.id == $id) | .status' "$tmp/workflows-after-$pipeline_id.json")"
+                    case "$current" in
+                      success|failed|error|canceled|not_run|terminated|"")
+                        echo "CIRCLECI_WORKFLOW_TERMINAL_AFTER_CANCEL_RACE=$workflow_id:$current"
+                        ;;
+                      *)
+                        echo "::error::Unable to cancel active workflow $workflow_id (HTTP $cancel_status); refusing to start another full build."
+                        cat "$tmp/cancel-$workflow_id.json"
+                        exit 1
+                        ;;
+                    esac
+                  else
+                    echo "CIRCLECI_WORKFLOW_CANCEL_ACCEPTED=$workflow_id"
+                  fi
+                  ;;
+              esac
+            done < <(jq -r '.items[]? | [.id,.name,.status] | @tsv' "$tmp/workflows-$pipeline_id.json")
+          done < <(jq -r '.items[]?.id // empty' "$tmp/pipelines.json")
+          echo "CIRCLECI_ACTIVE_BRANCH_WORKFLOWS_CANCELED_OR_TERMINAL=true"
       - name: Trigger the five-stage CircleCI Android APK pipeline
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
