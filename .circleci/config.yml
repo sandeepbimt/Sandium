@@ -138,6 +138,7 @@ commands:
                 keys:
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-
+      - when:
           condition:
             equal: [2, << parameters.stage_index >>]
           steps:
@@ -146,6 +147,7 @@ commands:
                 keys:
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-1-
+      - when:
           condition:
             equal: [3, << parameters.stage_index >>]
           steps:
@@ -154,6 +156,7 @@ commands:
                 keys:
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-2-
+      - when:
           condition:
             equal: [4, << parameters.stage_index >>]
           steps:
@@ -162,6 +165,7 @@ commands:
                 keys:
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-3-
+      - when:
           condition:
             equal: [5, << parameters.stage_index >>]
           steps:
@@ -170,6 +174,7 @@ commands:
                 keys:
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
                   - sandium-checkpoint-v6-{{ .Branch }}-{{ .Revision }}-stage-4-
+      - run:
           name: Ensure zstd is available for compressed build checkpoints
           command: |
             set -euo pipefail
