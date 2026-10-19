@@ -94,7 +94,7 @@ commands:
                 "production_apk_created": False,
             }
             path = root / f"stage-{stage}.json"
-            path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+            path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
             print(f"SANDIUM_SMOKE_STAGE_{stage}=PASS")
             print("SANDIUM_SMOKE_MODE_ONLY=true")
 
