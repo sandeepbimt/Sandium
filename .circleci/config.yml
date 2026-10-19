@@ -7,7 +7,7 @@ parameters:
   # MODE 2: preserve the real pinned Brave/Chromium Android APK build unchanged.
   run_sandium_android_apk_build:
     type: boolean
-    default: true
+    default: false
   # MODE 1: cheap five-job CI mechanics test; never sync or compile Chromium and never publishes an APK.
   run_sandium_ci_smoke_test:
     type: boolean
@@ -15,7 +15,7 @@ parameters:
   # MODE 2 gate: prepare and inspect GN/Siso first; compile windows require explicit opt-in.
   run_sandium_compile_windows:
     type: boolean
-    default: true
+    default: false
 
 commands:
   sandium-smoke-checkpoint:
