@@ -77,11 +77,28 @@ async function runBuildPhaseAsync<T>(
   }
 }
 
+function configureStrictSandiumSisoResume() {
+  if (process.env.SANDIUM_CI_STRICT_REMOTE !== 'true') {
+    throw new Error('SANDIUM CI graph resume requires strict remote execution')
+  }
+  const metricsPath = process.env.SANDIUM_CI_SISO_METRICS_JSON
+  if (!metricsPath || !metricsPath.startsWith('/')) {
+    throw new Error('SANDIUM CI graph resume requires an absolute SANDIUM_CI_SISO_METRICS_JSON path')
+  }
+  const jobs = Number.parseInt(process.env.SANDIUM_CI_NINJA_JOBS || '80', 10)
+  if (!Number.isInteger(jobs) || jobs < 1 || jobs > 80) {
+    throw new Error(`Invalid SANDIUM_CI_NINJA_JOBS value: ${process.env.SANDIUM_CI_NINJA_JOBS}`)
+  }
+  config.extraNinjaOpts.push('-strict_remote', '-metrics_json', metricsPath, `-j${jobs}`)
+  writePhaseDiagnostic(1, 'SANDIUM_STRICT_REMOTE_BUILD=ENABLED')
+  writePhaseDiagnostic(1, `SANDIUM_SISO_METRICS_JSON=${metricsPath}`)
+  writePhaseDiagnostic(1, `SANDIUM_NINJA_JOBS=${jobs}`)
+}
+
 function validateSandiumPreparedGraph(mode: string) {
   const outputDir = config.outputDir
   const requiredFiles = [
     ['build.ninja', join(outputDir, 'build.ninja')],
-    ['build.ninja.stamp', join(outputDir, 'build.ninja.stamp')],
     ['args.gn', join(outputDir, 'args.gn')],
     ['args_generated.gni', join(outputDir, 'args_generated.gni')],
   ] as const
@@ -90,6 +107,10 @@ function validateSandiumPreparedGraph(mode: string) {
     if (!existsSync(filename) || !statSync(filename).isFile() || statSync(filename).size === 0) {
       throw new Error(`SANDIUM ${mode} requires an existing, nonempty ${label}: ${filename}`)
     }
+  }
+  const buildNinjaStamp = join(outputDir, 'build.ninja.stamp')
+  if (!existsSync(buildNinjaStamp) || !statSync(buildNinjaStamp).isFile()) {
+    throw new Error(`SANDIUM ${mode} requires the GN generation stamp: ${buildNinjaStamp}`)
   }
 
   const argsGn = readFileSync(join(outputDir, 'args.gn'), 'utf8')
@@ -231,6 +252,9 @@ export async function build(
     // CI step. Do not touch inputs or regenerate GN between that gate and Siso.
     runBuildPhase('validate-prepared-ninja-graph', () =>
       validateSandiumPreparedGraph('compile resume'),
+    )
+    runBuildPhase('configure-strict-remote-siso-resume', () =>
+      configureStrictSandiumSisoResume(),
     )
     await runBuildPhaseAsync('build-targets-siso-autoninja-resume', () =>
       util.buildTargets(),
