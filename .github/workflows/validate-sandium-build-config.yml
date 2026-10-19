@@ -193,9 +193,18 @@ jobs:
               raise SystemExit("Compile commands must explicitly enable remote execution and Siso, and disable reclient")
           if "src/out/android_Debug_arm64/args.gn" not in raw or "src/out/Debug/args.gn" in raw:
               raise SystemExit("GN output path does not match Brave's Android ARM64 Debug output directory")
-          prepare_start = raw.find("name: Prepare source overlay and branding before GN")
-          version_start = raw.find("name: Generate Brave version.gni prerequisite before GN")
-          prepare_guard = raw[prepare_start:version_start] if 0 <= prepare_start < version_start else ""
+          stage2_steps = config["jobs"]["stage-2-graph-and-compile-window"]["steps"]
+          def run_step_index(steps, name):
+              return next((i for i, step in enumerate(steps)
+                           if isinstance(step, dict)
+                           and isinstance(step.get("run"), dict)
+                           and step["run"].get("name") == name), -1)
+          stage2_generator_index = next((i for i, step in enumerate(stage2_steps)
+                                         if isinstance(step, dict) and "generate-sandium-brave-version-gni" in step), -1)
+          prepare_index = run_step_index(stage2_steps, "Prepare source overlay and branding before GN")
+          if stage2_generator_index < 0 or prepare_index < 0 or stage2_generator_index >= prepare_index:
+              raise SystemExit("Stage 2 must generate and validate Brave version.gni before the first GN invocation")
+          prepare_guard = stage2_steps[prepare_index]["run"]["command"]
           required_gn_guard_fragments = (
               'GENERATED_ARGS="$OUT/args_generated.gni"',
               'import("//out/android_Debug_arm64/args_generated.gni")',
@@ -250,13 +259,26 @@ jobs:
               raise SystemExit("Stage 1 does not run the offline manual-pin cache fast path")
           if '"manual_chromium_pin": tag' not in raw:
               raise SystemExit("Saved source-cache manifest does not record the approved manual Chromium pin")
-          deps_step = raw.find("name: Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")
-          prepare_step = raw.find("name: Prepare source overlay and branding before GN")
-          version_step = raw.find("name: Generate Brave version.gni prerequisite before GN")
-          compile_step = raw.find("name: Validate fingerprint, configure GN and compile window 1")
-          if not (0 <= deps_step < prepare_step < version_step < compile_step):
-              raise SystemExit("Stage 2 must sync Brave-owned DEPS/hooks and verify generated inputs before GN")
-          deps_block = raw[deps_step:prepare_step]
+          stage2_steps = config["jobs"]["stage-2-graph-and-compile-window"]["steps"]
+          def step_run(steps, name):
+              return next((step.get("run", {}) for step in steps
+                           if isinstance(step, dict)
+                           and isinstance(step.get("run"), dict)
+                           and step["run"].get("name") == name), None)
+          def step_index(steps, key_or_run_name):
+              return next((i for i, step in enumerate(steps)
+                           if isinstance(step, dict) and (
+                               key_or_run_name in step or (
+                                   isinstance(step.get("run"), dict)
+                                   and step["run"].get("name") == key_or_run_name
+                               ))), -1)
+          deps_index = step_index(stage2_steps, "Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")
+          generator_index = step_index(stage2_steps, "generate-sandium-brave-version-gni")
+          prepare_index = step_index(stage2_steps, "Prepare source overlay and branding before GN")
+          compile_index = step_index(stage2_steps, "Validate fingerprint, configure GN and compile window 1")
+          if not (0 <= deps_index < generator_index < prepare_index < compile_index):
+              raise SystemExit("Stage 2 must sync Brave-owned DEPS, generate version.gni, prepare GN inputs, then compile")
+          deps_block = step_run(stage2_steps, "Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium")["command"]
           for required in (
               "--require-reusable",
               "--sync_chromium=false",
@@ -264,13 +286,28 @@ jobs:
               "SANDIUM_GCLIENT_MANIFEST_MATCH=PASS",
               "SANDIUM_SOURCE_MANIFEST_MATCH=PASS",
               "src/brave/vendor/bat-native-tweetnacl/BUILD.gn",
-              "src/brave/build/version.gni",
           ):
-              if required not in deps_block and required != "src/brave/build/version.gni":
+              if required not in deps_block:
                   raise SystemExit(f"Stage 2 Brave DEPS restoration is missing guard: {required}")
-          version_block = raw[version_step:compile_step]
-          if "test -s build/version.gni" not in version_block or "SANDIUM_BRAVE_VERSION_GNI=GENERATED" not in version_block:
-              raise SystemExit("GN compile window is not preceded by a generated Brave version.gni validation")
+          version_command = config.get("commands", {}).get("generate-sandium-brave-version-gni", {})
+          version_block = str(version_command)
+          if "python3 build/util/version.py gen ../chrome/VERSION" not in version_block or "test -s build/version.gni" not in version_block or "SANDIUM_BRAVE_VERSION_GNI=GENERATED" not in version_block:
+              raise SystemExit("Shared prerequisite must generate and validate Brave version.gni using Brave's version script")
+          for stage_name in (
+              "stage-2-graph-and-compile-window",
+              "stage-3-compile-continuation",
+              "stage-4-finish-and-package",
+              "stage-5-verify-publish",
+          ):
+              stage_steps = config["jobs"][stage_name]["steps"]
+              gen_index = step_index(stage_steps, "generate-sandium-brave-version-gni")
+              if gen_index < 0:
+                  raise SystemExit(f"{stage_name} is missing the version.gni prerequisite")
+              for i, step in enumerate(stage_steps):
+                  if isinstance(step, dict) and isinstance(step.get("run"), dict):
+                      cmd = step["run"].get("command", "")
+                      if "pnpm run build Debug" in cmd and i <= gen_index:
+                          raise SystemExit(f"{stage_name} invokes GN/build before version.gni is generated")
           pin_helper_source = Path("ci/siso/chromium_pin.py").read_text()
           if '"--require-reusable"' not in pin_helper_source or "CHROMIUM_REUSE_REQUIRED_FAILED=true" not in pin_helper_source:
               raise SystemExit("Stage 2 must fail closed instead of allowing an unintended Chromium refresh")
