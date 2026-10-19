@@ -104,8 +104,32 @@ jobs:
               raise SystemExit("Lightweight smoke mode must remain opt-in by default")
 
           workflow = config.get("workflows", {}).get("sandium-android-debug-apk", {})
-          if workflow.get("when") != "<< pipeline.parameters.run_sandium_android_apk_build >>":
-              raise SystemExit("The five-stage APK workflow is not gated by the opt-in parameter")
+          expected_full_gate = {
+              "and": [
+                  "<< pipeline.parameters.run_sandium_android_apk_build >>",
+                  "<< pipeline.parameters.run_sandium_compile_windows >>",
+              ]
+          }
+          if workflow.get("when") != expected_full_gate:
+              raise SystemExit("The five-stage APK workflow must require explicit full-build and compile-window opt-ins")
+          preflight = config.get("workflows", {}).get("sandium-android-preflight", {})
+          expected_preflight_gate = {
+              "and": [
+                  "<< pipeline.parameters.run_sandium_android_apk_build >>",
+                  {"not": "<< pipeline.parameters.run_sandium_compile_windows >>"},
+              ]
+          }
+          if preflight.get("when") != expected_preflight_gate:
+              raise SystemExit("The real-build preflight must run only when compile windows are explicitly disabled")
+          preflight_jobs = preflight.get("jobs", [])
+          preflight_names = [item if isinstance(item, str) else next(iter(item)) for item in preflight_jobs]
+          if preflight_names != expected_jobs[:2]:
+              raise SystemExit(f"Preflight must run exactly stages 1-2, not compile stages: {preflight_names}")
+          preflight_source = str(config["jobs"]["stage-2-graph-and-compile-window"])
+          if "SANDIUM_PREFLIGHT_ONLY=true" not in preflight_source or "COMPILE_WINDOW_1_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true" not in preflight_source:
+              raise SystemExit("Stage 2 lacks the compile-disabled preflight gate")
+          if "run_sandium_compile_windows:" not in raw:
+              raise SystemExit("The explicit compile-window safety parameter is missing")
           workflow_jobs = workflow.get("jobs", [])
           names = [item if isinstance(item, str) else next(iter(item)) for item in workflow_jobs]
           if names != expected_jobs:
