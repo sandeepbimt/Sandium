@@ -80,28 +80,57 @@ def _chromium_version() -> str:
         raise StateError(f"Chromium source tag is not a four-part numeric version: {version!r}")
     return version
 def _gn_fingerprint() -> str:
-    # GN's args.gn is the actual input generated and read by Brave's GN helper.
-    # Do not depend on args_generated.gni, which is not a standard GN output.
+    # Brave's GN wrapper writes --gn key:value options into
+    # args_generated.gni and imports that file from args.gn. In that normal
+    # case the assignments are not repeated literally in args.gn, so validate
+    # the imported generated file instead of rejecting a valid configuration.
     args_file = OUTPUT_DIR / "args.gn"
     if not args_file.is_file() or args_file.stat().st_size == 0:
         raise StateError(f"Required GN arguments missing or empty: {args_file}")
 
     arguments = args_file.read_text(encoding="utf-8")
+    generated_file = OUTPUT_DIR / "args_generated.gni"
+    import_line = 'import("//out/android_Debug_arm64/args_generated.gni")'
+    generated_imported = re.search(
+        r'(?m)^\s*import\(["\']//out/android_Debug_arm64/args_generated\.gni["\']\)\s*$',
+        arguments,
+    )
+
+    if generated_imported:
+        if not generated_file.is_file() or generated_file.stat().st_size == 0:
+            raise StateError(
+                f"args.gn imports generated GN arguments but file is missing or empty: {generated_file}"
+            )
+        effective_arguments = generated_file.read_text(encoding="utf-8")
+        source_description = str(generated_file)
+    else:
+        # Keep support for valid/direct args.gn assignments (including tests
+        # and manually maintained GN configs) where no generated file import
+        # is present.
+        effective_arguments = arguments
+        source_description = str(args_file)
+
     # use_remoteexec is Brave's build-command/runtime option (passed as
-    # --use_remoteexec true), not a required GN arg in args.gn. Requiring it
-    # here rejects otherwise correctly configured builds after compilation.
-    # Siso itself is controlled through the real GN args below.
+    # --use_remoteexec true), not a required GN arg in args.gn.
     expected_flags = {
         "use_siso": "true",
         "use_reclient": "false",
     }
     for name, value in expected_flags.items():
-        if not re.search(rf"(?m)^\s*{re.escape(name)}\s*=\s*{value}\s*$", arguments):
+        if not re.search(
+            rf"(?m)^\s*{re.escape(name)}\s*=\s*{value}\s*$",
+            effective_arguments,
+        ):
             raise StateError(
-                f"Effective GN args.gn must contain {name}={value}"
+                f"Effective GN arguments in {source_description} must contain {name}={value}"
             )
 
-    return hashlib.sha256(args_file.read_bytes()).hexdigest()
+    # Fingerprint both the wrapper's args.gn and the imported generated file so
+    # changes to CLI-provided GN settings invalidate saved build state.
+    digest = hashlib.sha256(args_file.read_bytes())
+    if generated_imported:
+        digest.update(generated_file.read_bytes())
+    return digest.hexdigest()
 
 
 def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
