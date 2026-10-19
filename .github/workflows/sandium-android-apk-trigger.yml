@@ -2,7 +2,7 @@ name: Sandium Android Debug APK Build Trigger
 # Trigger only after validated five-stage persistent-cache config and helpers are staged.
 # Requires GitHub Actions secret CIRCLECI_TOKEN and CircleCI BUILDBUDDY_API_KEY context.
 # The CircleCI pipeline is the source of truth for build success and APK publication.
-# Controlled retry 2026-10-19: rerun after escaping CircleCI Node heredocs and adding per-stage GN preflight.
+# Controlled Mode 2 preflight 2026-10-19: source + GN/Siso validation only; compile windows explicitly disabled pending review.
 
 on:
   push:
@@ -112,7 +112,7 @@ jobs:
             echo "::error::Repository secret CIRCLECI_TOKEN is missing; no CircleCI pipeline was started."
             exit 1
           fi
-          request_body="$(python3 -c 'import json,os; b=os.environ["BRANCH"]; print(json.dumps({"definition_id":os.environ["PIPELINE_DEFINITION_ID"],"config":{"branch":b},"checkout":{"branch":b},"parameters":{"run_sandium_android_apk_build":True}}))')"
+          request_body="$(python3 -c 'import json,os; b=os.environ["BRANCH"]; print(json.dumps({"definition_id":os.environ["PIPELINE_DEFINITION_ID"],"config":{"branch":b},"checkout":{"branch":b},"parameters":{"run_sandium_android_apk_build":True,"run_sandium_compile_windows":False,"run_sandium_ci_smoke_test":False}}))')"
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
           status="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" \
