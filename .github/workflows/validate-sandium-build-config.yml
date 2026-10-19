@@ -141,12 +141,13 @@ jobs:
               if workflow_ref is None or workflow_ref[job].get("requires") != [upstream]:
                   raise SystemExit(f"Wrong smoke handover dependency for {job}; expected after {upstream}")
           smoke_source = str({name: config["jobs"][name] for name in smoke_jobs})
+          smoke_command_source = str(config.get("commands", {}).get("sandium-smoke-checkpoint", {}))
           for forbidden in ("pnpm run sync", "pnpm run build Debug", "restore-sandium-source", "configure-sandium-remote-cache", "timeout --signal=INT"):
               if forbidden in smoke_source:
-                  raise SystemExit(f"Smoke mode must not run heavy build work: found {forbidden}")
+                  raise SystemExit(f"Smoke jobs must not invoke heavy build work: found {forbidden}")
           if "sandium-smoke-checkpoint" not in config.get("commands", {}):
               raise SystemExit("Smoke mode lacks its stage handover/checkpoint command")
-          if "production_apk_created" not in smoke_source or "SANDIUM_SMOKE_FIVE_STAGE_HANDOVER=PASS" not in smoke_source:
+          if "production_apk_created" not in smoke_command_source or "SANDIUM_SMOKE_FIVE_STAGE_HANDOVER=PASS" not in smoke_command_source:
               raise SystemExit("Smoke mode must prove five-stage handovers without claiming a production APK")
 
           source_text = str(config["jobs"]["stage-1-source-foundation"])
