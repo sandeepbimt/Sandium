@@ -244,7 +244,7 @@ jobs:
               "STAGE_START_OBJECT_COUNT",
               "STAGE_END_OBJECT_COUNT",
               "SISO_SHUTDOWN=CLEAN",
-              "SISO_REMOTE_EXECUTED_ACTION_RECORDS",
+              "remote_executed_action_records",
           ):
               if required_runner_fragment not in runner_source:
                   raise SystemExit(f"Shared compile runner is missing SANDFOX-style gate/metric: {required_runner_fragment}")
@@ -301,7 +301,10 @@ jobs:
           restore_start = raw.find("name: Restore latest prior-workflow SANDIUM checkpoint from any stage")
           if restore_start < 0:
               raise SystemExit("Stage 1 must search for the latest prior-workflow checkpoint from any stage")
-          restore_section = raw[restore_start:restore_start + 650]
+          restore_end = raw.find("\\n      - when:", restore_start)
+          if restore_end < 0:
+              restore_end = len(raw)
+          restore_section = raw[restore_start:restore_end]
           if "sandium-checkpoint-v7-{{ .Branch }}-\\n" not in restore_section or "stage-1-" in restore_section or "stage-5-" in restore_section:
               raise SystemExit("Stage 1 checkpoint discovery must use one branch-wide prefix, not a stage-priority list")
           pins = [line.strip() for line in Path("ci/pins/chromium-tag.txt").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
