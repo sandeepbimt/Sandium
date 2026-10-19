@@ -187,7 +187,7 @@ jobs:
               raise SystemExit("A validated, reusable APK cache must be checked before build setup in every stage")
           if "CIRCLE_SHA1" not in raw or "APK_SHA256=" not in raw or "APK_SIGNATURE_VERIFICATION=PASS" not in Path("ci/siso/package_apk.py").read_text():
               raise SystemExit("Revision pinning or APK verification evidence is missing")
-          if raw.count("package_apk.py --commit") < 5:
+          if raw.count("package_apk.py --commit") < 5
               raise SystemExit("All five stages must package an APK immediately when it appears")
           if "build-state.json" not in raw or "APK_ARTIFACT_VERIFIED=true" not in raw:
               raise SystemExit("The verified APK cache is missing its integrity state and manifest")
@@ -238,15 +238,15 @@ jobs:
           if 'choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
               raise SystemExit("APK packaging helper must accept a verified APK produced in Stage 5")
           compile_windows = re.findall(r'timeout --signal=INT --kill-after=30s "\$\{remaining_compile_seconds\}s" pnpm run build', raw)
-          if len(compile_windows) != 5:
+          if len(compile_windows) != 5
               raise SystemExit(f"Expected five dynamically bounded compile windows (stages 1-5); got {len(compile_windows)}")
           if "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true" not in raw:
               raise SystemExit("Stage 5 must explicitly report if the APK is still missing")
           if config["jobs"]["stage-5-verify-publish"].get("resource_class") != "large":
               raise SystemExit("Stage 5 must use the large runner for the final compile window")
-          if raw.count("Include verified APK in downloadable") < 5:
+          if raw.count("Include verified APK in downloadable") < 5
               raise SystemExit("Every stage with a compile window must expose an APK artifact if it appears")
-          if raw.count("remaining_compile_seconds=2400") < 5:
+          if raw.count("remaining_compile_seconds=2400") < 5
               raise SystemExit("Every compile stage must reserve handover time while allowing a 40-minute compile window")
           if raw.count("Start stage budget clock before restoration and handover") != 5:
               raise SystemExit("All five stages must start their budget clock before cache/checkout handover")
@@ -346,7 +346,7 @@ jobs:
               raise SystemExit("Incorrect nested Chromium source path remains in the CircleCI config")
           if "timeout --signal=INT --kill-after=30s 32m pnpm run sync" not in raw:
               raise SystemExit("Stage 1 source sync must be time-bounded to preserve handover time")
-          if raw.count("no_output_timeout: 45m") != 5:
+          if raw.count("no_output_timeout: 45m") != 5
               raise SystemExit("All five compile stages must permit up to 45 minutes without output before the no-output guard")
 
           command_blocks = []

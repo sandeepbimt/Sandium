@@ -1,22 +1,14 @@
-# SANDIUM five-stage Android debug APK CI.
-# APK builds are opt-in; the pipeline parameter defaults to false.
-
 version: 2.1
-
 parameters:
-  # MODE 2: preserve the real pinned Brave/Chromium Android APK build unchanged.
   run_sandium_android_apk_build:
     type: boolean
     default: false
-  # MODE 1: cheap five-job CI mechanics test; never sync or compile Chromium and never publishes an APK.
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
-  # MODE 2 gate: prepare and inspect GN/Siso first; compile windows require explicit opt-in.
   run_sandium_compile_windows:
     type: boolean
     default: false
-
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -34,7 +26,6 @@ commands:
               python3 tests/ci/test_smoke_checkpoint.py
             fi
             python3 ci/smoke/checkpoint.py "<< parameters.stage >>" "<< parameters.previous_stage >>"
-
   generate-sandium-brave-version-gni:
     steps:
       - run:
@@ -54,7 +45,6 @@ commands:
             grep -q '^chrome_version_string = ' build/version.gni
             echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_AND_VALIDATED"
             grep -E '^(brave_version|chrome_version_string) = ' build/version.gni
-
   install-sandium-node:
     steps:
       - run:
@@ -72,7 +62,6 @@ commands:
             node --version
             npm install --global pnpm@11.11.0
             pnpm --version
-
   restore-sandium-source:
     steps:
       - restore_cache:
@@ -135,7 +124,6 @@ commands:
               rm -f .gclient .gclient_entries .brave_latest_successful_sync.json .sandium-source-cache-manifest.json
               echo "SOURCE_CACHE=INVALID_COLD_START"
             fi
-
   restore-sandium-build-output:
     parameters:
       stage_index:
@@ -230,7 +218,6 @@ commands:
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=false' >> "$BASH_ENV"
               echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=STAGE1_COLD_START_ALLOWED"
             fi
-
   restore-sandium-siso-cache:
     steps:
       - restore_cache:
@@ -244,13 +231,11 @@ commands:
             du -sb sandium-siso-cache | awk '{print "SISO_LOCAL_CACHE_BYTES=" $1}'
             echo "SISO_LOCAL_CACHE_DIRECTORY=$HOME/project/sandium-siso-cache"
             echo "SISO_LOCAL_CACHE_RESTORE_COMPLETED=true"
-
   restore-sandium-pnpm-cache:
     steps:
       - restore_cache:
           keys:
             - sandium-pnpm-v1-{{ .Branch }}-{{ checksum "src/brave/pnpm-lock.yaml" }}-
-
   restore-sandium-apk-cache:
     steps:
       - restore_cache:
@@ -315,8 +300,6 @@ commands:
               mkdir -p sandium-output
               echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=false' >> "$BASH_ENV"
             fi
-
-
   install-sandium-android-build-deps:
     steps:
       - run:
@@ -327,7 +310,6 @@ commands:
             test -x src/build/install-build-deps.sh
             sudo src/build/install-build-deps.sh --android
             echo "ANDROID_BUILD_DEPS_INSTALLED_ON_CURRENT_JOB=true"
-
   configure-sandium-remote-cache:
     steps:
       - run:
@@ -359,7 +341,6 @@ commands:
             echo "SISO_TRUSTED_REMOTE_CACHE_WRITE_CONFIGURED=true"
             echo "REMOTE_EXECUTION_CONFIGURED_FOR_SYNC_ONLY=true"
             echo "REMOTE_EXECUTION_AND_CACHE_USAGE=VERIFY_FROM_SISO_STATS"
-
 jobs:
   stage-1-source-foundation:
     machine:
@@ -434,8 +415,6 @@ jobs:
             python3 - \<<'PY'
             import re, shutil, subprocess
             from pathlib import Path
-            # Brave downstream patches rewrite chrome/VERSION to its own product
-            # version; use the exact tag on the synced Chromium commit as identity.
             actual = subprocess.check_output(
                 ["git", "-C", "src", "describe", "--tags", "--exact-match", "HEAD"],
                 text=True,
@@ -597,8 +576,6 @@ jobs:
               find "$HOME/project/src" -type f -path '*/buildtools/linux64/gn' -o -type f -name gn 2>/dev/null | head -n 30 || true
               exit 1
             fi
-            # Chromium's GN binary lives in buildtools/linux64; depot_tools alone
-            # does not guarantee that this source-built/pinned GN is on PATH.
             echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
             export PATH="$GN_DIR:$PATH"
             echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
@@ -643,159 +620,9 @@ jobs:
               test -s "$OUT/build.ninja" && test -s "$ARGS" && test -s "$GENERATED_ARGS"
               grep -Fqx 'import("//out/android_Debug_arm64/args_generated.gni")' "$ARGS"
               ! grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS"
-              grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
-            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            echo "$status" > "$HOME/project/build-diagnostics/prepare-only-exit.txt"
-            if [[ "$status" -ne 0 ]]; then
-              echo "GN_PREPARE_FAILED=$status; refusing to start the long compile window"
-              exit "$status"
-            fi
-            OUT="$HOME/project/src/out/android_Debug_arm64"
-            ARGS="$OUT/args.gn"
-            GENERATED_ARGS="$OUT/args_generated.gni"
-            IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
-            # Brave's build wrapper writes CLI --gn values to args_generated.gni,
-            # then imports that file from args.gn. Checking args.gn for the literal
-            # values is a false negative: it normally contains only the import.
-            # Also reject direct overrides in args.gn so stale cached settings cannot
-            # silently negate the generated values on a later run.
-            if [[ ! -s "$ARGS" ]] ||
-               [[ ! -s "$GENERATED_ARGS" ]] ||
-               ! grep -Fqx "$IMPORT_LINE" "$ARGS" ||
-               grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS"; then
-              echo "GN_PREPARE_MISSING_REQUIRED_SISO_ARGS=true"
-              echo "EXPECTED_GN_ARGS_FILE=$ARGS"
-              echo "EXPECTED_GENERATED_GN_ARGS_FILE=$GENERATED_ARGS"
-              if [[ -s "$ARGS" ]]; then
-                echo "ARGS_GN_IMPORTS_AND_OVERRIDES:"
-                grep -E 'args_generated\.gni|^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" || true
-              else
-                echo "GN_ARGS_FILE_EXISTS=false"
-              fi
-              if [[ -s "$GENERATED_ARGS" ]]; then
-                echo "GENERATED_GN_REQUIRED_ARGS:"
-                grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
-              else
-                echo "GENERATED_GN_ARGS_FILE_EXISTS=false"
-              fi
-              echo "Refusing to spend a compile window with ineffective Siso GN args."
-              exit 22
-            fi
-            echo "GN_PREPARE_ARG_SOURCE=ARGS_GENERATED_GNI_IMPORTED"
-            echo "GN_PREPARE_REQUIRED_SISO_ARGS=PASS"
-            echo "SANDIUM_PREPARE_ONLY=PASS"
-            cd "$HOME/project"
- "$GENERATED_ARGS"
-              grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
-            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            echo "$status" > "$HOME/project/build-diagnostics/prepare-only-exit.txt"
-            if [[ "$status" -ne 0 ]]; then
-              echo "GN_PREPARE_FAILED=$status; refusing to start the long compile window"
-              exit "$status"
-            fi
-            OUT="$HOME/project/src/out/android_Debug_arm64"
-            ARGS="$OUT/args.gn"
-            GENERATED_ARGS="$OUT/args_generated.gni"
-            IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
-            # Brave's build wrapper writes CLI --gn values to args_generated.gni,
-            # then imports that file from args.gn. Checking args.gn for the literal
-            # values is a false negative: it normally contains only the import.
-            # Also reject direct overrides in args.gn so stale cached settings cannot
-            # silently negate the generated values on a later run.
-            if [[ ! -s "$ARGS" ]] ||
-               [[ ! -s "$GENERATED_ARGS" ]] ||
-               ! grep -Fqx "$IMPORT_LINE" "$ARGS" ||
-               grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS"; then
-              echo "GN_PREPARE_MISSING_REQUIRED_SISO_ARGS=true"
-              echo "EXPECTED_GN_ARGS_FILE=$ARGS"
-              echo "EXPECTED_GENERATED_GN_ARGS_FILE=$GENERATED_ARGS"
-              if [[ -s "$ARGS" ]]; then
-                echo "ARGS_GN_IMPORTS_AND_OVERRIDES:"
-                grep -E 'args_generated\.gni|^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" || true
-              else
-                echo "GN_ARGS_FILE_EXISTS=false"
-              fi
-              if [[ -s "$GENERATED_ARGS" ]]; then
-                echo "GENERATED_GN_REQUIRED_ARGS:"
-                grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
-              else
-                echo "GENERATED_GN_ARGS_FILE_EXISTS=false"
-              fi
-              echo "Refusing to spend a compile window with ineffective Siso GN args."
-              exit 22
-            fi
-            echo "GN_PREPARE_ARG_SOURCE=ARGS_GENERATED_GNI_IMPORTED"
-            echo "GN_PREPARE_REQUIRED_SISO_ARGS=PASS"
-            echo "SANDIUM_PREPARE_ONLY=PASS"
-            cd "$HOME/project"
- "$GENERATED_ARGS"
-              grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
-            pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --force_gn_gen --use_remoteexec true --gn use_siso:true --gn use_reclient:false --gn clang_diagnostic_dir:\"clang-crashreports\" --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/prepare-only.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            echo "$status" > "$HOME/project/build-diagnostics/prepare-only-exit.txt"
-            if [[ "$status" -ne 0 ]]; then
-              echo "GN_PREPARE_FAILED=$status; refusing to start the long compile window"
-              exit "$status"
-            fi
-            OUT="$HOME/project/src/out/android_Debug_arm64"
-            ARGS="$OUT/args.gn"
-            GENERATED_ARGS="$OUT/args_generated.gni"
-            IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
-            # Brave's build wrapper writes CLI --gn values to args_generated.gni,
-            # then imports that file from args.gn. Checking args.gn for the literal
-            # values is a false negative: it normally contains only the import.
-            # Also reject direct overrides in args.gn so stale cached settings cannot
-            # silently negate the generated values on a later run.
-            if [[ ! -s "$ARGS" ]] ||
-               [[ ! -s "$GENERATED_ARGS" ]] ||
-               ! grep -Fqx "$IMPORT_LINE" "$ARGS" ||
-               grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS"; then
-              echo "GN_PREPARE_MISSING_REQUIRED_SISO_ARGS=true"
-              echo "EXPECTED_GN_ARGS_FILE=$ARGS"
-              echo "EXPECTED_GENERATED_GN_ARGS_FILE=$GENERATED_ARGS"
-              if [[ -s "$ARGS" ]]; then
-                echo "ARGS_GN_IMPORTS_AND_OVERRIDES:"
-                grep -E 'args_generated\.gni|^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" || true
-              else
-                echo "GN_ARGS_FILE_EXISTS=false"
-              fi
-              if [[ -s "$GENERATED_ARGS" ]]; then
-                echo "GENERATED_GN_REQUIRED_ARGS:"
-                grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
-              else
-                echo "GENERATED_GN_ARGS_FILE_EXISTS=false"
-              fi
-              echo "Refusing to spend a compile window with ineffective Siso GN args."
-              exit 22
-            fi
-            echo "GN_PREPARE_ARG_SOURCE=ARGS_GENERATED_GNI_IMPORTED"
-            echo "GN_PREPARE_REQUIRED_SISO_ARGS=PASS"
-            echo "SANDIUM_PREPARE_ONLY=PASS"
-            cd "$HOME/project"
- "$GENERATED_ARGS"
+              grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS"
+              grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$GENERATED_ARGS"
+              grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS"
               echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               echo "SANDIUM_PREPARE_ONLY=SKIPPED_VALIDATED_GRAPH_REUSED"
               exit 0
@@ -814,21 +641,13 @@ jobs:
             ARGS="$OUT/args.gn"
             GENERATED_ARGS="$OUT/args_generated.gni"
             IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
-            # Brave's build wrapper writes CLI --gn values to args_generated.gni,
-            # then imports that file from args.gn. Checking args.gn for the literal
-            # values is a false negative: it normally contains only the import.
-            # Also reject direct overrides in args.gn so stale cached settings cannot
-            # silently negate the generated values on a later run.
             if [[ ! -s "$ARGS" ]] ||
                [[ ! -s "$GENERATED_ARGS" ]] ||
                ! grep -Fqx "$IMPORT_LINE" "$ARGS" ||
                grep -Eq '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS"; then
+               ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS"; then
               echo "GN_PREPARE_MISSING_REQUIRED_SISO_ARGS=true"
               echo "EXPECTED_GN_ARGS_FILE=$ARGS"
               echo "EXPECTED_GENERATED_GN_ARGS_FILE=$GENERATED_ARGS"
@@ -914,7 +733,6 @@ jobs:
               fi
               if [[ "$status" -ne 124 ]]; then exit "$status"; fi
               echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
-  
             fi
       - save_cache:
           key: sandium-siso-v1-{{ .Branch }}-android-debug-arm64-stage1-{{ .BuildNum }}
@@ -944,12 +762,9 @@ jobs:
               echo "SANDIUM_GN_DIRECT_REMOTE_OVERRIDES=FAIL"
               exit 7
             fi
-            if ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*
- "$GENERATED_ARGS" ||
-               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*
- "$GENERATED_ARGS"; then
+            if ! grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$GENERATED_ARGS" ||
+               ! grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$GENERATED_ARGS"; then
               echo "SANDIUM_GN_EFFECTIVE_REMOTE_ARGS=FAIL"
               grep -E '^[[:space:]]*(use_siso|use_reclient|use_remoteexec)[[:space:]]*=' "$GENERATED_ARGS" || true
               exit 8
@@ -1007,9 +822,6 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-1-compile-window
-
-
-
   stage-2-graph-and-compile-window:
     machine:
       image: ubuntu-2404:current
@@ -1074,9 +886,6 @@ jobs:
             export SANDIUM_SISO_CACHE_DIR="$ROOT/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             set +e
-            # Chromium reuse is mandatory here. The explicit false flag makes Brave's
-            # sync code skip the Chromium solution and sync only Brave's own DEPS
-            # plus the upstream hooks generated from the restored checkout.
             pnpm run sync --target_os=android --target_arch=arm64 --no-history --sync_chromium=false 2>&1 | tee "$ROOT/build-diagnostics/stage2-brave-deps-sync.log"
             sync_status=${PIPESTATUS[0]}
             set -e
@@ -1154,8 +963,6 @@ jobs:
               find "$HOME/project/src" -type f -path '*/buildtools/linux64/gn' -o -type f -name gn 2>/dev/null | head -n 30 || true
               exit 1
             fi
-            # Chromium's GN binary lives in buildtools/linux64; depot_tools alone
-            # does not guarantee that this source-built/pinned GN is on PATH.
             echo "export PATH=$GN_DIR:\$PATH" >> "$BASH_ENV"
             export PATH="$GN_DIR:$PATH"
             echo "SANDIUM_GN_EXPECTED_PATH=$GN_BIN"
@@ -1207,11 +1014,6 @@ jobs:
             ARGS="$OUT/args.gn"
             GENERATED_ARGS="$OUT/args_generated.gni"
             IMPORT_LINE='import("//out/android_Debug_arm64/args_generated.gni")'
-            # Brave's build wrapper writes CLI --gn values to args_generated.gni,
-            # then imports that file from args.gn. Checking args.gn for the literal
-            # values is a false negative: it normally contains only the import.
-            # Also reject direct overrides in args.gn so stale cached settings cannot
-            # silently negate the generated values on a later run.
             if [[ ! -s "$ARGS" ]] ||
                [[ ! -s "$GENERATED_ARGS" ]] ||
                ! grep -Fqx "$IMPORT_LINE" "$ARGS" ||
@@ -1342,8 +1144,6 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-2-compile-continuation
-
-
   stage-3-compile-continuation:
     machine:
       image: ubuntu-2404:current
@@ -1444,7 +1244,6 @@ jobs:
             STATE=src/brave/ci/siso/build_state.py
             LOG="$HOME/project/build-diagnostics/compile-window-3.log"
             status=0
-
             if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
               echo "FINAL_COMPILE_SKIPPED=COMPLETED_COMPILE_STATE"
               : > "$LOG"
@@ -1482,14 +1281,12 @@ jobs:
               fi
               cd "$HOME/project"
             fi
-
             if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)|local:[[:space:]]*[0-9]+[[:space:]]+remote:' "$LOG" > build-diagnostics/compile-window-3-remote-cache-log-candidates.txt; then
               echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < build-diagnostics/compile-window-3-remote-cache-log-candidates.txt)"
             else
               : > build-diagnostics/compile-window-3-remote-cache-log-candidates.txt
               echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
             fi
-
             COMPLETE=false
             if [[ "$status" -eq 0 || -s "$OUT/apks/Bravearm64.apk" ]]; then
               COMPLETE=true
@@ -1535,8 +1332,6 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-3-finish-build
-
-
   stage-4-finish-and-package:
     machine:
       image: ubuntu-2404:current
@@ -1637,7 +1432,6 @@ jobs:
             STATE=src/brave/ci/siso/build_state.py
             LOG="$HOME/project/build-diagnostics/compile-window-4.log"
             status=0
-
             if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
               echo "FINAL_COMPILE_SKIPPED=COMPLETED_COMPILE_STATE"
               : > "$LOG"
@@ -1675,14 +1469,12 @@ jobs:
               fi
               cd "$HOME/project"
             fi
-
             if grep -Eai 'remote.*(cache|execution)|cache.*(hit|miss|lookup)|action.*cache|siso.*(cache|remote)|local:[[:space:]]*[0-9]+[[:space:]]+remote:' "$LOG" > build-diagnostics/compile-window-4-remote-cache-log-candidates.txt; then
               echo "REMOTE_CACHE_LOG_MATCHES=$(wc -l < build-diagnostics/compile-window-4-remote-cache-log-candidates.txt)"
             else
               : > build-diagnostics/compile-window-4-remote-cache-log-candidates.txt
               echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
             fi
-
             COMPLETE=false
             if [[ "$status" -eq 0 || -s "$OUT/apks/Bravearm64.apk" ]]; then
               COMPLETE=true
@@ -1728,8 +1520,6 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-4-finish-build
-
-
   stage-5-verify-publish:
     machine:
       image: ubuntu-2404:current
@@ -1989,8 +1779,6 @@ jobs:
             print("APK_ARTIFACT_VERIFIED=true")
             print("SISO_REMOTE_BACKEND_PROVEN="+str(manifest.get("remote_execution_usage", {}).get("proven_from_siso_stats", False)).lower())
             PY
-
-
   smoke-1-contract-and-foundation:
     machine:
       image: ubuntu-2404:current
@@ -2005,7 +1793,6 @@ jobs:
           root: ~/project
           paths:
             - smoke-state/stage-1.json
-
   smoke-2-build-state-tests:
     machine:
       image: ubuntu-2404:current
@@ -2022,7 +1809,6 @@ jobs:
           root: ~/project
           paths:
             - smoke-state/stage-2.json
-
   smoke-3-handover-continuity:
     machine:
       image: ubuntu-2404:current
@@ -2039,7 +1825,6 @@ jobs:
           root: ~/project
           paths:
             - smoke-state/stage-3.json
-
   smoke-4-cache-and-artifact-contract:
     machine:
       image: ubuntu-2404:current
@@ -2056,7 +1841,6 @@ jobs:
           root: ~/project
           paths:
             - smoke-state/stage-4.json
-
   smoke-5-independent-handover-verification:
     machine:
       image: ubuntu-2404:current
@@ -2073,9 +1857,7 @@ jobs:
           root: ~/project
           paths:
             - smoke-state/stage-5.json
-
 workflows:
-  # First Mode 2 run: real source/dependency setup and GN/Siso preflight only.
   sandium-android-preflight:
     when:
       and:
@@ -2086,7 +1868,6 @@ workflows:
       - stage-2-graph-and-compile-window:
           requires:
             - stage-1-source-foundation
-  # Second Mode 2 run: enable only after reviewing the preflight artifacts.
   sandium-android-debug-apk:
     when:
       and:

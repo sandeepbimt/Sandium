@@ -67,7 +67,7 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
 
     def test_corrupt_checkpoint_does_not_delete_existing_output(self):
-        packed = self.invoke("pack", "--stage", "stage-2")
+        packed = self.invoke("pack", "--stage", "stage-1")
         self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
         sentinel = self.output / "preserve.txt"
         sentinel.write_text("existing output", encoding="utf-8")
@@ -85,7 +85,7 @@ class CheckpointTests(unittest.TestCase):
         state = json.loads(path.read_text(encoding="utf-8"))
         state["chromium_version"] = "not-a-version"
         path.write_text(json.dumps(state), encoding="utf-8")
-        result = self.invoke("pack", "--stage", "stage-2")
+        result = self.invoke("pack", "--stage", "stage-1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid Chromium version", result.stderr)
 
