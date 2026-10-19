@@ -45,6 +45,11 @@ FALLBACK_RETRY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+SISO_METRIC_LINE_PATTERN = re.compile(
+    r"^SISO_(?P<metric>REMOTE_EXECUTED_ACTION_RECORDS|LOCAL_ACTION_RECORDS|"
+    r"CACHED_ACTION_RECORDS|NO_EXEC_ACTION_RECORDS)=(?P<value>\d+)\s*$"
+)
+
 
 class StateError(RuntimeError):
     pass
@@ -182,6 +187,21 @@ def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
             found = True
             metrics["local_fallbacks"] = int(fallback_retry.group("fallback"))
             metrics["remote_retries"] = int(fallback_retry.group("retry"))
+
+        # The SANDFOX-style JSONL parser emits these explicit counters. Only
+        # count actual non-cached, non-local Siso actions as remote executions;
+        # a generic cached action is not automatically proof of remote-cache use.
+        siso_metric = SISO_METRIC_LINE_PATTERN.match(line.strip())
+        if siso_metric:
+            found = True
+            value = int(siso_metric.group("value"))
+            metric_name = siso_metric.group("metric")
+            if metric_name == "REMOTE_EXECUTED_ACTION_RECORDS":
+                metrics["remote_actions"] = value
+            elif metric_name == "LOCAL_ACTION_RECORDS":
+                metrics["local_actions"] = value
+            elif metric_name == "NO_EXEC_ACTION_RECORDS":
+                metrics["skipped_actions"] = value
 
     return metrics, found
 
