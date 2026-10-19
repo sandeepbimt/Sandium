@@ -205,6 +205,7 @@ def main() -> int:
         }
     except OSError:
         prior_frontier = set()
+    prior_frontier_path.touch(exist_ok=True)
 
     objects_before, outputs_before = count_outputs(out_dir)
     log_lines: set[str] = set()
@@ -231,7 +232,9 @@ def main() -> int:
         emit(log, f"STAGE_START_BUILD_OUTPUT_COUNT={outputs_before}")
         emit(log, f"RESTORED_OBJECT_COUNT={objects_before}")
         emit(log, f"RESTORED_BUILD_OUTPUT_COUNT={outputs_before}")
-        emit(log, f"RESTORED_OUTPUT_BYTES={sum(p.stat().st_size for p in out_dir.rglob('*') if p.is_file())}")
+        checkpoint_archive = root / "sandium-checkpoint.tar.zst"
+        checkpoint_bytes = checkpoint_archive.stat().st_size if checkpoint_archive.is_file() else 0
+        emit(log, f"RESTORED_CHECKPOINT_ARCHIVE_BYTES={checkpoint_bytes}")
         emit(log, "SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1")
         emit(log, "SOURCE_TIMESTAMP_VERIFY=PASS")
         if remaining <= 0:
