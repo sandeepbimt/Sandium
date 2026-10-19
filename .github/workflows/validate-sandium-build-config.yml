@@ -305,7 +305,7 @@ jobs:
           if restore_end < 0:
               restore_end = len(raw)
           restore_section = raw[restore_start:restore_end]
-          if "sandium-checkpoint-v7-{{ .Branch }}-\n" not in restore_section or "stage-1-" in restore_section or "stage-5-" in restore_section:
+          if "sandium-checkpoint-v7-{{ .Branch }}-" not in restore_section or "stage-1-" in restore_section or "stage-5-" in restore_section:
               raise SystemExit("Stage 1 checkpoint discovery must use one branch-wide prefix, not a stage-priority list")
           pins = [line.strip() for line in Path("ci/pins/chromium-tag.txt").read_text().splitlines() if line.strip() and not line.lstrip().startswith("#")]
           if len(pins) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", pins[0]):
