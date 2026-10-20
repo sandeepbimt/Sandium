@@ -28,6 +28,28 @@ class RemotePreflightTests(unittest.TestCase):
             path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
             return preflight.parse_remote_probe_metrics(path)
 
+    def test_probe_rule_is_found_in_generated_subninja_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fragment = Path(directory) / "test_support.ninja"
+            fragment.write_text(
+                "build obj/base/test/test_support/mock_log.o "
+                "obj/base/test/test_support/mock_log.dwo: cxx "
+                "../../base/test/mock_log.cc\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(preflight.has_probe_rule(fragment))
+            fragment.write_text(
+                "build obj/base/test/test_support/other.o: cxx "
+                "../../base/test/other.cc\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(preflight.has_probe_rule(fragment))
+
+    def test_probe_rule_rejects_missing_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fragment = Path(directory) / "missing.ninja"
+            self.assertFalse(preflight.has_probe_rule(fragment))
+
     def test_accepts_only_uncached_remote_probe_output(self):
         metrics = self.parse([
             record("obj/base/test/test_support/mock_log.o", is_remote=True, cached=False, no_exec=False),

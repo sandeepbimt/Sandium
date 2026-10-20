@@ -24,6 +24,18 @@ HANDOVER_RESERVE_SECONDS = 600
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def has_probe_rule(fragment: Path) -> bool:
+    """Check the generated GN subninja that owns the test_support C++ rule."""
+    if not fragment.is_file() or fragment.stat().st_size == 0:
+        return False
+    with fragment.open(encoding="utf-8", errors="replace") as stream:
+        return any(
+            line.startswith("build " + PROBE_TARGET + " ")
+            and "../../base/test/mock_log.cc" in line
+            for line in stream
+        )
+
+
 def parse_remote_probe_metrics(path: Path) -> dict[str, int]:
     if not path.is_file():
         raise ValueError("Siso metrics JSONL was not produced: " + str(path))
@@ -154,9 +166,14 @@ def run(root: Path) -> int:
     target = out / PROBE_TARGET
     target.unlink(missing_ok=True)
     Path(str(target) + ".dwo").unlink(missing_ok=True)
-    with (out / "build.ninja").open(encoding="utf-8", errors="replace") as stream:
-        if not any(PROBE_TARGET in line for line in stream):
-            raise ValueError("Pinned GN graph does not contain the test-only C++ probe target")
+    # GN emits per-target rules in subninja fragments; this object is in
+    # obj/base/test/test_support.ninja, not necessarily in root build.ninja.
+    target_fragment = out / "obj/base/test/test_support.ninja"
+    if not has_probe_rule(target_fragment):
+        raise ValueError(
+            "Pinned GN subninja does not contain the expected test_support "
+            "C++ rule for obj/base/test/test_support/mock_log.o"
+        )
 
     autoninja = shutil.which("autoninja") or str(brave / "vendor/depot_tools/autoninja")
     if not Path(autoninja).is_file() or not os.access(autoninja, os.X_OK):
