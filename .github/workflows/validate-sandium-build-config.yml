@@ -523,5 +523,6 @@ jobs:
           python3 tests/ci/test_siso_buildbuddy_config.py
           python3 tests/ci/test_siso_build_state.py
           python3 tests/ci/test_chromium_pin.py
+          python3 tests/ci/test_sync_utils_contract.py
           python3 tests/ci/test_siso_checkpoint.py
           python3 tests/ci/test_sandium_compile_window.py
