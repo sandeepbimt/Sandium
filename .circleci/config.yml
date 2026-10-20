@@ -798,7 +798,7 @@ jobs:
               "brave_core_commit":subprocess.check_output(["git","-C","src/brave","rev-parse","HEAD"],text=True).strip(),
               "chromium_commit":subprocess.check_output(["git","-C","src","rev-parse","HEAD"],text=True).strip(),
               "chromium_version":v,"target":"android-arm64","config":"Debug","format":"apk",
-              "siso_revision":"c574896b272b40aac6e44c228ee0b471ea7e3d7d",
+              "siso_revision":"bc45e8f67ae0f37d337190ad64aa8bb440c791eb",
               "build_command_args":["Debug","--target_os=android","--target_arch=arm64","--target_android_output_format=apk","--use_remoteexec","true","--gn","use_siso:true","--gn","use_reclient:false","--gn","clang_diagnostic_dir:\"clang-crashreports\""]
             },indent=2)+"\n")
             PY
