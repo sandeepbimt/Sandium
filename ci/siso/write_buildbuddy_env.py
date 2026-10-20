@@ -25,11 +25,15 @@ SISO_VERSION_LABEL = "v1.5.28"
 
 
 def validate_instance(instance: str) -> None:
+    # SANDFOX's successful configuration uses BuildBuddy's default instance.
+    # Keep the Sandium namespace available for an explicitly verified service setup.
+    if instance == "default":
+        return
     if not isinstance(instance, str) or not re.fullmatch(
         r"sandium/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*", instance
     ):
         raise ValueError(
-            "SANDIUM_REAPI_INSTANCE must use a stable Sandium-prefixed "
+            "SANDIUM_REAPI_INSTANCE must be 'default' or a stable Sandium-prefixed "
             "namespace such as sandium/android-arm64/ci"
         )
     if any(part in (".", "..") for part in instance.split("/")):
