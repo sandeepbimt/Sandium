@@ -14,6 +14,10 @@ on:
       - build/sandium-android-debug-apk-2026-10-17
     paths:
       - .github/workflows/sandium-android-apk-trigger.yml
+      - .circleci/config.yml
+      - ci/siso/**
+      - tests/ci/**
+      - SANDIUM_FAILURE_LEARNINGS.md
       - build/commands/lib/build.ts
 
 permissions:
@@ -41,6 +45,18 @@ jobs:
             exit 1
           fi
           echo "Approved isolated Sandium branch: $BRANCH"
+
+      - name: Check out the exact commit before triggering CircleCI
+        uses: actions/checkout@v4
+
+      - name: Validate remote preflight code and regression tests before spending CircleCI resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py ci/siso/build_state.py
+          python3 tests/ci/test_siso_remote_preflight.py
+          python3 tests/ci/test_siso_build_state.py
+          echo "SANDIUM_GITHUB_PREBUILD_VALIDATION=PASS"
 
       - name: Ensure BuildBuddy credential is configured in the isolated CircleCI project
         env:

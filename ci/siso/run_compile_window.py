@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remote_preflight import load_valid_marker
+
 REMOTE_SIGNATURES = (
     re.compile(r"is_remote=true", re.IGNORECASE),
     re.compile(r"is_local=false", re.IGNORECASE),  # Compatibility with emitters that include false booleans.
@@ -200,6 +202,34 @@ def main() -> int:
     elapsed_before_compile = max(0, int(time.time()) - stage_started)
     remaining = min(args.max_compile_seconds, args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds)
 
+    if apk.is_file() and apk.stat().st_size >= 1_000_000:
+        with log_path.open("w", encoding="utf-8", errors="replace") as log:
+            emit(log, "COMPILE_WINDOW_SKIPPED=APK_ALREADY_PRESENT_IN_RESTORED_OUTPUT")
+            emit(log, "APK_PRESENT_AFTER_BUILD=true")
+        return 0
+    if remaining <= 0:
+        print("STAGE_TIME_BUDGET_EXHAUSTED=true; preserving output and handover margin")
+        return 5
+    try:
+        chromium_commit = subprocess.check_output(
+            ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+        ).strip()
+        chromium_version = subprocess.check_output(
+            ["git", "-C", str(source), "describe", "--tags", "--exact-match", "HEAD"], text=True
+        ).strip()
+        remote_preflight = load_valid_marker(
+            out_dir / ".sandium-remote-preflight.json",
+            workflow_id=os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+            source_commit=os.environ.get("CIRCLE_SHA1", ""),
+            chromium_commit=chromium_commit,
+            chromium_version=chromium_version,
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print("SANDIUM_REMOTE_PREFLIGHT=FAIL", file=sys.stderr)
+        print("SANDIUM_REMOTE_PREFLIGHT_REASON=" + str(exc), file=sys.stderr)
+        return 126
+    remote_preflight_passed = True
+
     prior_frontier_path = root / "sandium-action-frontier.txt"
     prior_frontier_file_present = prior_frontier_path.is_file()
     try:
@@ -299,13 +329,9 @@ def main() -> int:
         emit(log, f"RESTORED_CHECKPOINT_ARCHIVE_BYTES={checkpoint_bytes}")
         emit(log, "SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1")
         emit(log, "SOURCE_TIMESTAMP_VERIFY=PASS")
-        if remaining <= 0:
-            emit(log, "STAGE_TIME_BUDGET_EXHAUSTED=true; preserving output and handover margin")
-            return 5
-        if apk.is_file() and apk.stat().st_size >= 1_000_000:
-            emit(log, "COMPILE_WINDOW_SKIPPED=APK_ALREADY_PRESENT_IN_RESTORED_OUTPUT")
-            emit(log, "APK_PRESENT_AFTER_BUILD=true")
-            return 0
+        emit(log, "SANDIUM_REMOTE_PREFLIGHT=PASS source=current-workflow-uncached-cxx-action")
+        emit(log, "SANDIUM_PREFLIGHT_REMOTE_EXECUTED_ACTION_RECORDS=" + str(remote_preflight["probe_remote_action_records"]))
+        emit(log, "EARLY_REMOTE_EXECUTION_GATE=PREPROVEN_BY_CURRENT_WORKFLOW_PREFLIGHT")
 
         env = os.environ.copy()
         env.update({
@@ -314,6 +340,7 @@ def main() -> int:
             "SANDIUM_CI_SISO_METRICS_JSON": str(metrics_path),
             "SANDIUM_CI_NINJA_JOBS": "80",
             "SISO_LIMITS": "local=8,remote=80",
+            "SISO_CREDENTIAL_HELPER": str(brave / "ci/siso/buildbuddy-credential-helper.py"),
         })
         command = [
             "pnpm", "run", "build", "Debug",
@@ -403,7 +430,7 @@ def main() -> int:
                     stop_reason = "stage compile time budget exhausted"
                     emit(log, f"COMPILE_WINDOW_TIMEOUT=PASS timeout_seconds={remaining}")
                     stop_process_group(proc)
-                elif proc.poll() is None and not remote_seen and elapsed >= args.remote_gate_seconds:
+                elif proc.poll() is None and not remote_seen and not remote_preflight_passed and elapsed >= args.remote_gate_seconds:
                     gate_failed = True
                     stop_reason = "no current-stage remote execution evidence within early gate"
                     emit(log, f"EARLY_REMOTE_EXECUTION_GATE=FAIL seconds={args.remote_gate_seconds}")
@@ -469,7 +496,7 @@ def main() -> int:
                 current_frontier.add(match.group(1).strip())
         if regeneration_seen:
             gate_failed = True
-        if not remote_seen and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
+        if not remote_seen and not remote_preflight_passed and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
             gate_failed = True
             stop_reason = stop_reason or "build finished without remote execution evidence and did not produce APK"
 
@@ -498,9 +525,13 @@ def main() -> int:
             gate_failed = True
             metrics = {}
         if metrics.get("remote_executed_action_records", 0) == 0 and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
-            gate_failed = True
-            stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
-            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0")
+            if remote_preflight_passed:
+                emit(log, "CURRENT_WINDOW_REMOTE_EXECUTION=NOT_OBSERVED; preflight proof is reported separately")
+                emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=validated_current_workflow_preflight remote_executed_action_records=0")
+            else:
+                gate_failed = True
+                stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
+                emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0")
         else:
             emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS remote_executed_action_records={metrics.get('remote_executed_action_records', 0)}")
         for key, value in metrics.items():

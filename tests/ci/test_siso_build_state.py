@@ -216,6 +216,19 @@ class BuildStateTests(unittest.TestCase):
         with self.assertRaises(state_module.StateError):
             state_module._valid_artifact_cache(self.commit)
 
+    def test_remote_preflight_proof_is_recorded_separately_from_compile_actions(self):
+        log = self.root / "preflight-proof.log"
+        log.write_text(
+            "SANDIUM_REMOTE_PREFLIGHT=PASS source=current-workflow-uncached-cxx-action\n"
+            "SANDIUM_PREFLIGHT_REMOTE_EXECUTED_ACTION_RECORDS=1\n",
+            encoding="utf-8",
+        )
+        metrics, found = state_module._remote_metrics(str(log))
+        self.assertTrue(found)
+        self.assertEqual(metrics["remote_actions"], 0)
+        self.assertEqual(metrics["preflight_remote_actions"], 1)
+        self.assertTrue(state_module._remote_backend_proven(metrics))
+
     def test_remote_metrics_parser_handles_siso_counters_split_across_lines(self):
         log = self.root / "split-siso-stats.log"
         log.write_text(

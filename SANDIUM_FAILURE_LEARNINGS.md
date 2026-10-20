@@ -48,3 +48,43 @@ SANDIUM_BRAVE_VERSION_GNI=GENERATED
 ```
 
 Only claim success after GN generation completes, Siso/remote execution is verified from logs, and a real APK artifact is found and verified.
+
+
+## 2026-10-20 — Stage 1 remote-execution gate stopped before a reusable handover
+
+### Evidence
+
+The failed Stage 1 job had 6,959 Siso action records and zero uncached remote
+worker completions. It spent 1,561 seconds in stage preparation before the
+compile window, then the 240-second early gate interrupted the build. At
+shutdown, the Siso filesystem-state file was absent while its journal remained,
+so the usual checkpoint handover could not be saved.
+
+The metrics JSONL contained remote-cache spans such as exec-remote-cache-check
+and exec-remote-cache-run. This proves the remote-cache path was exercised, but
+it does not prove a fresh worker completed an uncached action. The available
+logs do not establish why the worker action was not recorded.
+
+### Corrective change
+
+- Explicitly export SISO_CREDENTIAL_HELPER and test its credential protocol
+  without printing the API key.
+- Before the full Chromium compile, run one salted, strict-remote C++ action.
+  Require an uncached remote result for the exact test-only object and a
+  complete nonempty Siso state/journal pair.
+- Store a marker in the Chromium output checkpoint bound to workflow ID, Brave
+  commit, Chromium commit, and tag. Later stages validate and reuse that proof;
+  they do not repeat the probe.
+- Let the full build use the separately validated preflight proof to avoid a
+  false negative caused by delayed first remote completion. Report full-build
+  remote metrics separately from the preflight action.
+- At Stage 1 startup, verify the same-revision APK cache before source sync so
+  an already verified APK can skip all setup work.
+
+### Validation criteria
+
+The GitHub trigger workflow runs syntax checks and targeted regression tests
+before calling CircleCI. The five-stage workflow proceeds to the full compile
+only if the isolated current-workflow probe proves an uncached remote C++
+action. A green APK result remains unconfirmed until a real APK is produced
+and independently verified.

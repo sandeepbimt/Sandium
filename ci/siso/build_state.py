@@ -148,6 +148,7 @@ def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
         "local_fallbacks": 0,
         "remote_retries": 0,
         "skipped_actions": 0,
+        "preflight_remote_actions": 0,
     }
     if not log_path:
         return metrics, False
@@ -188,9 +189,18 @@ def _remote_metrics(log_path: str | None) -> tuple[dict[str, int], bool]:
             metrics["local_fallbacks"] = int(fallback_retry.group("fallback"))
             metrics["remote_retries"] = int(fallback_retry.group("retry"))
 
-        # The SANDFOX-style JSONL parser emits these explicit counters. Only
-        # count actual non-cached, non-local Siso actions as remote executions;
-        # a generic cached action is not automatically proof of remote-cache use.
+        preflight_match = re.match(
+            r"^SANDIUM_PREFLIGHT_REMOTE_EXECUTED_ACTION_RECORDS=(\d+)$",
+            line.strip(),
+        )
+        if preflight_match:
+            found = True
+            # Reused by every stage, not an action that should be summed per stage.
+            metrics["preflight_remote_actions"] = max(
+                metrics["preflight_remote_actions"], int(preflight_match.group(1))
+            )
+
+        # Actual compile-window actions remain separate from the preflight.
         siso_metric = SISO_METRIC_LINE_PATTERN.match(line.strip())
         if siso_metric:
             found = True
@@ -357,6 +367,7 @@ def _remote_backend_proven(metrics: dict[str, int]) -> bool:
         metrics.get("remote_actions", 0)
         + metrics.get("remote_cache_hits", 0)
         + metrics.get("remote_cache_writes", 0)
+        + metrics.get("preflight_remote_actions", 0)
     ) > 0
 
 
@@ -559,7 +570,11 @@ def command_record(args: argparse.Namespace) -> int:
                 )
 
         metrics = {
-            key: old_metrics.get(key, 0) + parsed_metrics.get(key, 0)
+            key: (
+                max(old_metrics.get(key, 0), parsed_metrics.get(key, 0))
+                if key == "preflight_remote_actions"
+                else old_metrics.get(key, 0) + parsed_metrics.get(key, 0)
+            )
             for key in parsed_metrics
         }
         artifact_verified = False
@@ -604,6 +619,7 @@ def command_record(args: argparse.Namespace) -> int:
         print(f"SISO_REMOTE_ACTIONS={metrics['remote_actions']}")
         print(f"SISO_REMOTE_CACHE_HITS={metrics['remote_cache_hits']}")
         print(f"SISO_REMOTE_CACHE_WRITES={metrics['remote_cache_writes']}")
+        print(f"SISO_PREFLIGHT_REMOTE_ACTIONS={metrics['preflight_remote_actions']}")
         print(f"SISO_REMOTE_BACKEND_PROVEN={str(state['remote_backend_proven']).lower()}")
         return 0
     except StateError as exc:

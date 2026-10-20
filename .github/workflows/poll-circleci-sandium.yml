@@ -99,7 +99,7 @@ jobs:
                 echo "ARTIFACT_LIST_UNAVAILABLE: job=$job_number"
                 continue
               fi
-              jq -r '.items[]? | select(.path | test("compile-window-[1-5]\\.log$|compile-window-[1-5]-metrics\\.jsonl$|fingerprint\\.json$|args\\.gn$|remote.*log|gn_logs\\.txt$|siso\\.INFO$|sisorc$|brave-env-redacted\\.txt$|sandium-checkpoint\\.meta$|capture-manifest\\.txt$|checkpoint.*log|restore.*log|pack.*log"; "i")) | [.path,.url] | @tsv' "$artifact_json" |
+              jq -r '.items[]? | select(.path | test("compile-window-[1-5]\\.log$|compile-window-[1-5]-metrics\\.jsonl$|remote-preflight-metrics\\.jsonl$|remote-preflight\\.log$|fingerprint\\.json$|args\\.gn$|remote.*log|gn_logs\\.txt$|siso\\.INFO$|sisorc$|brave-env-redacted\\.txt$|sandium-checkpoint\\.meta$|capture-manifest\\.txt$|checkpoint.*log|restore.*log|pack.*log"; "i")) | [.path,.url] | @tsv' "$artifact_json" |
               while IFS="$(printf '\t')" read -r artifact_path artifact_url; do
                 [[ -n "$artifact_url" ]] || continue
                 safe_name="$(basename "$artifact_path")"

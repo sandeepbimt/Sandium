@@ -340,11 +340,40 @@ commands:
             grep -Fxq 'projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci' src/brave/.env
             grep -Fxq 'use_remoteexec=true' src/brave/.env
             grep -Fxq "siso_cache_dir=$HOME/project/sandium-siso-cache" src/brave/.env
+            HELPER="$HOME/project/src/brave/ci/siso/buildbuddy-credential-helper.py"
+            test -x "$HELPER"
+            grep -Fxq "projects_chrome_custom_vars_reapi_credential_helper=$HELPER" src/brave/.env
+            grep -Fq "$HELPER" "$HOME/project/.gclient"
+            # Explicitly pass the non-Google REAPI credential helper to every Siso process.
+            echo "export SISO_CREDENTIAL_HELPER=\"$HELPER\"" >> "$BASH_ENV"
+            export SISO_CREDENTIAL_HELPER="$HELPER"
+            python3 - "$HELPER" \<<'PY'
+            import json, os, subprocess, sys
+            helper = sys.argv[1]
+            key = os.environ.get("BUILDBUDDY_API_KEY", "")
+            if not key:
+                raise SystemExit("BuildBuddy API key is missing")
+            proc = subprocess.run(
+                [sys.executable, helper, "get"],
+                input=json.dumps({"uri": "https://remote.buildbuddy.io:443"}),
+                text=True, capture_output=True, timeout=10, check=False,
+            )
+            if proc.returncode:
+                raise SystemExit("BuildBuddy credential-helper protocol failed: " + proc.stderr[:1000])
+            try:
+                value = json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                raise SystemExit("BuildBuddy credential helper returned invalid JSON")
+            if value.get("headers", {}).get("x-buildbuddy-api-key") != [key]:
+                raise SystemExit("BuildBuddy credential helper returned an unexpected header")
+            print("SANDIUM_CREDENTIAL_HELPER_PROTOCOL=PASS secret_value_redacted=true")
+            PY
             SISORC="$HOME/project/src/build/config/siso/.sisorc"
             grep -Fq -- '-local_cache_enable' "$SISORC"
             grep -Fq -- "-cache_dir \"$HOME/project/sandium-siso-cache\"" "$SISORC"
             grep -Fq -- '-re_cache_enable_write=true' "$SISORC"
             echo 'export SISO_LIMITS=local=8,remote=80' >> "$BASH_ENV"
+            echo "SISO_CREDENTIAL_HELPER_CONFIGURED=$HELPER"
             echo "SISO_LOCAL_CACHE_CONFIGURED=true"
             echo "SISO_TRUSTED_REMOTE_CACHE_WRITE_CONFIGURED=true"
             echo "SISO_LIMITS=local=8,remote=80"
@@ -410,6 +439,15 @@ jobs:
       - run:
           name: Start stage budget clock before restoration and handover
           command: date +%s > "$HOME/.sandium-stage-start-epoch"
+      - restore-sandium-apk-cache
+      - run:
+          name: Exit Stage 1 immediately when a verified APK is reusable
+          command: |
+            set -euo pipefail
+            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
+              echo "VERIFIED_APK_REUSED=true; skipping source sync, dependencies, GN and compilation"
+              circleci-agent step halt
+            fi
       - restore-sandium-source
       - checkout:
           path: src/brave
@@ -780,6 +818,12 @@ jobs:
             grep -Fxq 'use_reclient=false' "$OUT/gn_logs.txt"
             echo "GN_PREPARE_EFFECTIVE_REMOTE_EXECUTION=PASS"
       - normalize-sandium-source-baseline
+      - run:
+          name: Prove BuildBuddy executes one uncached C++ action before full compile
+          no_output_timeout: 3m
+          command: |
+            set -euo pipefail
+            python3 src/brave/ci/siso/remote_preflight.py --root "$HOME/project"
       - run:
           name: Validate fingerprint, configure GN and compile window 1
           no_output_timeout: 45m
