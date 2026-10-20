@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PROBE_TARGET = "obj/base/test/mock_log.o"
-PROBE_OUTPUT_SUFFIX = "mock_log.o"
+PROBE_TARGET = "obj/base/test/test_support/mock_log.o"
+PROBE_OUTPUT_SUFFIX = "obj/base/test/test_support/mock_log.o"
 PROBE_TIMEOUT_SECONDS = 90
 MAX_STAGE_SECONDS = 3000
 HANDOVER_RESERVE_SECONDS = 600

@@ -30,14 +30,14 @@ class RemotePreflightTests(unittest.TestCase):
 
     def test_accepts_only_uncached_remote_probe_output(self):
         metrics = self.parse([
-            record("obj/base/test/mock_log.o", is_remote=True, cached=False, no_exec=False),
+            record("obj/base/test/test_support/mock_log.o", is_remote=True, cached=False, no_exec=False),
         ])
         self.assertEqual(metrics["target_action_records"], 1)
         self.assertEqual(metrics["uncached_remote_target_actions"], 1)
 
     def test_rejects_cache_hit_and_local_results(self):
-        cached = self.parse([record("obj/base/test/mock_log.o", is_remote=True, cached=True)])
-        local = self.parse([record("obj/base/test/mock_log.o", is_local=True)])
+        cached = self.parse([record("obj/base/test/test_support/mock_log.o", is_remote=True, cached=True)])
+        local = self.parse([record("obj/base/test/test_support/mock_log.o", is_local=True)])
         self.assertEqual(cached["uncached_remote_target_actions"], 0)
         self.assertEqual(local["uncached_remote_target_actions"], 0)
 
@@ -54,7 +54,7 @@ class RemotePreflightTests(unittest.TestCase):
         marker = {
             "schema": 1, "status": "PASS", "workflow_id": "workflow-a",
             "source_commit": "brave-sha", "chromium_commit": "chromium-sha",
-            "chromium_version": "156.0.8078.39", "probe_target": "obj/base/test/mock_log.o",
+            "chromium_version": "156.0.8078.39", "probe_target": "obj/base/test/test_support/mock_log.o",
             "probe_output_suffix": "mock_log.o", "probe_remote_action_records": 1,
             "metrics_sha256": "a" * 64, "siso_state_pair_valid": True,
         }
