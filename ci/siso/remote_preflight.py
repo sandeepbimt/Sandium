@@ -18,7 +18,6 @@ from typing import Any
 
 PROBE_TARGET = "obj/base/test/test_support/mock_log.o"
 PROBE_OUTPUT_SUFFIX = "obj/base/test/test_support/mock_log.o"
-PROBE_TIMEOUT_SECONDS = 90
 MAX_STAGE_SECONDS = 3000
 HANDOVER_RESERVE_SECONDS = 600
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -131,7 +130,7 @@ def run(root: Path) -> int:
     auth = subprocess.run(
         [sys.executable, str(helper), "get"],
         input=json.dumps({"uri": "https://remote.buildbuddy.io:443"}),
-        text=True, capture_output=True, check=False, timeout=10, env=env,
+        text=True, capture_output=True, check=False, env=env,
     )
     if auth.returncode:
         raise ValueError("BuildBuddy credential-helper protocol failed: " + auth.stderr[:1000])
@@ -160,8 +159,8 @@ def run(root: Path) -> int:
     available = MAX_STAGE_SECONDS - elapsed - HANDOVER_RESERVE_SECONDS
     print("REMOTE_PREFLIGHT_STAGE_ELAPSED_SECONDS=" + str(elapsed))
     print("REMOTE_PREFLIGHT_SECONDS_AVAILABLE_BEFORE_HANDOVER=" + str(available))
-    if available < PROBE_TIMEOUT_SECONDS + 30:
-        raise ValueError("Insufficient stage budget for probe plus handover; full compile will not start")
+    if available <= 0:
+        raise ValueError("Stage build budget is exhausted before the remote preflight; full compile will not start")
 
     target = out / PROBE_TARGET
     target.unlink(missing_ok=True)
@@ -178,29 +177,22 @@ def run(root: Path) -> int:
     autoninja = shutil.which("autoninja") or str(brave / "vendor/depot_tools/autoninja")
     if not Path(autoninja).is_file() or not os.access(autoninja, os.X_OK):
         raise ValueError("autoninja is not executable in the configured build environment")
-    timeout_bin = shutil.which("timeout")
-    if not timeout_bin:
-        raise ValueError("GNU timeout is required for the bounded remote probe")
     env["PATH"] = str(brave / "vendor/depot_tools") + os.pathsep + str(source / "buildtools/linux64") + os.pathsep + env.get("PATH", "")
     salt = "sandium-remote-preflight-" + uuid.uuid4().hex
     command = [
-        timeout_bin, "--signal=INT", "--kill-after=10s", str(PROBE_TIMEOUT_SECONDS) + "s",
         autoninja, "-C", str(out), PROBE_TARGET, "-strict_remote",
         "-remote_jobs=1", "-local_jobs=1", "-action_salt=" + salt,
         "-metrics_json", str(metrics_path),
     ]
     print("REMOTE_PREFLIGHT_COMMAND=autoninja single-file C++ target, strict remote, unique action salt, one remote job")
     try:
+        # No per-probe timeout: a healthy remote C++ action may need more than
+        # a minute while dependencies are materialized. The stage compile controller
+        # owns the build budget and reserves time for checkpoint/handover.
         result = subprocess.run(command, cwd=root, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, errors="replace",
-                                check=False, timeout=PROBE_TIMEOUT_SECONDS + 20)
+                                check=False)
         output, status = result.stdout or "", result.returncode
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", "replace")
-        log_path.write_text(output.replace(api_key, "[REDACTED]"), encoding="utf-8")
-        raise ValueError("Strict-remote C++ preflight exceeded its hard timeout") from exc
     sanitized = output.replace(api_key, "[REDACTED]")
     log_path.write_text(sanitized, encoding="utf-8", errors="replace")
     if sanitized:
