@@ -201,6 +201,12 @@ def main() -> int:
     remaining = min(args.max_compile_seconds, args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds)
 
     prior_frontier_path = root / "sandium-action-frontier.txt"
+    prior_frontier_file_present = prior_frontier_path.is_file()
+    try:
+        prior_frontier_file_bytes = prior_frontier_path.stat().st_size if prior_frontier_file_present else 0
+    except OSError:
+        prior_frontier_file_present = False
+        prior_frontier_file_bytes = 0
     try:
         prior_frontier = {
             line.rstrip("\n")
@@ -212,6 +218,15 @@ def main() -> int:
     prior_frontier_path.touch(exist_ok=True)
 
     objects_before, outputs_before = count_outputs(out_dir)
+    state_start: dict[str, tuple[bool, int]] = {}
+    for state_name in (".siso_fs_state", ".siso_fs_state.journal"):
+        state_path = out_dir / state_name
+        try:
+            present = state_path.is_file() and not state_path.is_symlink()
+            size = state_path.stat().st_size if present else 0
+        except OSError:
+            present, size = False, 0
+        state_start[state_name] = (present, size)
     current_frontier: set[str] = set()
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
@@ -271,6 +286,14 @@ def main() -> int:
         emit(log, f"STAGE_START_BUILD_OUTPUT_COUNT={outputs_before}")
         emit(log, f"RESTORED_OBJECT_COUNT={objects_before}")
         emit(log, f"RESTORED_BUILD_OUTPUT_COUNT={outputs_before}")
+        emit(log, f"ACTION_FRONTIER_PRIOR_FILE_PRESENT={str(prior_frontier_file_present).lower()}")
+        emit(log, f"ACTION_FRONTIER_PRIOR_FILE_BYTES={prior_frontier_file_bytes}")
+        for state_name, (present, size) in state_start.items():
+            state_label = state_name.upper().replace(".", "_")
+            emit(log, f"STAGE_START_{state_label}_PRESENT={str(present).lower()}")
+            emit(log, f"STAGE_START_{state_label}_BYTES={size}")
+        state_pair_valid = all(present and size > 0 for present, size in state_start.values())
+        emit(log, f"STAGE_START_SISO_FS_STATE_PAIR_VALID={str(state_pair_valid).lower()}")
         checkpoint_archive = root / "sandium-checkpoint.tar.zst"
         checkpoint_bytes = checkpoint_archive.stat().st_size if checkpoint_archive.is_file() else 0
         emit(log, f"RESTORED_CHECKPOINT_ARCHIVE_BYTES={checkpoint_bytes}")
@@ -505,12 +528,19 @@ def main() -> int:
             "".join(label + "\n" for label in sorted(prior_frontier | current_frontier)),
             encoding="utf-8",
         )
+        emit(log, "SISO_STATE_PAIR_MEASUREMENT_PHASE=AFTER_SHUTDOWN")
         for state_name in (".siso_fs_state", ".siso_fs_state.journal"):
             state_path = out_dir / state_name
-            if state_path.is_file():
-                emit(log, f"{state_name.upper().replace('.', '_')}_BYTES={state_path.stat().st_size}")
+            state_label = state_name.upper().replace(".", "_")
+            if state_path.is_file() and not state_path.is_symlink():
+                size = state_path.stat().st_size
+                emit(log, f"{state_label}_BYTES={size}")
+                emit(log, f"STAGE_END_{state_label}_PRESENT=true")
+                emit(log, f"STAGE_END_{state_label}_BYTES={size}")
             else:
-                emit(log, f"{state_name.upper().replace('.', '_')}_PRESENT=false")
+                emit(log, f"{state_label}_PRESENT=false")
+                emit(log, f"STAGE_END_{state_label}_PRESENT=false")
+                emit(log, f"STAGE_END_{state_label}_BYTES=0")
         emit(log, f"COMPILE_CHILD_EXIT_CODE={build_return_code}")
         emit(log, f"METRICS_JSON_BYTES={metrics_path.stat().st_size if metrics_path.is_file() else 0}")
 
