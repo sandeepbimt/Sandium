@@ -13,7 +13,7 @@ CONFIG = (ROOT / ".circleci/config.yml").read_text(encoding="utf-8")
 class TimeoutPolicyTests(unittest.TestCase):
     def test_remote_preflight_has_no_arbitrary_subprocess_timeout(self):
         self.assertNotIn("PROBE_TIMEOUT_SECONDS", PREFLIGHT)
-        self.assertNotRegex(PREFLIGHT, r"subprocess\\.run\\([\\s\\S]{0,500}?timeout\\s*=")
+        self.assertNotRegex(PREFLIGHT, r"subprocess\.run\([\s\S]{0,500}?timeout\s*=")
         self.assertNotIn('shutil.which("timeout")', PREFLIGHT)
 
     def test_remote_execution_is_not_killed_by_a_short_elapsed_gate(self):
@@ -28,7 +28,7 @@ class TimeoutPolicyTests(unittest.TestCase):
         self.assertIn("--max-compile-seconds 2400", CONFIG)
 
     def test_circleci_quiet_step_watchdog_does_not_preempt_one_hour_stage_limit(self):
-        values = re.findall(r"no_output_timeout:\\s*(\\S+)", CONFIG)
+        values = re.findall(r"no_output_timeout:\s*(\S+)", CONFIG)
         self.assertTrue(values, "expected explicit CircleCI no-output watchdog settings")
         self.assertTrue(all(value == "1h" for value in values), values)
 
