@@ -86,7 +86,7 @@ jobs:
             done
           done < circleci-status/workflow-summary.tsv
           # Download the actual compile-window log from CircleCI's job artifacts.
-          # This inspection workflow does not trigger or rerun CircleCI builds; it monitors the corrected full-build request 9cbcc251-d42b-4a92-90cb-95d6e4975a65.
+          # This inspection workflow is read-only and reports the latest existing pipeline for the branch; it never triggers or reruns a build.
           while IFS="$(printf '\t')" read -r workflow_id workflow_name workflow_status created stopped; do
             [[ -n "$workflow_id" ]] || continue
             jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
