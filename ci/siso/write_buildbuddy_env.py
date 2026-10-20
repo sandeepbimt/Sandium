@@ -20,6 +20,8 @@ EXPECTED_ADDRESS = "remote.buildbuddy.io:443"
 BACKEND_CONFIG_RELATIVE = Path("ci/siso/buildbuddy_backend.star")
 CHROMIUM_PIN_RELATIVE = Path("ci/pins/chromium-tag.txt")
 CHROMIUM_TAG_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+SISO_VERSION_PIN = "git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
+SISO_VERSION_LABEL = "v1.5.25"
 
 
 def validate_instance(instance: str) -> None:
@@ -98,6 +100,7 @@ def render_block(
         f"projects_chrome_custom_vars_reapi_instance={instance}",
         f"projects_chrome_custom_vars_reapi_backend_config_path={backend_path}",
         f"projects_chrome_custom_vars_reapi_credential_helper={helper_path}",
+        f"projects_chrome_custom_vars_siso_version={SISO_VERSION_PIN}",
         f"sandium_chromium_tag={chromium_tag}",
         f"siso_cache_dir={siso_cache_dir}",
         "siso_use_googlechrome_config=false",
@@ -164,6 +167,8 @@ def main() -> int:
     print(f"SANDIUM_REAPI_ADDRESS={os.environ['SANDIUM_REAPI_ADDRESS']}")
     print(f"SANDIUM_REAPI_INSTANCE={os.environ['SANDIUM_REAPI_INSTANCE']}")
     print(f"SANDIUM_SISO_CACHE_DIR={os.environ.get('SANDIUM_SISO_CACHE_DIR') or (core_dir.parents[1] / 'sandium-siso-cache')}")
+    print(f"SANDIUM_SISO_VERSION_PIN={SISO_VERSION_PIN}")
+    print(f"SANDIUM_SISO_VERSION_EXPECTED={SISO_VERSION_LABEL}")
     print("SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=yes")
     print("SANDIUM_REMOTE_EXECUTION_ENABLED=no")
     return 0

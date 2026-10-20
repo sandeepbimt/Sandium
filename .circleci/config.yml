@@ -229,7 +229,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - sandium-siso-v2-{{ .Branch }}-android-debug-arm64-
+            - sandium-siso-v3-{{ .Branch }}-android-debug-arm64-
       - run:
           name: Validate persistent Siso local action cache
           command: |
@@ -470,6 +470,19 @@ jobs:
               exit "$sync_status"
             fi
             cd "$HOME/project"
+            SISO_BIN="$HOME/project/src/third_party/siso/cipd/siso"
+            if [[ ! -x "$SISO_BIN" ]]; then
+              echo "SANDIUM_SISO_VERSION_VERIFY=FAIL missing=$SISO_BIN"
+              find "$HOME/project/src/third_party/siso" -maxdepth 4 -type f -name siso -print 2>/dev/null | head -n 20 || true
+              exit 1
+            fi
+            "$SISO_BIN" version 2>&1 | tee build-diagnostics/siso-version.txt
+            if ! grep -Fq "v1.5.25" build-diagnostics/siso-version.txt; then
+              echo "SANDIUM_SISO_VERSION_VERIFY=FAIL expected=v1.5.25"
+              exit 1
+            fi
+            echo "SANDIUM_SISO_VERSION_VERIFY=PASS expected=v1.5.25"
+            echo "SANDIUM_SISO_VERSION_PIN_REVISION=git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             python3 - \<<'PY'
             import re, shutil, subprocess
@@ -817,7 +830,7 @@ jobs:
               echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
             fi
       - save_cache:
-          key: sandium-siso-v2-{{ .Branch }}-android-debug-arm64-stage1-{{ .BuildNum }}
+          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage1-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1192,7 +1205,7 @@ jobs:
             if [[ "$status" -ne 124 ]]; then exit "$status"; fi
             echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
       - save_cache:
-          key: sandium-siso-v2-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1420,7 +1433,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-3; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-siso-v2-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1631,7 +1644,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-siso-v2-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1877,7 +1890,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
             fi
       - save_cache:
-          key: sandium-siso-v2-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
