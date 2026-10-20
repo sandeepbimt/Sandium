@@ -334,6 +334,20 @@ jobs:
               raise SystemExit("Manual Chromium pin is not controlling both the reported version and actual source reference")
           if "gclientTimestamp" in sync_source or "gclientHash: getGclientConfigHash()" not in sync_source:
               raise SystemExit("Chromium sync decision must hash gclient content rather than unstable mtimes")
+          if "chromiumAlreadyAtPinnedRef" not in sync_source or "Still run gclient sync" not in sync_source:
+              raise SystemExit("Chromium sync must refresh changed DEPS variables without refetching an already validated pinned Chromium commit")
+          sync_step_start = raw.index("name: Synchronize pinned source and dependencies with shallow history")
+          sync_step_end = raw.index("name: ", sync_step_start + 6)
+          sync_step = raw[sync_step_start:sync_step_end]
+          for overlay_file in (
+              "install -D build/commands/lib/config.ts src/brave/build/commands/lib/config.ts",
+              "install -D build/commands/lib/syncUtils.ts src/brave/build/commands/lib/syncUtils.ts",
+              "install -D ci/siso/write_buildbuddy_env.py src/brave/ci/siso/write_buildbuddy_env.py",
+              "install -D ci/siso/chromium_pin.py src/brave/ci/siso/chromium_pin.py",
+              "SANDIUM_SYNC_OVERLAY=APPLIED",
+          ):
+              if overlay_file not in sync_step:
+                  raise SystemExit(f"Stage 1 must apply the current Sandium sync overlay before dependency sync: {overlay_file}")
           if "MIGRATED_TIMESTAMP_TO_CONTENT_HASH" not in pin_helper or "SOURCE_CACHE_FINGERPRINT=PASS" not in pin_helper:
               raise SystemExit("Verified cached Chromium source does not have a safe legacy sync-metadata fast path")
           if 'python3 ci/siso/chromium_pin.py --workspace "$HOME/project"' not in raw:

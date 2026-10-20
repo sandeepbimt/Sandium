@@ -360,7 +360,27 @@ export function syncChromium(program: SyncOptions) {
       && checkoutChromiumRef(requiredChromiumRef)
   }
 
-  if (!tryLeanCheckout) {
+  // The source cache is accepted only when HEAD and the pinned tag were
+  // validated before sync. If they already resolve to the same commit, do not
+  // ask gclient to refetch/reset Chromium merely because a custom DEPS variable
+  // (such as the pinned Siso package revision) changed. Still run gclient sync
+  // so dependency revisions can be updated.
+  const currentChromiumSHA = util.runGit(
+    config.srcDir,
+    ['rev-parse', 'HEAD'],
+    true,
+  )
+  const targetChromiumSHA = util.runGit(
+    config.srcDir,
+    ['rev-parse', requiredChromiumRef],
+    true,
+  )
+  const chromiumAlreadyAtPinnedRef = Boolean(
+    currentChromiumSHA
+    && targetChromiumSHA
+    && currentChromiumSHA === targetChromiumSHA,
+  )
+  if (!tryLeanCheckout && !chromiumAlreadyAtPinnedRef) {
     args.push('--revision')
     args.push('src@' + requiredChromiumRef)
   }
