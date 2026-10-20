@@ -938,9 +938,20 @@ jobs:
             OUT="$ROOT/src/out/android_Debug_arm64"
             DEST="$ROOT/build-diagnostics/runtime-config"
             mkdir -p "$DEST"
-            for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta"; do
-              if [[ -f "$file" ]]; then
+            for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$OUT/.siso_fs_state" "$OUT/.siso_fs_state.journal" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta" "$ROOT/sandium-action-frontier.txt"; do
+              if [[ -f "$file" && ! -L "$file" ]]; then
                 cp "$file" "$DEST/$(basename "$file")"
+              fi
+            done
+            # Preserve the actual JSONL used by the remote-execution gate. Summary counters alone
+            # cannot distinguish a parser/schema mismatch from a genuinely unused remote backend.
+            for stage in 1 2 3 4 5; do
+              metrics_file="$ROOT/build-diagnostics/compile-window-${stage}-metrics.jsonl"
+              if [[ -f "$metrics_file" ]]; then
+                cp "$metrics_file" "$DEST/$(basename "$metrics_file")"
+                echo "SISO_METRICS_JSONL_CAPTURED_STAGE_${stage}=true bytes=$(stat -c %s "$metrics_file")"
+              else
+                echo "SISO_METRICS_JSONL_CAPTURED_STAGE_${stage}=false"
               fi
             done
             if [[ -f "$ROOT/src/brave/.env" ]]; then
@@ -951,8 +962,20 @@ jobs:
               while IFS= read -r -d '' file; do cp "$file" "$DEST/$(basename "$file")"; done
             {
               echo "DIAGNOSTIC_CAPTURE_TIME_UTC=$(date -u +%FT%TZ)"
-              for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta"; do
-                if [[ -f "$file" ]]; then echo "CAPTURED_FILE=$file"; else echo "MISSING_FILE=$file"; fi
+              for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$OUT/.siso_fs_state" "$OUT/.siso_fs_state.journal" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta" "$ROOT/sandium-action-frontier.txt"; do
+                if [[ -f "$file" && ! -L "$file" ]]; then
+                  echo "CAPTURED_FILE=$file bytes=$(stat -c %s "$file")"
+                else
+                  echo "MISSING_OR_NONREGULAR_FILE=$file"
+                fi
+              done
+              for stage in 1 2 3 4 5; do
+                file="$ROOT/build-diagnostics/compile-window-${stage}-metrics.jsonl"
+                if [[ -f "$file" ]]; then
+                  echo "METRICS_JSONL_FILE=$file bytes=$(stat -c %s "$file")"
+                else
+                  echo "MISSING_METRICS_JSONL_FILE=$file"
+                fi
               done
             } > "$DEST/capture-manifest.txt"
       - store_artifacts:
