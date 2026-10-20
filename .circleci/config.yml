@@ -929,6 +929,32 @@ jobs:
             else
               echo "APK_NOT_YET_AVAILABLE=stage-1"
             fi
+      - run:
+          name: Capture sanitized Siso/GN/checkpoint diagnostics
+          when: always
+          command: |
+            set +e
+            ROOT="$HOME/project"
+            OUT="$ROOT/src/out/android_Debug_arm64"
+            DEST="$ROOT/build-diagnostics/runtime-config"
+            mkdir -p "$DEST"
+            for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta"; do
+              if [[ -f "$file" ]]; then
+                cp "$file" "$DEST/$(basename "$file")"
+              fi
+            done
+            if [[ -f "$ROOT/src/brave/.env" ]]; then
+              # Keep only non-secret configuration lines; never publish credentials/tokens.
+              sed -E '/(API_KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL|PRIVATE_KEY|AUTHORIZATION)/Id' "$ROOT/src/brave/.env" > "$DEST/brave-env-redacted.txt"
+            fi
+            find "$ROOT" -maxdepth 2 -type f \( -name '*checkpoint*log*' -o -name '*restore*log*' -o -name '*pack*log*' \) -print0 |
+              while IFS= read -r -d '' file; do cp "$file" "$DEST/$(basename "$file")"; done
+            {
+              echo "DIAGNOSTIC_CAPTURE_TIME_UTC=$(date -u +%FT%TZ)"
+              for file in "$OUT/gn_logs.txt" "$OUT/args.gn" "$OUT/siso.INFO" "$ROOT/src/build/config/siso/.sisorc" "$ROOT/sandium-checkpoint.meta"; do
+                if [[ -f "$file" ]]; then echo "CAPTURED_FILE=$file"; else echo "MISSING_FILE=$file"; fi
+              done
+            } > "$DEST/capture-manifest.txt"
       - store_artifacts:
           path: build-diagnostics
           destination: stage-1-compile-window
