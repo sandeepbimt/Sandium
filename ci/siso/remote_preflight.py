@@ -185,14 +185,13 @@ def run(root: Path) -> int:
         "-metrics_json", str(metrics_path),
     ]
     print("REMOTE_PREFLIGHT_COMMAND=autoninja single-file C++ target, strict remote, unique action salt, one remote job")
-    try:
-        # No per-probe timeout: a healthy remote C++ action may need more than
-        # a minute while dependencies are materialized. The stage compile controller
-        # owns the build budget and reserves time for checkpoint/handover.
-        result = subprocess.run(command, cwd=root, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, errors="replace",
-                                check=False)
-        output, status = result.stdout or "", result.returncode
+    # No per-probe timeout: a healthy remote C++ action may need more than
+    # a minute while dependencies are materialized. The stage compile controller
+    # owns the build budget and reserves time for checkpoint/handover.
+    result = subprocess.run(command, cwd=root, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace",
+                            check=False)
+    output, status = result.stdout or "", result.returncode
     sanitized = output.replace(api_key, "[REDACTED]")
     log_path.write_text(sanitized, encoding="utf-8", errors="replace")
     if sanitized:
