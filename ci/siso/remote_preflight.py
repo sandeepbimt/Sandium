@@ -7,7 +7,9 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -185,19 +187,76 @@ def run(root: Path) -> int:
         "-metrics_json", str(metrics_path),
     ]
     print("REMOTE_PREFLIGHT_COMMAND=autoninja single-file C++ target, strict remote, unique action salt, one remote job")
-    # No per-probe timeout: a healthy remote C++ action may need more than
-    # a minute while dependencies are materialized. The stage compile controller
-    # owns the build budget and reserves time for checkpoint/handover.
-    result = subprocess.run(command, cwd=root, env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace",
-                            check=False)
-    output, status = result.stdout or "", result.returncode
-    sanitized = output.replace(api_key, "[REDACTED]")
-    log_path.write_text(sanitized, encoding="utf-8", errors="replace")
-    if sanitized:
-        print("REMOTE_PREFLIGHT_DIAGNOSTICS_BEGIN")
-        print(sanitized[-24000:])
-        print("REMOTE_PREFLIGHT_DIAGNOSTICS_END")
+    # Bound this diagnostic probe separately from the one-hour CircleCI quiet
+    # watchdog. Stream sanitized output immediately so a stalled REAPI request
+    # cannot hide its own error until the entire job is killed.
+    probe_timeout = min(900, max(1, available))
+    deadline = time.monotonic() + probe_timeout
+    status = None
+    decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
+    with log_path.open("w", encoding="utf-8", errors="replace") as log:
+        print("REMOTE_PREFLIGHT_TIMEOUT_SECONDS=" + str(probe_timeout), flush=True)
+        print("REMOTE_PREFLIGHT_DIAGNOSTICS_BEGIN", flush=True)
+        proc = subprocess.Popen(
+            command, cwd=root, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, bufsize=0, start_new_session=True,
+        )
+        assert proc.stdout is not None
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        pending = ""
+        last_heartbeat = time.monotonic()
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, probe_timeout)
+                events = selector.select(min(1.0, remaining))
+                if events:
+                    chunk = os.read(proc.stdout.fileno(), 65536)
+                    if not chunk:
+                        selector.unregister(proc.stdout)
+                        break
+                    text = decoder.decode(chunk).replace(api_key, "[REDACTED]")
+                    log.write(text)
+                    log.flush()
+                    pending += text
+                    while "\\n" in pending:
+                        line, pending = pending.split("\\n", 1)
+                        print(line, flush=True)
+                elif time.monotonic() - last_heartbeat >= 30:
+                    heartbeat = "REMOTE_PREFLIGHT_HEARTBEAT elapsed_seconds=" + str(
+                        int(time.monotonic() - (deadline - probe_timeout))
+                    )
+                    log.write(heartbeat + "\\n")
+                    log.flush()
+                    print(heartbeat, flush=True)
+                    last_heartbeat = time.monotonic()
+            tail = decoder.decode(b"", final=True).replace(api_key, "[REDACTED]")
+            if tail:
+                log.write(tail)
+                pending += tail
+            if pending:
+                print(pending, end="", flush=True)
+            status = proc.wait(timeout=max(1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            print("REMOTE_PREFLIGHT_TIMEOUT=EXPIRED; sending SIGINT to probe process group", flush=True)
+            log.write("\\nREMOTE_PREFLIGHT_TIMEOUT=EXPIRED\\n")
+            log.flush()
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+                proc.wait(timeout=15)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+            status = proc.returncode if proc.returncode is not None else 124
+        finally:
+            selector.close()
+            proc.stdout.close()
+        print("REMOTE_PREFLIGHT_DIAGNOSTICS_END", flush=True)
     if status:
         raise ValueError("Strict-remote C++ probe failed with exit code " + str(status))
     if not target.is_file() or target.stat().st_size == 0:
