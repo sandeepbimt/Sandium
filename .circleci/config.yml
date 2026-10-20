@@ -775,6 +775,10 @@ jobs:
             fi
             echo "GN_PREPARE_ARG_SOURCE=ARGS_GENERATED_GNI_IMPORTED"
             echo "GN_PREPARE_REQUIRED_SISO_ARGS=PASS"
+            test -s "$OUT/gn_logs.txt"
+            grep -Fxq 'use_remoteexec=true' "$OUT/gn_logs.txt"
+            grep -Fxq 'use_reclient=false' "$OUT/gn_logs.txt"
+            echo "GN_PREPARE_EFFECTIVE_REMOTE_EXECUTION=PASS"
       - normalize-sandium-source-baseline
       - run:
           name: Validate fingerprint, configure GN and compile window 1
