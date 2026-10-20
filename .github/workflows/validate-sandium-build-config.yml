@@ -44,6 +44,12 @@ jobs:
           circleci version
           shellcheck --version
 
+      - name: Test Siso remote execution metrics parsing (no build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/ci/test_siso_metrics_parser.py
+
       - name: Validate CircleCI schema (no pipeline execution)
         shell: bash
         run: |
