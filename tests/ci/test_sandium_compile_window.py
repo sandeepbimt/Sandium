@@ -13,15 +13,17 @@ SPEC.loader.exec_module(MODULE)
 
 
 class SandiumCompileWindowTests(unittest.TestCase):
-    def test_remote_execution_signatures_match_sandfox_gate(self):
+    def test_actual_remote_execution_signatures_match_sandfox_gate(self):
         for line in (
             'is_local=false command_id=abc',
-            'use reapi "remote.buildbuddy.io:443"',
             'step state: remote exec',
             'exec remote execute',
         ):
             with self.subTest(line=line):
                 self.assertTrue(MODULE.has_remote_signature(line))
+
+    def test_remote_backend_configuration_is_not_execution_evidence(self):
+        self.assertFalse(MODULE.has_remote_signature('use reapi "remote.buildbuddy.io:443"'))
 
     def test_metrics_parser_distinguishes_cache_local_and_remote_execution(self):
         records = [
