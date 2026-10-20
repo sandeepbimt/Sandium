@@ -86,7 +86,7 @@ jobs:
             done
           done < circleci-status/workflow-summary.tsv
           # Download the actual compile-window log from CircleCI's job artifacts.
-          # Read-only status check for Siso v1.5.28 compatibility pipeline #58; this workflow never triggers or reruns a build.
+          # Re-inspect completed pipeline #58 logs after the runtime-gate correction; read-only, never triggers or reruns a build.
           while IFS="$(printf '\t')" read -r workflow_id workflow_name workflow_status created stopped; do
             [[ -n "$workflow_id" ]] || continue
             jq -r '.items[]?.job_number // empty' "circleci-status/jobs-$workflow_id.json" | while read -r job_number; do
