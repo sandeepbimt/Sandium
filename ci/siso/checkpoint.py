@@ -41,6 +41,30 @@ def required_file(path: Path) -> None:
         raise CheckpointError("Required checkpoint input is missing or empty: {}".format(path))
 
 
+
+def validate_siso_checkpoint_pair(output: Path) -> None:
+    """Reject half-written Siso filesystem state/journal handovers.
+
+    Siso's state and journal may both be absent, but a checkpoint must not
+    claim a consistent handover when only one member of the pair exists.
+    """
+    state_path = output / ".siso_fs_state"
+    journal_path = output / ".siso_fs_state.journal"
+    state_exists = state_path.exists()
+    journal_exists = journal_path.exists()
+    if state_exists != journal_exists:
+        raise CheckpointError(
+            "Siso filesystem state and journal must be present together "
+            "(state={}, journal={})".format(state_exists, journal_exists)
+        )
+    if state_exists:
+        for path in (state_path, journal_path):
+            if not path.is_file() or path.stat().st_size == 0:
+                raise CheckpointError(
+                    "Siso checkpoint file is not a nonempty regular file: {}".format(path.name)
+                )
+
+
 def validate_state(state: dict[str, Any]) -> None:
     for key in ("source_commit", "chromium_commit", "target", "build_config",
                 "build_input_fingerprint", "gn_args_sha256"):
@@ -78,6 +102,7 @@ def list_members(archive: Path) -> list[str]:
 
 
 def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, Any]:
+    validate_siso_checkpoint_pair(output)
     paths = {
         "state_sha256": output / STATE_NAME,
         "args_gn_sha256": output / "args.gn",
@@ -169,6 +194,7 @@ def restore(root: Path) -> int:
             required_file(path)
         state = read_json(state_file)
         validate_state(state)
+        validate_siso_checkpoint_pair(restored)
         for field in ("source_commit", "chromium_commit", "chromium_version", "target",
                       "build_config", "build_input_fingerprint", "gn_args_sha256"):
             if state.get(field) != meta.get(field):
