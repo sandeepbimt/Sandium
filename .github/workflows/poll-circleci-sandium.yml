@@ -1,4 +1,5 @@
 name: Inspect current SANDIUM checkpoint reuse status (read-only)
+# Read-only capture for corrected CircleCI pipeline 63; no APK trigger.
 # Read-only follow-up for corrected CircleCI pipeline 62; do not launch or rerun builds.
 # Read-only poll refresh for CircleCI pipeline 61; this change must not trigger an APK build.
 # Read-only status refresh for the Siso remote-preflight APK attempt launched from commit d9cebc1.
