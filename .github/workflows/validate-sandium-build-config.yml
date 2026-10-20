@@ -271,9 +271,15 @@ jobs:
               raise SystemExit("Final APK signature verification is missing from the package helper")
           if 'choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5")' not in package_helper:
               raise SystemExit("APK packaging helper must accept a verified APK produced in Stage 5")
-          compile_windows = raw.count('python3 "$HOME/project/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-')
+          compile_windows = sum(
+              raw.count(f'python3 "$HOME/project/{helper}" --root "$HOME/project" --stage stage-')
+              for helper in (
+                  "ci/siso/run_compile_window.py",
+                  "src/brave/ci/siso/run_compile_window.py",
+              )
+          )
           if compile_windows != 5:
-              raise SystemExit(f"Expected five shared SANDFOX-style bounded Siso compile windows (stages 1-5); got {compile_windows}")
+              raise SystemExit(f"Expected five shared bounded Siso compile windows (stages 1-5); got {compile_windows}")
           if raw.count("      - normalize-sandium-source-baseline") != 5:
               raise SystemExit("Every stage must normalize source timestamps after preparing/restoring GN and before resuming Siso")
           if raw.count("sandium-action-frontier.txt") < 5:
