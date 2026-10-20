@@ -1,26 +1,17 @@
 # -*- bazel-starlark -*-
 # Copyright 2026 The SANDIUM Authors.
 #
-# Backend starting point based on Chromium 156's official non-Google RBE
-# example. The image is digest-pinned. BuildBuddy pullability and action
-# compatibility have not yet been tested.
-#
-# Keep the backend platform properties minimal; do not copy upstream Google worker-pool settings.
+# SANDIUM BuildBuddy backend aligned with the successful SANDFOX setup.
+# Do not override the worker container image until an image is verified against
+# the configured BuildBuddy service. Let the service choose its default Linux
+# worker image, matching SANDFOX's minimal backend properties.
 
 load("@builtin//struct.star", "module")
 
-_CONTAINER_IMAGE = "docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a"
-
 def __platform_properties(ctx):
     return {
-        "default": {
-            "OSFamily": "Linux",
-            "container-image": _CONTAINER_IMAGE,
-        },
-        "large": {
-            "OSFamily": "Linux",
-            "container-image": _CONTAINER_IMAGE,
-        },
+        "default": {"OSFamily": "Linux"},
+        "large": {"OSFamily": "Linux"},
     }
 
 backend = module(
