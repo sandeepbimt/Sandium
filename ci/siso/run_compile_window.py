@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 REMOTE_SIGNATURES = (
-    re.compile(r"is_local=false", re.IGNORECASE),
+    re.compile(r"is_remote=true", re.IGNORECASE),
+    re.compile(r"is_local=false", re.IGNORECASE),  # Compatibility with emitters that include false booleans.
     re.compile(r"step state: remote exec", re.IGNORECASE),
     re.compile(r"exec remote execute", re.IGNORECASE),
 )
@@ -406,7 +407,8 @@ def main() -> int:
                     last_info_poll = now
                     # Log text and cache messages are not execution evidence. The
                     # only authoritative early-gate signal is an uncached Siso
-                    # action whose metrics explicitly report is_local=false.
+                    # action whose metrics explicitly report is_remote=true (or the
+                    # explicit is_local=false compatibility field).
                     try:
                         metrics_now = parse_metrics(metrics_path)
                     except ValueError as exc:
