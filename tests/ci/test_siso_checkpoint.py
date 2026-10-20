@@ -80,6 +80,17 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("SANDIUM_CHECKPOINT_RESTORE=REJECTED", result.stdout)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "existing output")
 
+    def test_pack_rejects_missing_siso_state_or_journal(self):
+        for missing in (".siso_fs_state", ".siso_fs_state.journal"):
+            with self.subTest(missing=missing):
+                path = self.output / missing
+                saved = path.read_bytes()
+                path.unlink()
+                result = self.invoke("pack", "--stage", "stage-1")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Required checkpoint input is missing or empty", result.stderr)
+                path.write_bytes(saved)
+
     def test_pack_rejects_bad_chromium_version(self):
         path = self.output / ".sandium-build-state.json"
         state = json.loads(path.read_text(encoding="utf-8"))

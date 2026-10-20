@@ -98,10 +98,14 @@ def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, A
     }
     for key, path in paths.items():
         meta[key] = sha256_file(path)
+    # Siso continuation state is required for a resumable checkpoint. A
+    # checkpoint without these files must fail at pack time rather than
+    # advertise a successful handover that cannot preserve Siso's state.
     for key, name in (("siso_state_sha256", ".siso_fs_state"),
                       ("siso_journal_sha256", ".siso_fs_state.journal")):
         path = output / name
-        meta[key] = sha256_file(path) if path.is_file() else None
+        required_file(path)
+        meta[key] = sha256_file(path)
     return meta
 
 
