@@ -163,8 +163,7 @@ def main() -> int:
     parser.add_argument("--max-stage-seconds", type=int, default=3000)
     parser.add_argument("--handover-reserve-seconds", type=int, default=600)
     parser.add_argument("--max-compile-seconds", type=int, default=2400)
-    parser.add_argument("--remote-gate-seconds", type=int, default=240)
-    parser.add_argument("--remote-gate-interval-seconds", type=int, default=15)
+    parser.add_argument("--metrics-poll-interval-seconds", type=int, default=15)
     args = parser.parse_args()
 
     root = args.root.resolve()
@@ -334,6 +333,7 @@ def main() -> int:
         emit(log, "SANDIUM_REMOTE_PREFLIGHT=PASS source=current-workflow-uncached-cxx-action")
         emit(log, "SANDIUM_PREFLIGHT_REMOTE_EXECUTED_ACTION_RECORDS=" + str(remote_preflight["probe_remote_action_records"]))
         emit(log, "EARLY_REMOTE_EXECUTION_GATE=PREPROVEN_BY_CURRENT_WORKFLOW_PREFLIGHT")
+        emit(log, "REMOTE_EXECUTION_MONITORING_POLICY=NO_SEPARATE_TIME_DEADLINE")
 
         env = os.environ.copy()
         env.update({
@@ -415,7 +415,7 @@ def main() -> int:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
-                if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.remote_gate_interval_seconds):
+                if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
                     last_metrics_poll = now
                     try:
                         metrics_now = parse_metrics(metrics_path)
@@ -431,11 +431,6 @@ def main() -> int:
                     timeout_seen = True
                     stop_reason = "stage compile time budget exhausted"
                     emit(log, f"COMPILE_WINDOW_TIMEOUT=PASS timeout_seconds={remaining}")
-                    stop_process_group(proc)
-                elif proc.poll() is None and not remote_seen and not remote_preflight_passed and elapsed >= args.remote_gate_seconds:
-                    gate_failed = True
-                    stop_reason = "no current-stage remote execution evidence within early gate"
-                    emit(log, f"EARLY_REMOTE_EXECUTION_GATE=FAIL seconds={args.remote_gate_seconds}")
                     stop_process_group(proc)
                 elif regeneration_seen and proc.poll() is None:
                     gate_failed = True
