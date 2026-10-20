@@ -342,8 +342,6 @@ def main() -> int:
             rolling = (rolling + lower)[-8192:]
             if REGENERATE_NINJA.search(rolling):
                 regeneration_seen = True
-            if has_remote_signature(rolling):
-                remote_seen = True
             partial += text
             while "\n" in partial:
                 line, partial = partial.split("\n", 1)
@@ -389,9 +387,20 @@ def main() -> int:
                 if now - last_info_poll >= max(1, args.remote_gate_interval_seconds):
                     info_delta = read_new_siso_info()
                     last_info_poll = now
+                    # Log text and cache messages are not execution evidence. The
+                    # only authoritative early-gate signal is an uncached Siso
+                    # action whose metrics explicitly report is_local=false.
+                    try:
+                        metrics_now = parse_metrics(metrics_path)
+                    except ValueError as exc:
+                        gate_failed = True
+                        stop_reason = f"invalid Siso metrics during remote gate: {exc}"
+                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
+                        stop_process_group(proc)
+                        metrics_now = {"remote_executed_action_records": 0}
+                    if metrics_now.get("remote_executed_action_records", 0) > 0:
+                        remote_seen = True
                     if info_delta:
-                        if has_remote_signature(info_delta):
-                            remote_seen = True
                         for line in info_delta.splitlines():
                             if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
                                 remote_signatures.add(line.strip())
