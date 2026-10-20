@@ -20,8 +20,8 @@ EXPECTED_ADDRESS = "remote.buildbuddy.io:443"
 BACKEND_CONFIG_RELATIVE = Path("ci/siso/buildbuddy_backend.star")
 CHROMIUM_PIN_RELATIVE = Path("ci/pins/chromium-tag.txt")
 CHROMIUM_TAG_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
-SISO_VERSION_PIN = "git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
-SISO_VERSION_LABEL = "v1.5.25"
+SISO_VERSION_PIN = "git_revision:bc45e8f67ae0f37d337190ad64aa8bb440c791eb"
+SISO_VERSION_LABEL = "v1.5.28"
 
 
 def validate_instance(instance: str) -> None:

@@ -487,12 +487,12 @@ jobs:
               exit 1
             fi
             "$SISO_BIN" version 2>&1 | tee build-diagnostics/siso-version.txt
-            if ! grep -Fq "v1.5.25" build-diagnostics/siso-version.txt; then
-              echo "SANDIUM_SISO_VERSION_VERIFY=FAIL expected=v1.5.25"
+            if ! grep -Fq "v1.5.28" build-diagnostics/siso-version.txt; then
+              echo "SANDIUM_SISO_VERSION_VERIFY=FAIL expected=v1.5.28"
               exit 1
             fi
-            echo "SANDIUM_SISO_VERSION_VERIFY=PASS expected=v1.5.25"
-            echo "SANDIUM_SISO_VERSION_PIN_REVISION=git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
+            echo "SANDIUM_SISO_VERSION_VERIFY=PASS expected=v1.5.28"
+            echo "SANDIUM_SISO_VERSION_PIN_REVISION=git_revision:bc45e8f67ae0f37d337190ad64aa8bb440c791eb"
             sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
             python3 - \<<'PY'
             import re, shutil, subprocess
