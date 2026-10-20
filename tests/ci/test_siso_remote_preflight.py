@@ -55,7 +55,7 @@ class RemotePreflightTests(unittest.TestCase):
             "schema": 1, "status": "PASS", "workflow_id": "workflow-a",
             "source_commit": "brave-sha", "chromium_commit": "chromium-sha",
             "chromium_version": "156.0.8078.39", "probe_target": "obj/base/test/test_support/mock_log.o",
-            "probe_output_suffix": "mock_log.o", "probe_remote_action_records": 1,
+            "probe_output_suffix": "obj/base/test/test_support/mock_log.o", "probe_remote_action_records": 1,
             "metrics_sha256": "a" * 64, "siso_state_pair_valid": True,
         }
         with tempfile.TemporaryDirectory() as directory:
