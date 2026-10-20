@@ -18,7 +18,6 @@ from typing import Any
 
 REMOTE_SIGNATURES = (
     re.compile(r"is_local=false", re.IGNORECASE),
-    re.compile(r'use reapi "remote\.buildbuddy\.io:443"', re.IGNORECASE),
     re.compile(r"step state: remote exec", re.IGNORECASE),
     re.compile(r"exec remote execute", re.IGNORECASE),
 )
@@ -447,6 +446,12 @@ def main() -> int:
             emit(log, f"SISO_METRICS_PARSE=FAIL error={exc}")
             gate_failed = True
             metrics = {}
+        if metrics.get("remote_executed_action_records", 0) == 0 and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
+            gate_failed = True
+            stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
+            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0")
+        else:
+            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS remote_executed_action_records={metrics.get('remote_executed_action_records', 0)}")
         for key, value in metrics.items():
             emit(log, f"SISO_{key.upper()}={value}")
         emit(log, f"REMOTE_EXEC_LOG_SIGNATURE_COUNT={len(remote_signatures)}")
