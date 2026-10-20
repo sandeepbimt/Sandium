@@ -327,6 +327,7 @@ def main() -> int:
         last_activity = time.monotonic()
         child_exit_seen_at: float | None = None
         last_info_poll = 0.0
+        last_metrics_poll = 0.0
         remote_gate_pass_logged = False
 
         def process_text(text: str) -> None:
@@ -357,6 +358,18 @@ def main() -> int:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
+                if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.remote_gate_interval_seconds):
+                    last_metrics_poll = now
+                    try:
+                        metrics_now = parse_metrics(metrics_path)
+                    except ValueError as exc:
+                        gate_failed = True
+                        stop_reason = f"invalid Siso metrics during remote gate: {exc}"
+                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
+                        stop_process_group(proc)
+                        metrics_now = {"remote_executed_action_records": 0}
+                    if metrics_now.get("remote_executed_action_records", 0) > 0:
+                        remote_seen = True
                 if proc.poll() is None and elapsed >= remaining:
                     timeout_seen = True
                     stop_reason = "stage compile time budget exhausted"
