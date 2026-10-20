@@ -340,14 +340,22 @@ jobs:
           sync_step_end = raw.index("name: ", sync_step_start + 6)
           sync_step = raw[sync_step_start:sync_step_end]
           for overlay_file in (
-              "install -D build/commands/lib/config.ts src/brave/build/commands/lib/config.ts",
-              "install -D build/commands/lib/syncUtils.ts src/brave/build/commands/lib/syncUtils.ts",
-              "install -D ci/siso/write_buildbuddy_env.py src/brave/ci/siso/write_buildbuddy_env.py",
-              "install -D ci/siso/chromium_pin.py src/brave/ci/siso/chromium_pin.py",
-              "SANDIUM_SYNC_OVERLAY=APPLIED",
+              'cd "$HOME/project/src/brave"',
+              "SANDIUM_SYNC_OVERLAY=CHECKOUT_SOURCE",
+              "test -s build/commands/lib/syncUtils.ts",
+              "chromiumAlreadyAtPinnedRef",
+              "gclientHash: getGclientConfigHash()",
           ):
               if overlay_file not in sync_step:
-                  raise SystemExit(f"Stage 1 must apply the current Sandium sync overlay before dependency sync: {overlay_file}")
+                  raise SystemExit(f"Stage 1 must validate the checked-out Sandium sync implementation before dependency sync: {overlay_file}")
+          for invalid_root_copy in (
+              "install -D build/commands/lib/config.ts",
+              "install -D build/commands/lib/syncUtils.ts",
+              "install -D ci/siso/write_buildbuddy_env.py",
+              "install -D ci/siso/chromium_pin.py",
+          ):
+              if invalid_root_copy in sync_step:
+                  raise SystemExit(f"Stage 1 must not copy source files from nonexistent workspace-root paths: {invalid_root_copy}")
           if "MIGRATED_TIMESTAMP_TO_CONTENT_HASH" not in pin_helper or "SOURCE_CACHE_FINGERPRINT=PASS" not in pin_helper:
               raise SystemExit("Verified cached Chromium source does not have a safe legacy sync-metadata fast path")
           if 'python3 ci/siso/chromium_pin.py --workspace "$HOME/project"' not in raw:
