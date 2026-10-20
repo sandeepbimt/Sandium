@@ -188,10 +188,24 @@ function shouldUpdateChromium(
   const chromiumRef = expectedSyncInfo.chromiumRef
   const headSHA = util.runGit(config.srcDir, ['rev-parse', 'HEAD'], true)
   const targetSHA = util.runGit(config.srcDir, ['rev-parse', chromiumRef], true)
-  const needsUpdate =
-    targetSHA !== headSHA
-    || (!headSHA && !targetSHA)
-    || JSON.stringify(latestSyncInfo) !== JSON.stringify(expectedSyncInfo)
+  // Compare the persisted fields semantically, not by JSON property order.
+  // Unknown legacy metadata must not trigger a Chromium sync by itself.
+  const refMismatch = latestSyncInfo.chromiumRef !== expectedSyncInfo.chromiumRef
+  const gclientHashMismatch = latestSyncInfo.gclientHash !== expectedSyncInfo.gclientHash
+  const revisionMismatch = targetSHA !== headSHA || (!headSHA && !targetSHA)
+  const needsUpdate = revisionMismatch || refMismatch || gclientHashMismatch
+
+  console.log(`SANDIUM_SYNC_CURRENT_HEAD=${headSHA || '[missing]'}`)
+  console.log(`SANDIUM_SYNC_TARGET_HEAD=${targetSHA || '[missing]'}`)
+  console.log(`SANDIUM_SYNC_LATEST_CHROMIUM_REF=${latestSyncInfo.chromiumRef || '[missing]'}`)
+  console.log(`SANDIUM_SYNC_EXPECTED_CHROMIUM_REF=${expectedSyncInfo.chromiumRef}`)
+  console.log(`SANDIUM_SYNC_LATEST_GCLIENT_SHA256=${latestSyncInfo.gclientHash || '[missing]'}`)
+  console.log(`SANDIUM_SYNC_EXPECTED_GCLIENT_SHA256=${expectedSyncInfo.gclientHash}`)
+  console.log(`SANDIUM_SYNC_REVISION_MISMATCH=${revisionMismatch}`)
+  console.log(`SANDIUM_SYNC_REF_MISMATCH=${refMismatch}`)
+  console.log(`SANDIUM_SYNC_GCLIENT_HASH_MISMATCH=${gclientHashMismatch}`)
+  console.log(`SANDIUM_SYNC_DECISION=${needsUpdate ? 'SYNC_REQUIRED' : 'NO_SYNC_REQUIRED'}`)
+
   if (needsUpdate) {
     const currentRef = util.getGitReadableLocalRef(config.srcDir)
     console.log(
