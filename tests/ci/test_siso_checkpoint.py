@@ -90,5 +90,24 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("invalid Chromium version", result.stderr)
 
 
+    def test_pack_rejects_journal_without_siso_state(self):
+        (self.output / ".siso_fs_state").unlink()
+        result = self.invoke("pack", "--stage", "stage-1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be present together", result.stderr)
+
+    def test_pack_rejects_siso_state_without_journal(self):
+        (self.output / ".siso_fs_state.journal").unlink()
+        result = self.invoke("pack", "--stage", "stage-1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be present together", result.stderr)
+
+    def test_pack_rejects_empty_siso_state_or_journal(self):
+        (self.output / ".siso_fs_state").write_bytes(b"")
+        result = self.invoke("pack", "--stage", "stage-1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nonempty regular file", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
