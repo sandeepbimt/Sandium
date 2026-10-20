@@ -2,13 +2,13 @@ version: 2.1
 parameters:
   run_sandium_android_apk_build:
     type: boolean
-    default: false
+    default: true
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
   run_sandium_compile_windows:
     type: boolean
-    default: false
+    default: true
 commands:
   sandium-smoke-checkpoint:
     parameters:
