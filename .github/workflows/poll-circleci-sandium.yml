@@ -1,5 +1,6 @@
 name: Inspect current SANDIUM checkpoint reuse status (read-only)
 # Read-only follow-up monitor requested 2026-10-20 for diagnostic build pipeline 59; collect sync decision logs if stage 1 reaches sync.
+# Read-only inspect of the corrected Siso metrics/checkpoint run triggered by bd45c6b; do not start or rerun CircleCI.
 
 on:
   push:
