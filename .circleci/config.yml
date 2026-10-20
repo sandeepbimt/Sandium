@@ -326,7 +326,7 @@ commands:
             set -euo pipefail
             : "${BUILDBUDDY_API_KEY:?Missing protected CircleCI environment variable BUILDBUDDY_API_KEY}"
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
-            export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
+            export SANDIUM_REAPI_INSTANCE=default
             export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             cd src/brave
@@ -338,7 +338,7 @@ commands:
             git check-ignore -q .env
             cd "$HOME/project"
             grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
-            grep -Fxq 'projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci' src/brave/.env
+            grep -Fxq 'projects_chrome_custom_vars_reapi_instance=default' src/brave/.env
             grep -Fxq 'use_remoteexec=true' src/brave/.env
             grep -Fxq "siso_cache_dir=$HOME/project/sandium-siso-cache" src/brave/.env
             HELPER="$HOME/project/src/brave/ci/siso/buildbuddy-credential-helper.py"
@@ -504,7 +504,7 @@ jobs:
             grep -q "chromiumAlreadyAtPinnedRef" build/commands/lib/syncUtils.ts
             grep -q "gclientHash: getGclientConfigHash()" build/commands/lib/syncUtils.ts
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
-            export SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci
+            export SANDIUM_REAPI_INSTANCE=default
             export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
             python3 ci/siso/write_buildbuddy_env.py
@@ -819,12 +819,9 @@ jobs:
             grep -Fxq 'use_reclient=false' "$OUT/gn_logs.txt"
             echo "GN_PREPARE_EFFECTIVE_REMOTE_EXECUTION=PASS"
       - normalize-sandium-source-baseline
-      - run:
-          name: Prove BuildBuddy executes one uncached C++ action before full compile
-          no_output_timeout: 1h
-          command: |
-            set -euo pipefail
-            python3 src/brave/ci/siso/remote_preflight.py --root "$HOME/project"
+      # Deliberately do not run a separate C++ probe here. The next step is the
+      # actual staged Android APK compile; its Siso metrics are captured and
+      # validated as part of the build, avoiding a duplicate graph/action cost.
       - run:
           name: Validate fingerprint, configure GN and compile window 1
           no_output_timeout: 1h
