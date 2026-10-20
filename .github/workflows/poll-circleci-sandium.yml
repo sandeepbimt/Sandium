@@ -1,4 +1,5 @@
 name: Inspect current SANDIUM checkpoint reuse status (read-only)
+# Read-only monitor requested 2026-10-20 for approved diagnostic build pipeline 59.
 
 on:
   push:
