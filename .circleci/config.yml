@@ -453,18 +453,15 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p build-diagnostics
-            # Apply the validated Sandium sync implementation before pnpm invokes
-            # Brave's sync.ts. The cached src/brave checkout can otherwise retain
-            # an upstream syncUtils.ts that ignores our content-hash metadata and
-            # refetches the already-correct Chromium source.
-            cd "$HOME/project"
-            install -D build/commands/lib/config.ts src/brave/build/commands/lib/config.ts
-            install -D build/commands/lib/syncUtils.ts src/brave/build/commands/lib/syncUtils.ts
-            mkdir -p src/brave/ci/siso
-            install -D ci/siso/write_buildbuddy_env.py src/brave/ci/siso/write_buildbuddy_env.py
-            install -D ci/siso/chromium_pin.py src/brave/ci/siso/chromium_pin.py
-            cd src/brave
-            echo "SANDIUM_SYNC_OVERLAY=APPLIED"
+            # The CircleCI checkout places this Sandium/Brave-Core fork at
+            # src/brave; the workspace root contains cached Chromium, not a
+            # second copy of the Sandium source files. Validate in place.
+            cd "$HOME/project/src/brave"
+            echo "SANDIUM_SYNC_OVERLAY=CHECKOUT_SOURCE"
+            test -s build/commands/lib/config.ts
+            test -s build/commands/lib/syncUtils.ts
+            test -s ci/siso/write_buildbuddy_env.py
+            test -s ci/siso/chromium_pin.py
             grep -q "chromiumAlreadyAtPinnedRef" build/commands/lib/syncUtils.ts
             grep -q "gclientHash: getGclientConfigHash()" build/commands/lib/syncUtils.ts
             export SANDIUM_REAPI_ADDRESS=remote.buildbuddy.io:443
