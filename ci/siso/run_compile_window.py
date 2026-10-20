@@ -79,7 +79,11 @@ def parse_metrics(path: Path) -> dict[str, int]:
             values["cached_action_records"] += int(cached)
             values["local_action_records"] += int(local)
             values["no_exec_action_records"] += int(no_exec)
-            if record.get("is_local") is False and not cached and not no_exec:
+            # Siso emits positive boolean fields; is_local=false is commonly omitted.
+            # Prefer its explicit is_remote signal, keeping the explicit-false fallback
+            # for compatible metric emitters that provide both fields.
+            remote = record.get("is_remote") is True or record.get("is_local") is False
+            if remote and not cached and not no_exec:
                 values["remote_executed_action_records"] += 1
     return values
 
