@@ -52,6 +52,17 @@ class SandiumCompileWindowTests(unittest.TestCase):
     def test_gn_regeneration_marker_is_rejected(self):
         self.assertIsNotNone(MODULE.REGENERATE_NINJA.search("Regenerating ninja files"))
 
+    def test_log_signature_does_not_replace_remote_action_metrics(self):
+        self.assertTrue(MODULE.has_remote_signature("is_local=false command_id=abc"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metrics.jsonl"
+            path.write_text(
+                json.dumps({"step_id": "local", "outputs": [], "cached": False, "is_local": True}) + "\\n",
+                encoding="utf-8",
+            )
+            metrics = MODULE.parse_metrics(path)
+        self.assertEqual(metrics["remote_executed_action_records"], 0)
+
     def test_cached_action_records_are_not_misreported_as_remote_execution(self):
         record = {"step_id": "cached", "outputs": [], "cached": True, "is_local": False}
         with tempfile.TemporaryDirectory() as directory:
