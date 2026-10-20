@@ -321,8 +321,11 @@ jobs:
           sync_source = Path("build/commands/lib/syncUtils.ts").read_text()
           pin_helper = Path("ci/siso/chromium_pin.py").read_text()
           expected_siso_pin = "git_revision:7bc9a0bfe050ef97e1712ff61c6f11952799e951"
-          if f"projects_chrome_custom_vars_siso_version={expected_siso_pin}" not in writer_source:
-              raise SystemExit("Stage 1 must pin the known Siso release containing the on-disk flush fixes")
+          if (
+              f'SISO_VERSION_PIN = "{expected_siso_pin}"' not in writer_source
+              or 'f"projects_chrome_custom_vars_siso_version={SISO_VERSION_PIN}"' not in writer_source
+          ):
+              raise SystemExit("Stage 1 must render the known Siso release containing the on-disk flush fixes")
           if "SANDIUM_SISO_VERSION_VERIFY=PASS" not in raw or "v1.5.25" not in raw:
               raise SystemExit("Stage 1 must verify the installed Siso binary matches the pinned release before checkpointing/build continuation")
           if "sandium-siso-v3-" not in raw or "sandium-siso-v2-" in raw:
