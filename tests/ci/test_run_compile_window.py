@@ -62,16 +62,26 @@ class ResetSisoInfoTests(unittest.TestCase):
                 "previous diagnostics",
             )
 
-    def test_rejects_directory_at_siso_info_path(self):
+    def test_preserves_and_replaces_directory_at_siso_info_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             diagnostics = root / "diagnostics"
             diagnostics.mkdir()
             info = root / "siso.INFO"
             info.mkdir()
+            (info / "restored-note.txt").write_text("keep for diagnosis", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "expected a regular Siso info log"):
-                compile_window.reset_siso_info(info, diagnostics, "stage-1")
+            compile_window.reset_siso_info(info, diagnostics, "stage-1")
+
+            self.assertTrue(info.is_file())
+            self.assertFalse(info.is_symlink())
+            self.assertEqual(info.read_text(encoding="utf-8"), "")
+            preserved = diagnostics / "siso.INFO.unexpected-stage-1"
+            self.assertTrue(preserved.is_dir())
+            self.assertEqual(
+                (preserved / "restored-note.txt").read_text(encoding="utf-8"),
+                "keep for diagnosis",
+            )
 
 
 if __name__ == "__main__":
