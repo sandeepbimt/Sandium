@@ -518,8 +518,9 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/brave-core"
-            python3 -m py_compile ci/siso/remote_preflight.py
+            python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py
             python3 tests/ci/test_siso_remote_preflight.py
+            python3 tests/ci/test_run_compile_window.py
       - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
