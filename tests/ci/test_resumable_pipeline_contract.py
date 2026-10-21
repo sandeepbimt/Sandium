@@ -54,7 +54,7 @@ class ResumablePipelineContractTests(unittest.TestCase):
                     ),
                     "stage-2-graph-and-compile-window" if stage == 1 else "stage-3-compile-continuation",
                 )
-                self.assertIn('status == "125"', segment)
+                self.assertIn('[[ "$status" == "125" &&', segment)
                 self.assertIn('<< pipeline.parameters.run_sandium_compile_windows >>" != "true"', segment)
                 self.assertIn(f"BUILD_STAGE_PREFLIGHT_ONLY_HANDOVER_ALLOWED=true stage={stage} status=125", segment)
                 self.assertLess(
