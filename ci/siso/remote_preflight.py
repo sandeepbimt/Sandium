@@ -37,6 +37,17 @@ def has_probe_rule(fragment: Path) -> bool:
         )
 
 
+def validate_generated_siso_environment(sisoenv: str) -> None:
+    """Require the endpoint and instance actually configured by the CI writer."""
+    if "remote.buildbuddy.io:443" not in sisoenv:
+        raise ValueError("Generated Siso environment does not select remote.buildbuddy.io:443")
+    # configure-sandium-remote-cache sets SANDIUM_REAPI_INSTANCE=default and
+    # write_buildbuddy_env.py writes projects_chrome_custom_vars_reapi_instance=default.
+    # Chromium's generated .sisoenv carries this through as -re_instance=default.
+    if "-re_instance=default" not in sisoenv:
+        raise ValueError("Generated Siso environment does not select configured BuildBuddy instance 'default'")
+
+
 def parse_remote_probe_metrics(path: Path) -> dict[str, int]:
     if not path.is_file():
         raise ValueError("Siso metrics JSONL was not produced: " + str(path))
@@ -124,8 +135,7 @@ def run(root: Path) -> int:
     if not gclient.is_file() or str(helper) not in gclient.read_text(encoding="utf-8"):
         raise ValueError(".gclient does not contain the expected BuildBuddy credential-helper path")
     sisoenv = (source / "build/config/siso/.sisoenv").read_text(encoding="utf-8", errors="replace")
-    if "remote.buildbuddy.io:443" not in sisoenv or "sandium/android-arm64/ci" not in sisoenv:
-        raise ValueError("Generated Siso environment does not select the configured BuildBuddy endpoint/instance")
+    validate_generated_siso_environment(sisoenv)
 
     env = os.environ.copy()
     env["SISO_CREDENTIAL_HELPER"] = str(helper)
