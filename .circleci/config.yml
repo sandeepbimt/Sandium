@@ -72,7 +72,7 @@ commands:
             set -euo pipefail
             ROOT="$HOME/project"
             python3 "$ROOT/src/brave/ci/siso/source_cache_key.py" --root "$ROOT"
-            expected="$(python3 - "$ROOT/.sandium-source-cache-manifest.json" <<'PY'
+            expected="$(python3 - "$ROOT/.sandium-source-cache-manifest.json" \\<<'PY'
             import json, sys
             from pathlib import Path
             manifest=json.loads(Path(sys.argv[1]).read_text())
@@ -2203,6 +2203,9 @@ jobs:
     working_directory: ~/project
     steps:
       - checkout
+      - run:
+          name: Test stable Brave source-cache identity without compiling Chromium
+          command: python3 tests/ci/test_source_cache_key.py
       - attach_workspace:
           at: ~/project
       - sandium-smoke-checkpoint:
