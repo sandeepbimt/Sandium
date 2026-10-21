@@ -26,6 +26,7 @@ commands:
               python3 tests/ci/test_siso_build_state.py
               python3 tests/ci/test_timeout_policy.py
               python3 tests/ci/test_smoke_checkpoint.py
+              python3 tests/ci/test_siso_remote_preflight.py
             fi
             python3 ci/smoke/checkpoint.py "<< parameters.stage >>" "<< parameters.previous_stage >>"
   generate-sandium-brave-version-gni:
