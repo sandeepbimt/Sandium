@@ -28,15 +28,24 @@ class RemotePreflightTests(unittest.TestCase):
             path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
             return preflight.parse_remote_probe_metrics(path)
 
-    def test_generated_siso_environment_matches_ci_buildbuddy_configuration(self):
-        preflight.validate_generated_siso_environment(
-            " -re_proxy=remote.buildbuddy.io:443\\n -re_instance=default\\n"
-        )
+    def test_generated_siso_environment_checks_endpoint_without_assuming_instance_flag(self):
+        preflight.validate_generated_siso_environment("remote.buildbuddy.io:443")
         with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
-            preflight.validate_generated_siso_environment(" -re_instance=default\\n")
-        with self.assertRaisesRegex(ValueError, "instance 'default'"):
-            preflight.validate_generated_siso_environment(
-                " -re_proxy=remote.buildbuddy.io:443\\n -re_instance=sandium/android-arm64/ci\\n"
+            preflight.validate_generated_siso_environment("no remote endpoint")
+
+    def test_authoritative_runtime_config_checks_default_instance(self):
+        preflight.validate_buildbuddy_runtime_config(
+            "rbe_service=remote.buildbuddy.io:443\\n"
+            "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\\n"
+            "projects_chrome_custom_vars_reapi_instance=default\\n"
+            "use_remoteexec=true\\n"
+        )
+        with self.assertRaisesRegex(ValueError, "reapi_instance=default"):
+            preflight.validate_buildbuddy_runtime_config(
+                "rbe_service=remote.buildbuddy.io:443\\n"
+                "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\\n"
+                "projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci\\n"
+                "use_remoteexec=true\\n"
             )
 
     def test_probe_rule_is_found_in_generated_subninja_fragment(self):
