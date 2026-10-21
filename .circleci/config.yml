@@ -6,9 +6,10 @@ parameters:
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
+  # APK builds are opt-in, but an explicitly requested APK build runs all compile windows by default.
   run_sandium_compile_windows:
     type: boolean
-    default: false
+    default: true
 commands:
   sandium-smoke-checkpoint:
     parameters:
