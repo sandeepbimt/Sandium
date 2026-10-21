@@ -899,7 +899,7 @@ jobs:
       # expensive APK compile; never let a missing marker fail only after setup.
       - run:
           name: Prove BuildBuddy remote execution before APK compilation
-          no_output_timeout: 10m
+          no_output_timeout: 1h
           command: |
             set -euo pipefail
             PREFLIGHT="$HOME/project/src/brave/ci/siso/remote_preflight.py"
