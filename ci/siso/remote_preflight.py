@@ -43,6 +43,15 @@ def validate_generated_siso_environment(sisoenv: str) -> None:
         raise ValueError("Generated Siso environment does not select remote.buildbuddy.io:443")
 
 
+def is_retryable_manifest_fetch_failure(output: str) -> bool:
+    """Recognize only BuildBuddy CAS input-manifest retrieval failures."""
+    return (
+        "download inputs: could not fetch inputs" in output
+        and "manifestKey(" in output
+        and "Exhausted all peers" in output
+    )
+
+
 def validate_buildbuddy_runtime_config(runtime_env: str) -> None:
     """Validate the authoritative Brave .env values written by Sandium CI."""
     required = (
@@ -210,7 +219,7 @@ def run(root: Path) -> int:
     # Bound this diagnostic probe separately from the one-hour CircleCI quiet
     # watchdog. Stream sanitized output immediately so a stalled REAPI request
     # cannot hide its own error until the entire job is killed.
-    probe_timeout = min(900, max(1, available))
+    # Three bounded attempts must not consume the whole stage budget.\n    probe_timeout = min(300, max(1, available // 3))
     deadline = time.monotonic() + probe_timeout
     status = None
     # BuildBuddy can transiently fail to retrieve an action input manifest from
@@ -299,11 +308,7 @@ def run(root: Path) -> int:
                 attempt_log = saved_log.read()
         except OSError:
             attempt_log = ""
-        retryable_manifest_failure = (
-            "download inputs: could not fetch inputs" in attempt_log
-            and "manifestKey(" in attempt_log
-            and "Exhausted all peers" in attempt_log
-        )
+        retryable_manifest_failure = is_retryable_manifest_fetch_failure(attempt_log)
         if not retryable_manifest_failure or attempt == max_manifest_attempts:
             break
         print("REMOTE_PREFLIGHT_RETRY_REASON=transient remote input-manifest retrieval failure", flush=True)
