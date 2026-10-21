@@ -38,14 +38,22 @@ def has_probe_rule(fragment: Path) -> bool:
 
 
 def validate_generated_siso_environment(sisoenv: str) -> None:
-    """Require the endpoint and instance actually configured by the CI writer."""
+    """Check only the endpoint represented in .sisoenv; instance is in Brave .env."""
     if "remote.buildbuddy.io:443" not in sisoenv:
         raise ValueError("Generated Siso environment does not select remote.buildbuddy.io:443")
-    # configure-sandium-remote-cache sets SANDIUM_REAPI_INSTANCE=default and
-    # write_buildbuddy_env.py writes projects_chrome_custom_vars_reapi_instance=default.
-    # Chromium's generated .sisoenv carries this through as -re_instance=default.
-    if "-re_instance=default" not in sisoenv:
-        raise ValueError("Generated Siso environment does not select configured BuildBuddy instance 'default'")
+
+
+def validate_buildbuddy_runtime_config(runtime_env: str) -> None:
+    """Validate the authoritative Brave .env values written by Sandium CI."""
+    required = (
+        "rbe_service=remote.buildbuddy.io:443",
+        "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443",
+        "projects_chrome_custom_vars_reapi_instance=default",
+        "use_remoteexec=true",
+    )
+    missing = [value for value in required if value not in runtime_env.splitlines()]
+    if missing:
+        raise ValueError("Brave runtime BuildBuddy configuration is missing: " + ", ".join(missing))
 
 
 def parse_remote_probe_metrics(path: Path) -> dict[str, int]:
@@ -134,6 +142,8 @@ def run(root: Path) -> int:
     gclient = root / ".gclient"
     if not gclient.is_file() or str(helper) not in gclient.read_text(encoding="utf-8"):
         raise ValueError(".gclient does not contain the expected BuildBuddy credential-helper path")
+    runtime_env = (brave / ".env").read_text(encoding="utf-8", errors="replace")
+    validate_buildbuddy_runtime_config(runtime_env)
     sisoenv = (source / "build/config/siso/.sisoenv").read_text(encoding="utf-8", errors="replace")
     validate_generated_siso_environment(sisoenv)
 
