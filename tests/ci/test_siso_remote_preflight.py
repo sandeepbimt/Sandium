@@ -35,17 +35,17 @@ class RemotePreflightTests(unittest.TestCase):
 
     def test_authoritative_runtime_config_checks_default_instance(self):
         preflight.validate_buildbuddy_runtime_config(
-            "rbe_service=remote.buildbuddy.io:443\\n"
-            "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\\n"
-            "projects_chrome_custom_vars_reapi_instance=default\\n"
-            "use_remoteexec=true\\n"
+            "rbe_service=remote.buildbuddy.io:443\n"
+            "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\n"
+            "projects_chrome_custom_vars_reapi_instance=default\n"
+            "use_remoteexec=true\n"
         )
         with self.assertRaisesRegex(ValueError, "reapi_instance=default"):
             preflight.validate_buildbuddy_runtime_config(
-                "rbe_service=remote.buildbuddy.io:443\\n"
-                "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\\n"
-                "projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci\\n"
-                "use_remoteexec=true\\n"
+                "rbe_service=remote.buildbuddy.io:443\n"
+                "projects_chrome_custom_vars_reapi_address=remote.buildbuddy.io:443\n"
+                "projects_chrome_custom_vars_reapi_instance=sandium/android-arm64/ci\n"
+                "use_remoteexec=true\n"
             )
 
     def test_probe_rule_is_found_in_generated_subninja_fragment(self):
