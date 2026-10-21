@@ -33,18 +33,6 @@ class RemotePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
             preflight.validate_generated_siso_environment("no remote endpoint")
 
-    def test_retries_only_remote_input_manifest_fetch_failures(self):
-        self.assertTrue(preflight.is_retryable_manifest_fetch_failure(
-            'FailedPrecondition: download inputs: could not fetch inputs; '
-            'NotFound: Exhausted all peers attempting to GetWithMetadata "manifestKey(abc)"'
-        ))
-        self.assertFalse(preflight.is_retryable_manifest_fetch_failure(
-            "clang: error: unsupported argument"
-        ))
-        self.assertFalse(preflight.is_retryable_manifest_fetch_failure(
-            "download inputs: could not fetch inputs: connection reset"
-        ))
-
     def test_authoritative_runtime_config_checks_default_instance(self):
         preflight.validate_buildbuddy_runtime_config(
             "rbe_service=remote.buildbuddy.io:443\n"
@@ -60,38 +48,35 @@ class RemotePreflightTests(unittest.TestCase):
                 "use_remoteexec=true\n"
             )
 
-    def test_probe_rule_is_found_in_generated_subninja_fragment(self):
+    def test_probe_graph_is_one_isolated_compile_not_a_chromium_gn_target(self):
         with tempfile.TemporaryDirectory() as directory:
-            fragment = Path(directory) / "test_support.ninja"
-            fragment.write_text(
-                "build obj/base/test/test_support/mock_log.o "
-                "obj/base/test/test_support/mock_log.dwo: cxx "
-                "../../base/test/mock_log.cc\n",
-                encoding="utf-8",
+            root = Path(directory)
+            out = root / "out"
+            out.mkdir()
+            compiler = root / "clang++"
+            compiler.write_text("#!/bin/sh\\n", encoding="utf-8")
+            compiler.chmod(0o755)
+            source, ninja = preflight.write_probe_files(out, compiler)
+            graph = ninja.read_text(encoding="utf-8")
+            self.assertEqual(
+                source.read_text(encoding="utf-8"),
+                'extern "C" int sandium_remote_execution_probe() { return 42; }\\n',
             )
-            self.assertTrue(preflight.has_probe_rule(fragment))
-            fragment.write_text(
-                "build obj/base/test/test_support/other.o: cxx "
-                "../../base/test/other.cc\n",
-                encoding="utf-8",
-            )
-            self.assertFalse(preflight.has_probe_rule(fragment))
-
-    def test_probe_rule_rejects_missing_fragment(self):
-        with tempfile.TemporaryDirectory() as directory:
-            fragment = Path(directory) / "missing.ninja"
-            self.assertFalse(preflight.has_probe_rule(fragment))
+            self.assertEqual(sum(line.startswith("build ") for line in graph.splitlines()), 1)
+            self.assertIn("build " + preflight.PROBE_TARGET + ": cxx " + preflight.PROBE_SOURCE, graph)
+            self.assertNotIn("build.ninja", graph)
+            self.assertNotIn("mock_log", graph)
 
     def test_accepts_only_uncached_remote_probe_output(self):
         metrics = self.parse([
-            record("obj/base/test/test_support/mock_log.o", is_remote=True, cached=False, no_exec=False),
+            record(preflight.PROBE_OUTPUT_SUFFIX, is_remote=True, cached=False, no_exec=False),
         ])
         self.assertEqual(metrics["target_action_records"], 1)
         self.assertEqual(metrics["uncached_remote_target_actions"], 1)
 
     def test_rejects_cache_hit_and_local_results(self):
-        cached = self.parse([record("obj/base/test/test_support/mock_log.o", is_remote=True, cached=True)])
-        local = self.parse([record("obj/base/test/test_support/mock_log.o", is_local=True)])
+        cached = self.parse([record(preflight.PROBE_OUTPUT_SUFFIX, is_remote=True, cached=True)])
+        local = self.parse([record(preflight.PROBE_OUTPUT_SUFFIX, is_local=True)])
         self.assertEqual(cached["uncached_remote_target_actions"], 0)
         self.assertEqual(local["uncached_remote_target_actions"], 0)
 
@@ -108,8 +93,8 @@ class RemotePreflightTests(unittest.TestCase):
         marker = {
             "schema": 1, "status": "PASS", "workflow_id": "workflow-a",
             "source_commit": "brave-sha", "chromium_commit": "chromium-sha",
-            "chromium_version": "156.0.8078.39", "probe_target": "obj/base/test/test_support/mock_log.o",
-            "probe_output_suffix": "obj/base/test/test_support/mock_log.o", "probe_remote_action_records": 1,
+            "chromium_version": "156.0.8078.39", "probe_target": preflight.PROBE_TARGET,
+            "probe_output_suffix": preflight.PROBE_OUTPUT_SUFFIX, "probe_remote_action_records": 1,
             "metrics_sha256": "a" * 64, "siso_state_pair_valid": True,
         }
         with tempfile.TemporaryDirectory() as directory:
