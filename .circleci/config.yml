@@ -64,6 +64,31 @@ commands:
             node --version
             npm install --global pnpm@11.11.0
             pnpm --version
+  snapshot-sandium-source-cache-inputs:
+    steps:
+      - run:
+          name: Snapshot stable source-cache identity files before restoring Chromium
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            SOURCE="$ROOT/brave-core"
+            SNAPSHOT="$ROOT/.sandium-source-cache-inputs"
+            test -d "$SOURCE/.git"
+            rm -rf "$SNAPSHOT"
+            mkdir -p "$SNAPSHOT"
+            for relative in \
+              ci/pins/chromium-tag.txt \
+              DEPS \
+              package.json \
+              pnpm-lock.yaml \
+              build/commands/lib/config.ts \
+              build/commands/lib/syncUtils.ts \
+              build/commands/scripts/sync.ts; do
+              test -s "$SOURCE/$relative"
+              mkdir -p "$SNAPSHOT/$(dirname "$relative")"
+              cp -f "$SOURCE/$relative" "$SNAPSHOT/$relative"
+            done
+            echo "SANDIUM_SOURCE_CACHE_INPUT_SNAPSHOT=PASS"
   validate-sandium-source-cache-inputs:
     steps:
       - run:
@@ -96,7 +121,7 @@ commands:
       - restore_cache:
           name: Restore Chromium source by stable Brave sync-input identity
           keys:
-            - sandium-src-v7-{{ checksum "brave-core/ci/pins/chromium-tag.txt" }}-{{ checksum "brave-core/DEPS" }}-{{ checksum "brave-core/package.json" }}-{{ checksum "brave-core/pnpm-lock.yaml" }}-{{ checksum "brave-core/build/commands/lib/config.ts" }}-{{ checksum "brave-core/build/commands/lib/syncUtils.ts" }}-{{ checksum "brave-core/build/commands/scripts/sync.ts" }}-
+            - sandium-src-v7-{{ checksum ".sandium-source-cache-inputs/ci/pins/chromium-tag.txt" }}-{{ checksum ".sandium-source-cache-inputs/DEPS" }}-{{ checksum ".sandium-source-cache-inputs/package.json" }}-{{ checksum ".sandium-source-cache-inputs/pnpm-lock.yaml" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/lib/config.ts" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/lib/syncUtils.ts" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/scripts/sync.ts" }}-
             - sandium-src-v6-{{ .Branch }}-
             - sandium-src-v6-
       - run:
@@ -485,6 +510,7 @@ jobs:
             fi
       - checkout:
           path: brave-core
+      - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
           name: Place Brave Core checkout after restoring Chromium source
@@ -685,7 +711,7 @@ jobs:
             echo "SOURCE_CACHE_CONTAINS_COMPILED_OUTPUT=false"
       - save_cache:
           name: Save Chromium source for reuse across branches with identical sync inputs
-          key: sandium-src-v7-{{ checksum "brave-core/ci/pins/chromium-tag.txt" }}-{{ checksum "brave-core/DEPS" }}-{{ checksum "brave-core/package.json" }}-{{ checksum "brave-core/pnpm-lock.yaml" }}-{{ checksum "brave-core/build/commands/lib/config.ts" }}-{{ checksum "brave-core/build/commands/lib/syncUtils.ts" }}-{{ checksum "brave-core/build/commands/scripts/sync.ts" }}-{{ .BuildNum }}
+          key: sandium-src-v7-{{ checksum ".sandium-source-cache-inputs/ci/pins/chromium-tag.txt" }}-{{ checksum ".sandium-source-cache-inputs/DEPS" }}-{{ checksum ".sandium-source-cache-inputs/package.json" }}-{{ checksum ".sandium-source-cache-inputs/pnpm-lock.yaml" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/lib/config.ts" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/lib/syncUtils.ts" }}-{{ checksum ".sandium-source-cache-inputs/build/commands/scripts/sync.ts" }}-{{ .BuildNum }}
           paths:
             - src
             - .gclient
@@ -1125,6 +1151,7 @@ jobs:
             fi
       - checkout:
           path: brave-core
+      - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
           name: Place Brave Core checkout after restoring Chromium source
@@ -1492,6 +1519,7 @@ jobs:
             fi
       - checkout:
           path: brave-core
+      - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
           name: Place Brave Core checkout after restoring Chromium source
@@ -1729,6 +1757,7 @@ jobs:
             fi
       - checkout:
           path: brave-core
+      - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
           name: Place Brave Core checkout after restoring Chromium source
@@ -1998,6 +2027,7 @@ jobs:
             circleci-agent step halt
       - checkout:
           path: brave-core
+      - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
       - run:
           name: Place Brave Core checkout after restoring Chromium source
