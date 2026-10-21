@@ -69,6 +69,36 @@ function removeDepotTools() {
   }
 }
 
+// Chromium's Gitiles endpoint occasionally returns transient HTTP 503 responses
+// during clone. Retry a few times and remove partial clones between attempts so
+// the next attempt cannot mistake an incomplete directory for a valid checkout.
+function cloneDepotToolsWithRetry(options, maxAttempts = 4) {
+  let lastError
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      util.run(
+        'git',
+        ['clone', config.depotToolsRepo, config.depotToolsDir],
+        options,
+      )
+      return
+    } catch (error) {
+      lastError = error
+      removeDepotTools()
+      if (attempt === maxAttempts) {
+        break
+      }
+      const delaySeconds = attempt * 5
+      Log.warn(
+        `depot_tools clone failed (attempt ${attempt}/${maxAttempts}); `
+          + `retrying in ${delaySeconds}s. ${String(error).split('\\n').slice(-1)[0]}`,
+      )
+      util.run('sleep', [String(delaySeconds)], options)
+    }
+  }
+  throw lastError
+}
+
 function installDepotTools(options = config.defaultOptions) {
   options.cwd = config.braveCoreDir
 
@@ -108,11 +138,7 @@ function installDepotTools(options = config.defaultOptions) {
 
     if (!fs.existsSync(config.depotToolsDir) || wasInterrupted) {
       Log.progressScope('install depot_tools', () => {
-        util.run(
-          'git',
-          ['clone', config.depotToolsRepo, config.depotToolsDir],
-          options,
-        )
+        cloneDepotToolsWithRetry(options)
         // Bootstrap CIPD, Python and other dependencies.
         bootstrapDepotTools(options)
       })
