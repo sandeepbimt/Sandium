@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove one fresh C++ action completes remotely before starting the full browser compile."""
+"""Prove one isolated C++ action completes remotely before the full browser compile."""
 from __future__ import annotations
 
 import argparse
@@ -18,38 +18,44 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PROBE_TARGET = "obj/base/test/test_support/mock_log.o"
-PROBE_OUTPUT_SUFFIX = "obj/base/test/test_support/mock_log.o"
+PROBE_TARGET = "sandium_remote_probe.o"
+PROBE_OUTPUT_SUFFIX = PROBE_TARGET
+PROBE_SOURCE = "sandium_remote_probe.cc"
+PROBE_NINJA = ".sandium-remote-probe.ninja"
 MAX_STAGE_SECONDS = 3000
+PROBE_TIMEOUT_SECONDS = 60
 HANDOVER_RESERVE_SECONDS = 600
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def has_probe_rule(fragment: Path) -> bool:
-    """Check the generated GN subninja that owns the test_support C++ rule."""
-    if not fragment.is_file() or fragment.stat().st_size == 0:
-        return False
-    with fragment.open(encoding="utf-8", errors="replace") as stream:
-        return any(
-            line.startswith("build " + PROBE_TARGET + " ")
-            and "../../base/test/mock_log.cc" in line
-            for line in stream
-        )
+def write_probe_files(out: Path, compiler: Path) -> tuple[Path, Path]:
+    """Create a two-input, one-action Ninja graph isolated from Chromium's GN graph."""
+    if not compiler.is_file() or not os.access(compiler, os.X_OK):
+        raise ValueError("Pinned Chromium clang++ is missing or not executable: " + str(compiler))
+    source_path = out / PROBE_SOURCE
+    ninja_path = out / PROBE_NINJA
+    compiler_rel = os.path.relpath(compiler, out).replace(os.sep, "/")
+    source_path.write_text(
+        'extern "C" int sandium_remote_execution_probe() { return 42; }\\n',
+        encoding="utf-8",
+    )
+    ninja_path.write_text(
+        "ninja_required_version = 1.10\\n"
+        "rule cxx\\n"
+        f"  command = {compiler_rel} -c -x c++ -fno-exceptions -fno-rtti "
+        "-fno-stack-protector -o $out $in\\n"
+        "  description = SANDIUM_REMOTE_CXX_PROBE\\n"
+        f"build {PROBE_TARGET}: cxx {PROBE_SOURCE} | {compiler_rel}\\n"
+        f"default {PROBE_TARGET}\\n",
+        encoding="utf-8",
+    )
+    return source_path, ninja_path
 
 
 def validate_generated_siso_environment(sisoenv: str) -> None:
     """Check only the endpoint represented in .sisoenv; instance is in Brave .env."""
     if "remote.buildbuddy.io:443" not in sisoenv:
         raise ValueError("Generated Siso environment does not select remote.buildbuddy.io:443")
-
-
-def is_retryable_manifest_fetch_failure(output: str) -> bool:
-    """Recognize only BuildBuddy CAS input-manifest retrieval failures."""
-    return (
-        "download inputs: could not fetch inputs" in output
-        and "manifestKey(" in output
-        and "Exhausted all peers" in output
-    )
 
 
 def validate_buildbuddy_runtime_config(runtime_env: str) -> None:
@@ -196,14 +202,11 @@ def run(root: Path) -> int:
     target = out / PROBE_TARGET
     target.unlink(missing_ok=True)
     Path(str(target) + ".dwo").unlink(missing_ok=True)
-    # GN emits per-target rules in subninja fragments; this object is in
-    # obj/base/test/test_support.ninja, not necessarily in root build.ninja.
-    target_fragment = out / "obj/base/test/test_support.ninja"
-    if not has_probe_rule(target_fragment):
-        raise ValueError(
-            "Pinned GN subninja does not contain the expected test_support "
-            "C++ rule for obj/base/test/test_support/mock_log.o"
-        )
+    # Do not probe a GN target: even one object can pull in thousands of
+    # generated-header and library actions. Use a private Ninja file containing
+    # exactly one trivial C++ compile, independent of Chromium's default graph.
+    compiler = source / "third_party/llvm-build/Release+Asserts/bin/clang++"
+    _, probe_ninja = write_probe_files(out, compiler)
 
     autoninja = shutil.which("autoninja") or str(brave / "vendor/depot_tools/autoninja")
     if not Path(autoninja).is_file() or not os.access(autoninja, os.X_OK):
@@ -211,27 +214,19 @@ def run(root: Path) -> int:
     env["PATH"] = str(brave / "vendor/depot_tools") + os.pathsep + str(source / "buildtools/linux64") + os.pathsep + env.get("PATH", "")
     salt = "sandium-remote-preflight-" + uuid.uuid4().hex
     command = [
-        autoninja, "-C", str(out), PROBE_TARGET, "-strict_remote",
-        "-remote_jobs=1", "-local_jobs=1", "-action_salt=" + salt,
-        "-metrics_json", str(metrics_path),
+        autoninja, "-C", str(out), "-f", probe_ninja.name, PROBE_TARGET,
+        "-strict_remote", "-remote_jobs=1", "-local_jobs=1",
+        "-action_salt=" + salt, "-metrics_json", str(metrics_path),
     ]
-    print("REMOTE_PREFLIGHT_COMMAND=autoninja single-file C++ target, strict remote, unique action salt, one remote job")
-    # Bound this diagnostic probe separately from the one-hour CircleCI quiet
-    # watchdog. Stream sanitized output immediately so a stalled REAPI request
-    # cannot hide its own error until the entire job is killed.
-    # Three bounded attempts must not consume the whole stage budget.
-    probe_timeout = min(300, max(1, available // 3))
+    print("REMOTE_PREFLIGHT_COMMAND=isolated one-action Ninja graph, strict remote, unique action salt, one remote job")
+    # This graph has one source and one compile output, not Chromium's GN
+    # dependency graph. Keep the whole proof to one short attempt so a remote
+    # CAS failure cannot consume minutes before the APK compile is even allowed.
+    probe_timeout = min(PROBE_TIMEOUT_SECONDS, max(1, available // 3))
     deadline = time.monotonic() + probe_timeout
     status = None
-    # BuildBuddy can transiently fail to retrieve an action input manifest from
-    # CAS. Retry only that specific transport/storage failure; never retry a
-    # compiler error or treat a failed remote action as success. Re-running the
-    # same Ninja target lets Siso reuse completed local/cache work.
-    max_manifest_attempts = 3
+    max_manifest_attempts = 1
     for attempt in range(1, max_manifest_attempts + 1):
-        if attempt > 1:
-            print("REMOTE_PREFLIGHT_MANIFEST_RETRY=" + str(attempt) + "/" + str(max_manifest_attempts), flush=True)
-            metrics_path.unlink(missing_ok=True)
         attempt_started = time.monotonic()
         deadline = attempt_started + probe_timeout
         decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
@@ -309,10 +304,10 @@ def run(root: Path) -> int:
                 attempt_log = saved_log.read()
         except OSError:
             attempt_log = ""
-        retryable_manifest_failure = is_retryable_manifest_fetch_failure(attempt_log)
-        if not retryable_manifest_failure or attempt == max_manifest_attempts:
-            break
-        print("REMOTE_PREFLIGHT_RETRY_REASON=transient remote input-manifest retrieval failure", flush=True)
+        # A failed preflight is intentionally not retried: this is a fast
+        # infrastructure gate, not a compilation window. Preserve the attempt
+        # log so the actual CAS/REAPI failure remains diagnosable.
+        break
     if status:
         raise ValueError("Strict-remote C++ probe failed with exit code " + str(status))
     if not target.is_file() or target.stat().st_size == 0:
