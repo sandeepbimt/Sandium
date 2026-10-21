@@ -265,14 +265,14 @@ def run(root: Path) -> int:
                         log.write(chunk_text)
                         log.flush()
                         pending += chunk_text
-                        while "\\n" in pending:
-                            line, pending = pending.split("\\n", 1)
+                        while "\n" in pending:
+                            line, pending = pending.split("\n", 1)
                             print(line, flush=True)
                     elif time.monotonic() - last_heartbeat >= 30:
                         heartbeat = "REMOTE_PREFLIGHT_HEARTBEAT elapsed_seconds=" + str(
                             int(time.monotonic() - attempt_started)
                         )
-                        log.write(heartbeat + "\\n")
+                        log.write(heartbeat + "\n")
                         log.flush()
                         print(heartbeat, flush=True)
                         last_heartbeat = time.monotonic()
@@ -285,7 +285,7 @@ def run(root: Path) -> int:
                 status = proc.wait(timeout=max(1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 print("REMOTE_PREFLIGHT_TIMEOUT=EXPIRED; sending SIGINT to probe process group", flush=True)
-                log.write("\\nREMOTE_PREFLIGHT_TIMEOUT=EXPIRED\\n")
+                log.write("\nREMOTE_PREFLIGHT_TIMEOUT=EXPIRED\n")
                 log.flush()
                 try:
                     os.killpg(proc.pid, signal.SIGINT)
