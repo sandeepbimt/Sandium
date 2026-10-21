@@ -1574,6 +1574,8 @@ jobs:
             if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
               echo "FINAL_COMPILE_SKIPPED=COMPLETED_COMPILE_STATE"
               : > "$LOG"
+              echo "0" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
+              echo "0" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
             else
               python3 "$STATE" fingerprint --commit "$CIRCLE_SHA1" | tee build-diagnostics/validated-build-fingerprint.txt
               cd src/brave
