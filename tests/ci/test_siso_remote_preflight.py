@@ -28,6 +28,17 @@ class RemotePreflightTests(unittest.TestCase):
             path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
             return preflight.parse_remote_probe_metrics(path)
 
+    def test_generated_siso_environment_matches_ci_buildbuddy_configuration(self):
+        preflight.validate_generated_siso_environment(
+            " -re_proxy=remote.buildbuddy.io:443\\n -re_instance=default\\n"
+        )
+        with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
+            preflight.validate_generated_siso_environment(" -re_instance=default\\n")
+        with self.assertRaisesRegex(ValueError, "instance 'default'"):
+            preflight.validate_generated_siso_environment(
+                " -re_proxy=remote.buildbuddy.io:443\\n -re_instance=sandium/android-arm64/ci\\n"
+            )
+
     def test_probe_rule_is_found_in_generated_subninja_fragment(self):
         with tempfile.TemporaryDirectory() as directory:
             fragment = Path(directory) / "test_support.ninja"
