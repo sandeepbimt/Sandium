@@ -71,6 +71,37 @@ class RemotePreflightTests(unittest.TestCase):
             self.assertNotIn("build.ninja", graph)
             self.assertNotIn("mock_log", graph)
 
+    def test_probe_restores_original_siso_state_pair_presence_and_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out = root / "out"
+            backup = root / "backup"
+            out.mkdir()
+            backup.mkdir()
+            state = out / ".siso_fs_state"
+            journal = out / ".siso_fs_state.journal"
+            state.write_bytes(b"original-state")
+            snapshot = preflight.snapshot_siso_state(out, backup)
+            state.write_bytes(b"probe-mutated-state")
+            journal.write_bytes(b"probe-created-journal")
+            preflight.restore_siso_state(out, snapshot)
+            self.assertEqual(state.read_bytes(), b"original-state")
+            self.assertFalse(journal.exists())
+
+    def test_probe_removes_siso_state_files_created_from_empty_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out = root / "out"
+            backup = root / "backup"
+            out.mkdir()
+            backup.mkdir()
+            snapshot = preflight.snapshot_siso_state(out, backup)
+            (out / ".siso_fs_state").write_bytes(b"probe-state")
+            (out / ".siso_fs_state.journal").write_bytes(b"probe-journal")
+            preflight.restore_siso_state(out, snapshot)
+            self.assertFalse((out / ".siso_fs_state").exists())
+            self.assertFalse((out / ".siso_fs_state.journal").exists())
+
     def test_accepts_only_uncached_remote_probe_output(self):
         metrics = self.parse([
             record(preflight.PROBE_OUTPUT_SUFFIX, is_remote=True, cached=False, no_exec=False),
