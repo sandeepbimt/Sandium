@@ -603,7 +603,12 @@ jobs:
             python3 ci/siso/write_buildbuddy_env.py
             python3 ci/siso/chromium_pin.py --workspace "$HOME/project"
             set +e
-            timeout --signal=INT --kill-after=30s 32m pnpm run sync --target_os=android --target_arch=arm64 --no-history 2>&1 | tee "$HOME/project/build-diagnostics/source-sync.log"
+            # Keep dependency installation explicit, then syntax-check the
+            # retry fix before invoking sync (which can start Chromium hooks).
+            pnpm install --frozen-lockfile --yes
+            node --check build/commands/lib/depotTools.js
+            set +e
+            timeout --signal=INT --kill-after=30s 32m node ./build/commands/scripts/sync.ts --target_os=android --target_arch=arm64 --no-history 2>&1 | tee "$HOME/project/build-diagnostics/source-sync.log"
             sync_status=${PIPESTATUS[0]}
             set -e
             echo "$sync_status" > "$HOME/project/build-diagnostics/source-sync-exit.txt"
