@@ -491,6 +491,19 @@ commands:
             cat "$ROOT/build-diagnostics/source-timestamp-policy.txt"
 
 jobs:
+  sandium-fast-regression-gate:
+    docker:
+      - image: cimg/python:3.12
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Fast Siso compile-window regression gate (no Chromium restore/build)
+          command: |
+            set -euo pipefail
+            python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py
+            python3 tests/ci/test_siso_remote_preflight.py
+            python3 tests/ci/test_run_compile_window.py
   stage-1-source-foundation:
     machine:
       image: ubuntu-2404:current
@@ -2370,6 +2383,10 @@ jobs:
           paths:
             - smoke-state/stage-5.json
 workflows:
+  # Always run the tiny regression suite on pushes; APK builds remain opt-in.
+  sandium-fast-regression:
+    jobs:
+      - sandium-fast-regression-gate
   sandium-android-preflight:
     when:
       and:
