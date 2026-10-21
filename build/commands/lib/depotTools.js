@@ -91,7 +91,7 @@ function cloneDepotToolsWithRetry(options, maxAttempts = 4) {
       const delaySeconds = attempt * 5
       Log.warn(
         `depot_tools clone failed (attempt ${attempt}/${maxAttempts}); `
-          + `retrying in ${delaySeconds}s. ${String(error).split('\\n').slice(-1)[0]}`,
+          + `retrying in ${delaySeconds}s. ${String(error).split(/\r?\n/).slice(-1)[0]}`,
       )
       util.run('sleep', [String(delaySeconds)], options)
     }
