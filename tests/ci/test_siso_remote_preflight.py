@@ -99,7 +99,7 @@ class RemotePreflightTests(unittest.TestCase):
             "source_commit": "brave-sha", "chromium_commit": "chromium-sha",
             "chromium_version": "156.0.8078.39", "probe_target": preflight.PROBE_TARGET,
             "probe_output_suffix": preflight.PROBE_OUTPUT_SUFFIX, "probe_remote_action_records": 1,
-            "metrics_sha256": "a" * 64, "siso_state_pair_valid": True,
+            "metrics_sha256": "a" * 64,
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "marker.json"
