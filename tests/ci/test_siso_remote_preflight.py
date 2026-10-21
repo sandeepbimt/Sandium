@@ -28,6 +28,12 @@ class RemotePreflightTests(unittest.TestCase):
             path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
             return preflight.parse_remote_probe_metrics(path)
 
+    def test_state_snapshot_runtime_dependency_is_imported(self):
+        # Keep runtime-only names used by the preflight available; py_compile
+        # cannot catch a missing import referenced only when run() executes.
+        self.assertTrue(hasattr(preflight, "tempfile"))
+        self.assertTrue(callable(preflight.tempfile.TemporaryDirectory))
+
     def test_generated_siso_environment_checks_endpoint_without_assuming_instance_flag(self):
         preflight.validate_generated_siso_environment("remote.buildbuddy.io:443")
         with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
