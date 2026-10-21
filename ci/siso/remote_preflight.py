@@ -223,7 +223,6 @@ def run(root: Path) -> int:
     # dependency graph. Keep the whole proof to one short attempt so a remote
     # CAS failure cannot consume minutes before the APK compile is even allowed.
     probe_timeout = min(PROBE_TIMEOUT_SECONDS, max(1, available // 3))
-    deadline = time.monotonic() + probe_timeout
     status = None
     max_manifest_attempts = 1
     for attempt in range(1, max_manifest_attempts + 1):
@@ -284,7 +283,7 @@ def run(root: Path) -> int:
                 log.flush()
                 try:
                     os.killpg(proc.pid, signal.SIGINT)
-                    proc.wait(timeout=15)
+                    proc.wait(timeout=3)
                 except (ProcessLookupError, subprocess.TimeoutExpired):
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
