@@ -219,7 +219,8 @@ def run(root: Path) -> int:
     # Bound this diagnostic probe separately from the one-hour CircleCI quiet
     # watchdog. Stream sanitized output immediately so a stalled REAPI request
     # cannot hide its own error until the entire job is killed.
-    # Three bounded attempts must not consume the whole stage budget.\n    probe_timeout = min(300, max(1, available // 3))
+    # Three bounded attempts must not consume the whole stage budget.
+    probe_timeout = min(300, max(1, available // 3))
     deadline = time.monotonic() + probe_timeout
     status = None
     # BuildBuddy can transiently fail to retrieve an action input manifest from
