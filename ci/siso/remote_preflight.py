@@ -34,18 +34,27 @@ def write_probe_files(out: Path, compiler: Path) -> tuple[Path, Path]:
         raise ValueError("Pinned Chromium clang++ is missing or not executable: " + str(compiler))
     source_path = out / PROBE_SOURCE
     ninja_path = out / PROBE_NINJA
+    # Declare the compiler executable and its resolved target as explicit action
+    # inputs. The remote executor must stage both the clang++ symlink and the
+    # binary it resolves to; mentioning the compiler in the command or as an
+    # implicit dependency did not stage it in the previous preflight.
     compiler_rel = os.path.relpath(compiler, out).replace(os.sep, "/")
+    real_compiler = compiler.resolve(strict=True)
+    real_compiler_rel = os.path.relpath(real_compiler, out).replace(os.sep, "/")
+    compiler_inputs = list(dict.fromkeys((compiler_rel, real_compiler_rel)))
     source_path.write_text(
         'extern "C" int sandium_remote_execution_probe() { return 42; }\n',
         encoding="utf-8",
     )
+    # Hard-code the source in the command because $in includes the compiler
+    # executable(s), which are explicit dependencies for remote input staging.
     ninja_path.write_text(
         "ninja_required_version = 1.10\n"
         "rule cxx\n"
         f"  command = {compiler_rel} -c -x c++ -fno-exceptions -fno-rtti "
-        "-fno-stack-protector -o $out $in\n"
+        f"-fno-stack-protector -o $out {PROBE_SOURCE}\n"
         "  description = SANDIUM_REMOTE_CXX_PROBE\n"
-        f"build {PROBE_TARGET}: cxx {PROBE_SOURCE} | {compiler_rel}\n"
+        f"build {PROBE_TARGET}: cxx {PROBE_SOURCE} {' '.join(compiler_inputs)}\n"
         f"default {PROBE_TARGET}\n",
         encoding="utf-8",
     )
