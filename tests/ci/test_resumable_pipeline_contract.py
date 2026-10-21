@@ -55,7 +55,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
             with self.subTest(stage=current):
                 segment = job_segment(current, following)
                 self.assertLess(
-                    segment.index("- checkout:\n          path: src/brave"),
+                    segment.index("- checkout:\n          path: brave-core"),
+                    segment.index("- snapshot-sandium-source-cache-inputs"),
+                )
+                self.assertLess(
+                    segment.index("- snapshot-sandium-source-cache-inputs"),
+                    segment.index("- restore-sandium-source"),
+                )
+                self.assertLess(
+                    segment.index("Place Brave Core checkout after restoring Chromium source"),
                     segment.index("- validate-sandium-source-cache-inputs"),
                 )
 
