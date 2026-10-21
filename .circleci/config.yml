@@ -94,8 +94,11 @@ commands:
   restore-sandium-source:
     steps:
       - restore_cache:
+          name: Restore Chromium source by stable Brave sync-input identity
           keys:
+            - sandium-src-v7-{{ checksum "brave-core/ci/pins/chromium-tag.txt" }}-{{ checksum "brave-core/DEPS" }}-{{ checksum "brave-core/package.json" }}-{{ checksum "brave-core/pnpm-lock.yaml" }}-{{ checksum "brave-core/build/commands/lib/config.ts" }}-{{ checksum "brave-core/build/commands/lib/syncUtils.ts" }}-{{ checksum "brave-core/build/commands/scripts/sync.ts" }}-
             - sandium-src-v6-{{ .Branch }}-
+            - sandium-src-v6-
       - run:
           name: Validate restored Chromium source cache or record cold start
           command: |
@@ -477,9 +480,18 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; skipping source sync, dependencies, GN and compilation"
               circleci-agent step halt
             fi
-      - restore-sandium-source
       - checkout:
-          path: src/brave
+          path: brave-core
+      - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - run:
           name: Validate Brave checkout metadata and manual Chromium pin
           command: |
@@ -669,7 +681,8 @@ jobs:
             du -sb src | awk '{print "SOURCE_CACHE_BYTES=" $1}'
             echo "SOURCE_CACHE_CONTAINS_COMPILED_OUTPUT=false"
       - save_cache:
-          key: sandium-src-v6-{{ .Branch }}-{{ .BuildNum }}
+          name: Save Chromium source for reuse across branches with identical sync inputs
+          key: sandium-src-v7-{{ checksum "brave-core/ci/pins/chromium-tag.txt" }}-{{ checksum "brave-core/DEPS" }}-{{ checksum "brave-core/package.json" }}-{{ checksum "brave-core/pnpm-lock.yaml" }}-{{ checksum "brave-core/build/commands/lib/config.ts" }}-{{ checksum "brave-core/build/commands/lib/syncUtils.ts" }}-{{ checksum "brave-core/build/commands/scripts/sync.ts" }}-{{ .BuildNum }}
           paths:
             - src
             - .gclient
@@ -1107,9 +1120,18 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
               circleci-agent step halt
             fi
-      - restore-sandium-source
       - checkout:
-          path: src/brave
+          path: brave-core
+      - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 2
@@ -1465,9 +1487,18 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; no Chromium compile or dependency setup required"
               circleci-agent step halt
             fi
-      - restore-sandium-source
       - checkout:
-          path: src/brave
+          path: brave-core
+      - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 3
@@ -1693,9 +1724,18 @@ jobs:
               echo "VERIFIED_APK_REUSED=true; skipping Chromium checkout, dependencies and compilation"
               circleci-agent step halt
             fi
-      - restore-sandium-source
       - checkout:
-          path: src/brave
+          path: brave-core
+      - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 4
@@ -1953,9 +1993,18 @@ jobs:
             PY
             echo "VERIFIED_APK_REUSED=true; no Chromium checkout, dependency setup or compile is needed"
             circleci-agent step halt
-      - restore-sandium-source
       - checkout:
-          path: src/brave
+          path: brave-core
+      - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 5
