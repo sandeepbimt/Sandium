@@ -225,6 +225,7 @@ def run(root: Path) -> int:
         attempt_started = time.monotonic()
         deadline = attempt_started + probe_timeout
         decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
+        attempt_log_offset = log_path.stat().st_size if log_path.exists() else 0
         mode = "w" if attempt == 1 else "a"
         with log_path.open(mode, encoding="utf-8", errors="replace") as log:
             print("REMOTE_PREFLIGHT_ATTEMPT=" + str(attempt), flush=True)
@@ -293,7 +294,9 @@ def run(root: Path) -> int:
         if status == 0:
             break
         try:
-            attempt_log = log_path.read_text(encoding="utf-8", errors="replace")
+            with log_path.open("r", encoding="utf-8", errors="replace") as saved_log:
+                saved_log.seek(attempt_log_offset)
+                attempt_log = saved_log.read()
         except OSError:
             attempt_log = ""
         retryable_manifest_failure = (
