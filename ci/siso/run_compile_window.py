@@ -480,7 +480,7 @@ def main() -> int:
                             process_text(tail)
                             continue
                         process_text(decoder.decode(chunk))
-                if now - last_info_poll >= max(1, args.remote_gate_interval_seconds):
+                if now - last_info_poll >= max(1, args.metrics_poll_interval_seconds):
                     info_delta = read_new_siso_info()
                     last_info_poll = now
                     # Log text and cache messages are not execution evidence. The
