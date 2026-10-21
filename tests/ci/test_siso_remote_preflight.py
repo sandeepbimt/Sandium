@@ -33,6 +33,18 @@ class RemotePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
             preflight.validate_generated_siso_environment("no remote endpoint")
 
+    def test_retries_only_remote_input_manifest_fetch_failures(self):
+        self.assertTrue(preflight.is_retryable_manifest_fetch_failure(
+            'FailedPrecondition: download inputs: could not fetch inputs; '
+            'NotFound: Exhausted all peers attempting to GetWithMetadata "manifestKey(abc)"'
+        ))
+        self.assertFalse(preflight.is_retryable_manifest_fetch_failure(
+            "clang: error: unsupported argument"
+        ))
+        self.assertFalse(preflight.is_retryable_manifest_fetch_failure(
+            "download inputs: could not fetch inputs: connection reset"
+        ))
+
     def test_authoritative_runtime_config_checks_default_instance(self):
         preflight.validate_buildbuddy_runtime_config(
             "rbe_service=remote.buildbuddy.io:443\n"
