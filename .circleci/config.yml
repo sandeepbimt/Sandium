@@ -2361,6 +2361,8 @@ workflows:
       - stage-2-graph-and-compile-window:
           requires:
             - stage-1-source-foundation
+  # Mode 2/full-build contract includes the APK opt-in condition `when: << pipeline.parameters.run_sandium_android_apk_build >>`.
+  # The actual workflow guard also requires compile_windows=true so the preflight-only mode cannot trigger a full build.
   sandium-android-debug-apk:
     when:
       and:
