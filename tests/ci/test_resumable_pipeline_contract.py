@@ -45,6 +45,23 @@ class ResumablePipelineContractTests(unittest.TestCase):
                 failure_gate = segment.index("Propagate compile failure only after saving resumable state")
                 self.assertLess(checkpoint, failure_gate)
 
+    def test_preflight_only_status_is_allowed_only_when_compile_windows_are_disabled(self):
+        for stage in (1, 2):
+            with self.subTest(stage=stage):
+                segment = job_segment(
+                    f"stage-{stage}-" + (
+                        "source-foundation" if stage == 1 else "graph-and-compile-window"
+                    ),
+                    "stage-2-graph-and-compile-window" if stage == 1 else "stage-3-compile-continuation",
+                )
+                self.assertIn('status == "125"', segment)
+                self.assertIn('<< pipeline.parameters.run_sandium_compile_windows >>" != "true"', segment)
+                self.assertIn(f"BUILD_STAGE_PREFLIGHT_ONLY_HANDOVER_ALLOWED=true stage={stage} status=125", segment)
+                self.assertLess(
+                    segment.index("Save stage-" + str(stage) + " resumable build checkpoint"),
+                    segment.index("Propagate compile failure only after saving resumable state"),
+                )
+
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [
             ("stage-2-graph-and-compile-window", "stage-3-compile-continuation"),
