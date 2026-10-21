@@ -2208,6 +2208,9 @@ jobs:
       - run:
           name: Test stable Brave source-cache identity without compiling Chromium
           command: python3 tests/ci/test_source_cache_key.py
+      - run:
+          name: Test resumable pipeline contract without compiling Chromium
+          command: python3 tests/ci/test_resumable_pipeline_contract.py
       - attach_workspace:
           at: ~/project
       - sandium-smoke-checkpoint:
