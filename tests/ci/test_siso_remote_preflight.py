@@ -54,13 +54,13 @@ class RemotePreflightTests(unittest.TestCase):
             out = root / "out"
             out.mkdir()
             compiler = root / "clang++"
-            compiler.write_text("#!/bin/sh\\n", encoding="utf-8")
+            compiler.write_text("#!/bin/sh\n", encoding="utf-8")
             compiler.chmod(0o755)
             source, ninja = preflight.write_probe_files(out, compiler)
             graph = ninja.read_text(encoding="utf-8")
             self.assertEqual(
                 source.read_text(encoding="utf-8"),
-                'extern "C" int sandium_remote_execution_probe() { return 42; }\\n',
+                'extern "C" int sandium_remote_execution_probe() { return 42; }\n',
             )
             self.assertEqual(sum(line.startswith("build ") for line in graph.splitlines()), 1)
             self.assertIn("build " + preflight.PROBE_TARGET + ": cxx " + preflight.PROBE_SOURCE, graph)
