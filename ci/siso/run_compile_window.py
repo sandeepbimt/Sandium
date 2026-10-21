@@ -155,6 +155,25 @@ def stop_process_group(proc: subprocess.Popen[bytes], grace_seconds: int = 30) -
         pass
 
 
+def reset_siso_info(siso_info: Path, diagnostics: Path, stage: str) -> None:
+    """Start a fresh regular Siso info log without following restored symlinks."""
+    if siso_info.is_symlink():
+        # A restored Siso log can be a symlink (including a dangling one).
+        # Unlink only the link itself; never truncate or follow its target.
+        siso_info.unlink()
+        print("SISO_INFO_SYMLINK_REPLACED=true")
+    elif siso_info.exists():
+        if not siso_info.is_file():
+            raise ValueError(f"expected a regular Siso info log: {siso_info}")
+        # Preserve checkpoint-era diagnostics, but don't let a previous
+        # stage's remote signature satisfy the current stage's remote gate.
+        shutil.copy2(siso_info, diagnostics / f"siso.INFO.before-{stage}")
+        print(f"SISO_INFO_PREVIOUS_STAGE_SAVED={diagnostics / f'siso.INFO.before-{stage}'}")
+    siso_info.write_text("", encoding="utf-8")
+    if not siso_info.is_file() or siso_info.is_symlink():
+        raise ValueError(f"failed to initialize a regular Siso info log: {siso_info}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
@@ -268,16 +287,11 @@ def main() -> int:
     build_return_code: int | None = None
     started = time.monotonic()
     siso_info = out_dir / "siso.INFO"
-    if siso_info.exists():
-        if siso_info.is_symlink() or not siso_info.is_file():
-            print(f"SANDIUM_SISO_INFO_RESET=FAIL; expected a regular Siso info log: {siso_info}", file=sys.stderr)
-            return 23
-        # Preserve checkpoint-era Siso diagnostics, but do not let a previous
-        # run's remote signature satisfy the current window's remote gate.
-        shutil.copy2(siso_info, diagnostics / f"siso.INFO.before-{args.stage}")
-        siso_info.write_text("", encoding="utf-8")
-        print(f"SISO_INFO_PREVIOUS_STAGE_SAVED={diagnostics / f'siso.INFO.before-{args.stage}'}")
-    siso_info.write_text("", encoding="utf-8")
+    try:
+        reset_siso_info(siso_info, diagnostics, args.stage)
+    except (OSError, ValueError) as exc:
+        print(f"SANDIUM_SISO_INFO_RESET=FAIL; {exc}", file=sys.stderr)
+        return 23
     try:
         initial_info_stat = siso_info.stat()
         siso_info_identity: tuple[int, int] | None = (initial_info_stat.st_dev, initial_info_stat.st_ino)
