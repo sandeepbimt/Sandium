@@ -64,6 +64,33 @@ commands:
             node --version
             npm install --global pnpm@11.11.0
             pnpm --version
+  validate-sandium-source-cache-inputs:
+    steps:
+      - run:
+          name: Validate Brave sync-input fingerprint against restored Chromium cache
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            python3 "$ROOT/src/brave/ci/siso/source_cache_key.py" --root "$ROOT"
+            expected="$(python3 - "$ROOT/.sandium-source-cache-manifest.json" <<'PY'
+            import json, sys
+            from pathlib import Path
+            manifest=json.loads(Path(sys.argv[1]).read_text())
+            print(manifest.get("brave_sync_inputs_fingerprint", ""))
+            PY
+            )"
+            actual="$(sed -n 's/^fingerprint=//p' "$ROOT/.sandium-source-cache-key.txt")"
+            if [[ -z "$expected" || -z "$actual" ]]; then
+              echo "SANDIUM_SOURCE_CACHE_INPUT_FINGERPRINT=INVALID_OR_MISSING"
+              exit 34
+            fi
+            if [[ "$expected" != "$actual" ]]; then
+              echo "SANDIUM_SOURCE_CACHE_INPUT_FINGERPRINT=MISMATCH"
+              echo "CACHED_BRAVE_SYNC_INPUTS=$expected"
+              echo "CURRENT_BRAVE_SYNC_INPUTS=$actual"
+              exit 35
+            fi
+            echo "SANDIUM_SOURCE_CACHE_INPUT_FINGERPRINT=PASS"
   restore-sandium-source:
     steps:
       - restore_cache:
@@ -563,6 +590,7 @@ jobs:
             PY
             mkdir -p build-diagnostics
             git -C src rev-parse HEAD > build-diagnostics/chromium-commit.txt
+            python3 "$HOME/project/src/brave/ci/siso/source_cache_key.py" --root "$HOME/project"
             python3 - \<<'PY'
             import hashlib, json, re, subprocess
             from pathlib import Path
@@ -581,6 +609,10 @@ jobs:
               "manual_chromium_pin": tag,
               "version_file_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
               "gclient_sha256": hashlib.sha256(Path(".gclient").read_bytes()).hexdigest() if Path(".gclient").is_file() else None,
+              "brave_sync_inputs_fingerprint": next(
+                (line.split("=", 1)[1] for line in Path(".sandium-source-cache-key.txt").read_text().splitlines()
+                 if line.startswith("fingerprint=")), ""
+              ),
               "target": "android-arm64-debug-apk"
             }
             Path(".sandium-source-cache-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
@@ -1060,6 +1092,7 @@ jobs:
       - restore-sandium-source
       - checkout:
           path: src/brave
+      - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 2
       - restore-sandium-siso-cache
@@ -1399,6 +1432,7 @@ jobs:
       - restore-sandium-source
       - checkout:
           path: src/brave
+      - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 3
       - restore-sandium-siso-cache
@@ -1610,6 +1644,7 @@ jobs:
       - restore-sandium-source
       - checkout:
           path: src/brave
+      - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 4
       - restore-sandium-siso-cache
@@ -1855,6 +1890,7 @@ jobs:
       - restore-sandium-source
       - checkout:
           path: src/brave
+      - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 5
       - restore-sandium-siso-cache
