@@ -213,70 +213,97 @@ def run(root: Path) -> int:
     probe_timeout = min(900, max(1, available))
     deadline = time.monotonic() + probe_timeout
     status = None
-    decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
-    with log_path.open("w", encoding="utf-8", errors="replace") as log:
-        print("REMOTE_PREFLIGHT_TIMEOUT_SECONDS=" + str(probe_timeout), flush=True)
-        print("REMOTE_PREFLIGHT_DIAGNOSTICS_BEGIN", flush=True)
-        proc = subprocess.Popen(
-            command, cwd=root, env=env, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, bufsize=0, start_new_session=True,
-        )
-        assert proc.stdout is not None
-        selector = selectors.DefaultSelector()
-        selector.register(proc.stdout, selectors.EVENT_READ)
-        pending = ""
-        last_heartbeat = time.monotonic()
-        try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, probe_timeout)
-                events = selector.select(min(1.0, remaining))
-                if events:
-                    chunk = os.read(proc.stdout.fileno(), 65536)
-                    if not chunk:
-                        selector.unregister(proc.stdout)
-                        break
-                    text = decoder.decode(chunk).replace(api_key, "[REDACTED]")
-                    log.write(text)
-                    log.flush()
-                    pending += text
-                    while "\n" in pending:
-                        line, pending = pending.split("\n", 1)
-                        print(line, flush=True)
-                elif time.monotonic() - last_heartbeat >= 30:
-                    heartbeat = "REMOTE_PREFLIGHT_HEARTBEAT elapsed_seconds=" + str(
-                        int(time.monotonic() - (deadline - probe_timeout))
-                    )
-                    log.write(heartbeat + "\n")
-                    log.flush()
-                    print(heartbeat, flush=True)
-                    last_heartbeat = time.monotonic()
-            tail = decoder.decode(b"", final=True).replace(api_key, "[REDACTED]")
-            if tail:
-                log.write(tail)
-                pending += tail
-            if pending:
-                print(pending, end="", flush=True)
-            status = proc.wait(timeout=max(1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            print("REMOTE_PREFLIGHT_TIMEOUT=EXPIRED; sending SIGINT to probe process group", flush=True)
-            log.write("\nREMOTE_PREFLIGHT_TIMEOUT=EXPIRED\n")
-            log.flush()
+    # BuildBuddy can transiently fail to retrieve an action input manifest from
+    # CAS. Retry only that specific transport/storage failure; never retry a
+    # compiler error or treat a failed remote action as success. Re-running the
+    # same Ninja target lets Siso reuse completed local/cache work.
+    max_manifest_attempts = 3
+    for attempt in range(1, max_manifest_attempts + 1):
+        if attempt > 1:
+            print("REMOTE_PREFLIGHT_MANIFEST_RETRY=" + str(attempt) + "/" + str(max_manifest_attempts), flush=True)
+            metrics_path.unlink(missing_ok=True)
+        attempt_started = time.monotonic()
+        deadline = attempt_started + probe_timeout
+        decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
+        mode = "w" if attempt == 1 else "a"
+        with log_path.open(mode, encoding="utf-8", errors="replace") as log:
+            print("REMOTE_PREFLIGHT_ATTEMPT=" + str(attempt), flush=True)
+            print("REMOTE_PREFLIGHT_TIMEOUT_SECONDS=" + str(probe_timeout), flush=True)
+            print("REMOTE_PREFLIGHT_DIAGNOSTICS_BEGIN", flush=True)
+            proc = subprocess.Popen(
+                command, cwd=root, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, bufsize=0, start_new_session=True,
+            )
+            assert proc.stdout is not None
+            selector = selectors.DefaultSelector()
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            pending = ""
+            last_heartbeat = time.monotonic()
             try:
-                os.killpg(proc.pid, signal.SIGINT)
-                proc.wait(timeout=15)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, probe_timeout)
+                    events = selector.select(min(1.0, remaining))
+                    if events:
+                        chunk = os.read(proc.stdout.fileno(), 65536)
+                        if not chunk:
+                            selector.unregister(proc.stdout)
+                            break
+                        chunk_text = decoder.decode(chunk).replace(api_key, "[REDACTED]")
+                        log.write(chunk_text)
+                        log.flush()
+                        pending += chunk_text
+                        while "\\n" in pending:
+                            line, pending = pending.split("\\n", 1)
+                            print(line, flush=True)
+                    elif time.monotonic() - last_heartbeat >= 30:
+                        heartbeat = "REMOTE_PREFLIGHT_HEARTBEAT elapsed_seconds=" + str(
+                            int(time.monotonic() - attempt_started)
+                        )
+                        log.write(heartbeat + "\\n")
+                        log.flush()
+                        print(heartbeat, flush=True)
+                        last_heartbeat = time.monotonic()
+                tail = decoder.decode(b"", final=True).replace(api_key, "[REDACTED]")
+                if tail:
+                    log.write(tail)
+                    pending += tail
+                if pending:
+                    print(pending, end="", flush=True)
+                status = proc.wait(timeout=max(1, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                print("REMOTE_PREFLIGHT_TIMEOUT=EXPIRED; sending SIGINT to probe process group", flush=True)
+                log.write("\\nREMOTE_PREFLIGHT_TIMEOUT=EXPIRED\\n")
+                log.flush()
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                proc.wait()
-            status = proc.returncode if proc.returncode is not None else 124
-        finally:
-            selector.close()
-            proc.stdout.close()
-        print("REMOTE_PREFLIGHT_DIAGNOSTICS_END", flush=True)
+                    os.killpg(proc.pid, signal.SIGINT)
+                    proc.wait(timeout=15)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.wait()
+                status = proc.returncode if proc.returncode is not None else 124
+            finally:
+                selector.close()
+                proc.stdout.close()
+            print("REMOTE_PREFLIGHT_DIAGNOSTICS_END", flush=True)
+        if status == 0:
+            break
+        try:
+            attempt_log = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            attempt_log = ""
+        retryable_manifest_failure = (
+            "download inputs: could not fetch inputs" in attempt_log
+            and "manifestKey(" in attempt_log
+            and "Exhausted all peers" in attempt_log
+        )
+        if not retryable_manifest_failure or attempt == max_manifest_attempts:
+            break
+        print("REMOTE_PREFLIGHT_RETRY_REASON=transient remote input-manifest retrieval failure", flush=True)
     if status:
         raise ValueError("Strict-remote C++ probe failed with exit code " + str(status))
     if not target.is_file() or target.stat().st_size == 0:
