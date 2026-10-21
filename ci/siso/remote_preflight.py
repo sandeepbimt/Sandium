@@ -130,6 +130,37 @@ def load_valid_marker(path: Path, workflow_id: str, source_commit: str,
     return marker
 
 
+def snapshot_siso_state(out: Path, backup_dir: Path) -> dict[str, Path | None]:
+    """Copy pre-existing Siso state files so the isolated probe cannot poison a checkpoint."""
+    snapshot: dict[str, Path | None] = {}
+    for name in (".siso_fs_state", ".siso_fs_state.journal"):
+        original = out / name
+        if original.exists():
+            if not original.is_file():
+                raise ValueError("Siso state path is not a regular file: " + str(original))
+            backup = backup_dir / name
+            shutil.copy2(original, backup)
+            snapshot[name] = backup
+        else:
+            snapshot[name] = None
+    print(
+        "REMOTE_PREFLIGHT_SISO_STATE_SNAPSHOT="
+        + ",".join(name + (":present" if path else ":absent") for name, path in snapshot.items())
+    )
+    return snapshot
+
+
+def restore_siso_state(out: Path, snapshot: dict[str, Path | None]) -> None:
+    """Restore exactly the pre-probe state/journal presence and contents."""
+    for name, backup in snapshot.items():
+        destination = out / name
+        if backup is None:
+            destination.unlink(missing_ok=True)
+        else:
+            shutil.copy2(backup, destination)
+    print("REMOTE_PREFLIGHT_SISO_STATE_RESTORED=true")
+
+
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
 
@@ -232,6 +263,9 @@ def run(root: Path) -> int:
     # dependency graph. Keep the whole proof to one short attempt so a remote
     # CAS failure cannot consume minutes before the APK compile is even allowed.
     probe_timeout = min(PROBE_TIMEOUT_SECONDS, max(1, available // 3))
+    # Keep a temporary backup alive until the probe has finished.
+    state_backup_context = tempfile.TemporaryDirectory(prefix="sandium-siso-state-", dir=diagnostics)
+    state_snapshot = snapshot_siso_state(out, Path(state_backup_context.name))
     status = None
     max_manifest_attempts = 1
     for attempt in range(1, max_manifest_attempts + 1):
@@ -316,6 +350,11 @@ def run(root: Path) -> int:
         # infrastructure gate, not a compilation window. Preserve the attempt
         # log so the actual CAS/REAPI failure remains diagnosable.
         break
+    try:
+        restore_siso_state(out, state_snapshot)
+    finally:
+        state_backup_context.cleanup()
+
     if status:
         raise ValueError("Strict-remote C++ probe failed with exit code " + str(status))
     if not target.is_file() or target.stat().st_size == 0:
