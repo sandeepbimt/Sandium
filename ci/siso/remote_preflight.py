@@ -36,17 +36,17 @@ def write_probe_files(out: Path, compiler: Path) -> tuple[Path, Path]:
     ninja_path = out / PROBE_NINJA
     compiler_rel = os.path.relpath(compiler, out).replace(os.sep, "/")
     source_path.write_text(
-        'extern "C" int sandium_remote_execution_probe() { return 42; }\\n',
+        'extern "C" int sandium_remote_execution_probe() { return 42; }\n',
         encoding="utf-8",
     )
     ninja_path.write_text(
-        "ninja_required_version = 1.10\\n"
-        "rule cxx\\n"
+        "ninja_required_version = 1.10\n"
+        "rule cxx\n"
         f"  command = {compiler_rel} -c -x c++ -fno-exceptions -fno-rtti "
-        "-fno-stack-protector -o $out $in\\n"
-        "  description = SANDIUM_REMOTE_CXX_PROBE\\n"
-        f"build {PROBE_TARGET}: cxx {PROBE_SOURCE} | {compiler_rel}\\n"
-        f"default {PROBE_TARGET}\\n",
+        "-fno-stack-protector -o $out $in\n"
+        "  description = SANDIUM_REMOTE_CXX_PROBE\n"
+        f"build {PROBE_TARGET}: cxx {PROBE_SOURCE} | {compiler_rel}\n"
+        f"default {PROBE_TARGET}\n",
         encoding="utf-8",
     )
     return source_path, ninja_path
