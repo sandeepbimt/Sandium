@@ -64,6 +64,10 @@ class RemotePreflightTests(unittest.TestCase):
             )
             self.assertEqual(sum(line.startswith("build ") for line in graph.splitlines()), 1)
             self.assertIn("build " + preflight.PROBE_TARGET + ": cxx " + preflight.PROBE_SOURCE, graph)
+            build_line = next(line for line in graph.splitlines() if line.startswith("build "))
+            self.assertIn(str(compiler.relative_to(out).as_posix()), build_line)
+            self.assertNotIn(" | ", build_line)
+            self.assertIn("-o $out " + preflight.PROBE_SOURCE, graph)
             self.assertNotIn("build.ninja", graph)
             self.assertNotIn("mock_log", graph)
 
