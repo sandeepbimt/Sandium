@@ -67,6 +67,18 @@ class ResumablePipelineContractTests(unittest.TestCase):
     def test_remote_preflight_script_path_is_inside_checked_out_brave_core(self):
         self.assertIn('PREFLIGHT="$HOME/project/src/brave/ci/siso/remote_preflight.py"', CONFIG)
 
+    def test_source_cache_key_is_stable_across_ci_only_commits_and_branches(self):
+        self.assertIn("sandium-src-v7-", CONFIG)
+        self.assertIn('.sandium-source-cache-inputs/ci/pins/chromium-tag.txt', CONFIG)
+        self.assertIn('.sandium-source-cache-inputs/build/commands/lib/syncUtils.ts', CONFIG)
+        self.assertIn("Snapshot stable source-cache identity files before restoring Chromium", CONFIG)
+        self.assertIn("Save Chromium source for reuse across branches with identical sync inputs", CONFIG)
+
+    def test_siso_action_cache_is_shared_across_branches(self):
+        self.assertIn("sandium-siso-v4-android-debug-arm64-", CONFIG)
+        for stage in range(1, 6):
+            self.assertIn(f"key: sandium-siso-v4-android-debug-arm64-stage{stage}-", CONFIG)
+
 
 if __name__ == "__main__":
     unittest.main()
