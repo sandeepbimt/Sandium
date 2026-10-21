@@ -260,8 +260,11 @@ commands:
   restore-sandium-siso-cache:
     steps:
       - restore_cache:
+          name: Restore shared content-addressed Siso action cache across branches
           keys:
+            - sandium-siso-v4-android-debug-arm64-
             - sandium-siso-v3-{{ .Branch }}-android-debug-arm64-
+            - sandium-siso-v3-
       - run:
           name: Validate persistent Siso local action cache
           command: |
@@ -950,7 +953,7 @@ jobs:
               fi
             fi
       - save_cache:
-          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage1-{{ .BuildNum }}
+          key: sandium-siso-v4-android-debug-arm64-stage1-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1402,7 +1405,7 @@ jobs:
               echo "COMPILE_WINDOW_STATUS_ACCEPTED_FOR_HANDOVER=$status"
             fi
       - save_cache:
-          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
+          key: sandium-siso-v4-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1656,7 +1659,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-3; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage3-{{ .BuildNum }}
+          key: sandium-siso-v4-android-debug-arm64-stage3-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -1891,7 +1894,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE=stage-4; output cache will be kept for the next run"
             fi
       - save_cache:
-          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage4-{{ .BuildNum }}
+          key: sandium-siso-v4-android-debug-arm64-stage4-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
@@ -2162,7 +2165,7 @@ jobs:
               echo "APK_NOT_YET_AVAILABLE_AFTER_FIVE_STAGE_WINDOWS=true"
             fi
       - save_cache:
-          key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage5-{{ .BuildNum }}
+          key: sandium-siso-v4-android-debug-arm64-stage5-{{ .BuildNum }}
           paths:
             - sandium-siso-cache
       - run:
