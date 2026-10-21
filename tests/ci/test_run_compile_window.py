@@ -1,6 +1,7 @@
 """Regression tests for Siso compile-window log initialization."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import tempfile
 import unittest
@@ -15,6 +16,35 @@ spec.loader.exec_module(compile_window)
 
 
 class ResetSisoInfoTests(unittest.TestCase):
+    def test_every_args_attribute_is_declared_by_argument_parser(self):
+        # Catch runtime-only Namespace typos such as using
+        # args.remote_gate_interval_seconds when the parser declares
+        # --metrics-poll-interval-seconds. py_compile cannot detect these.
+        tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
+        declared = set()
+        referenced = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"
+            ):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        if arg.value.startswith("--"):
+                            declared.add(arg.value[2:].replace("-", "_"))
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "args"
+            ):
+                referenced.add(node.attr)
+        self.assertEqual(
+            referenced - declared,
+            set(),
+            "compile-window script references undeclared argparse attributes",
+        )
+
     def test_replaces_symlink_without_truncating_its_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
