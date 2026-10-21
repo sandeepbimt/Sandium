@@ -828,7 +828,14 @@ jobs:
           no_output_timeout: 10m
           command: |
             set -euo pipefail
-            python3 "$HOME/project/ci/siso/remote_preflight.py" --root "$HOME/project"
+            PREFLIGHT="$HOME/project/src/brave/ci/siso/remote_preflight.py"
+            if [[ ! -f "$PREFLIGHT" ]]; then
+              echo "SANDIUM_REMOTE_PREFLIGHT_SCRIPT_MISSING=$PREFLIGHT"
+              echo "Available candidates:"
+              find "$HOME/project" -path '*/ci/siso/remote_preflight.py' -type f -print 2>/dev/null || true
+              exit 2
+            fi
+            python3 "$PREFLIGHT" --root "$HOME/project"
             test -s "$HOME/project/src/out/android_Debug_arm64/.sandium-remote-preflight.json"
             echo "SANDIUM_REMOTE_PREFLIGHT_MARKER_PRESENT=PASS"
       - run:
