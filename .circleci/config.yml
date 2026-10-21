@@ -820,9 +820,17 @@ jobs:
             grep -Fxq 'use_reclient=false' "$OUT/gn_logs.txt"
             echo "GN_PREPARE_EFFECTIVE_REMOTE_EXECUTION=PASS"
       - normalize-sandium-source-baseline
-      # Deliberately do not run a separate C++ probe here. The next step is the
-      # actual staged Android APK compile; its Siso metrics are captured and
-      # validated as part of the build, avoiding a duplicate graph/action cost.
+      # run_compile_window.py requires a workflow/source-bound proof marker.
+      # Generate that marker here with one uncached C++ action before the
+      # expensive APK compile; never let a missing marker fail only after setup.
+      - run:
+          name: Prove BuildBuddy remote execution before APK compilation
+          no_output_timeout: 10m
+          command: |
+            set -euo pipefail
+            python3 "$HOME/project/ci/siso/remote_preflight.py" --root "$HOME/project"
+            test -s "$HOME/project/src/out/android_Debug_arm64/.sandium-remote-preflight.json"
+            echo "SANDIUM_REMOTE_PREFLIGHT_MARKER_PRESENT=PASS"
       - run:
           name: Validate fingerprint, configure GN and compile window 1
           no_output_timeout: 1h
