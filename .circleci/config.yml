@@ -930,8 +930,11 @@ jobs:
                 echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
                 : > "$evidence"
               fi
-              if [[ "$status" -ne 124 ]]; then exit "$status"; fi
-              echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+              if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+                echo "COMPILE_WINDOW_FAILURE_DEFERRED_FOR_CHECKPOINT=$status"
+              else
+                echo "COMPILE_WINDOW_STATUS_ACCEPTED_FOR_HANDOVER=$status"
+              fi
             fi
       - save_cache:
           key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage1-{{ .BuildNum }}
@@ -1071,6 +1074,21 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-1-compile-window
+      - run:
+          name: Propagate compile failure only after saving resumable state
+          command: |
+            set -euo pipefail
+            status_file="$HOME/project/build-diagnostics/compile-window-1-exit.txt"
+            if [[ ! -s "$status_file" ]]; then
+              echo "COMPILE_EXIT_STATUS_MISSING=$status_file"
+              exit 90
+            fi
+            status="$(cat "$status_file")"
+            if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+              echo "BUILD_STAGE_FAILED_AFTER_CHECKPOINT_SAVE=true status=$status"
+              exit "$status"
+            fi
+            echo "BUILD_STAGE_HANDOVER_ALLOWED=true status=$status"
   stage-2-graph-and-compile-window:
     machine:
       image: ubuntu-2404:current
@@ -1356,8 +1374,11 @@ jobs:
               echo "REMOTE_CACHE_LOG_MATCHES=NO_MATCHING_LINES"
               : > "$evidence"
             fi
-            if [[ "$status" -ne 124 ]]; then exit "$status"; fi
-            echo "INTERMEDIATE_WINDOW_STOP_ACCEPTED=$status"
+            if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+              echo "COMPILE_WINDOW_FAILURE_DEFERRED_FOR_CHECKPOINT=$status"
+            else
+              echo "COMPILE_WINDOW_STATUS_ACCEPTED_FOR_HANDOVER=$status"
+            fi
       - save_cache:
           key: sandium-siso-v3-{{ .Branch }}-android-debug-arm64-stage2-{{ .BuildNum }}
           paths:
@@ -1411,6 +1432,21 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-2-compile-continuation
+      - run:
+          name: Propagate compile failure only after saving resumable state
+          command: |
+            set -euo pipefail
+            status_file="$HOME/project/build-diagnostics/compile-window-2-exit.txt"
+            if [[ ! -s "$status_file" ]]; then
+              echo "COMPILE_EXIT_STATUS_MISSING=$status_file"
+              exit 90
+            fi
+            status="$(cat "$status_file")"
+            if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+              echo "BUILD_STAGE_FAILED_AFTER_CHECKPOINT_SAVE=true status=$status"
+              exit "$status"
+            fi
+            echo "BUILD_STAGE_HANDOVER_ALLOWED=true status=$status"
   stage-3-compile-continuation:
     machine:
       image: ubuntu-2404:current
@@ -1563,8 +1599,7 @@ jobs:
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
               if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
-                echo "Final compile window failed (status=$status)"
-                exit "$status"
+                echo "COMPILE_WINDOW_FAILURE_DEFERRED_FOR_CHECKPOINT=$status"
               fi
               if [[ "$status" -eq 124 ]]; then
                 echo "FINAL_COMPILE_WINDOW_TIMED_OUT=124; preserving partial output for the next run"
@@ -1623,6 +1658,21 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-3-finish-build
+      - run:
+          name: Propagate compile failure only after saving resumable state
+          command: |
+            set -euo pipefail
+            status_file="$HOME/project/build-diagnostics/compile-window-3-exit.txt"
+            if [[ ! -s "$status_file" ]]; then
+              echo "COMPILE_EXIT_STATUS_MISSING=$status_file"
+              exit 90
+            fi
+            status="$(cat "$status_file")"
+            if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+              echo "BUILD_STAGE_FAILED_AFTER_CHECKPOINT_SAVE=true status=$status"
+              exit "$status"
+            fi
+            echo "BUILD_STAGE_HANDOVER_ALLOWED=true status=$status"
   stage-4-finish-and-package:
     machine:
       image: ubuntu-2404:current
@@ -1775,8 +1825,7 @@ jobs:
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
               if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
-                echo "Final compile window failed (status=$status)"
-                exit "$status"
+                echo "COMPILE_WINDOW_FAILURE_DEFERRED_FOR_CHECKPOINT=$status"
               fi
               if [[ "$status" -eq 124 ]]; then
                 echo "FINAL_COMPILE_WINDOW_TIMED_OUT=124; preserving partial output for the next run"
@@ -1835,6 +1884,21 @@ jobs:
       - store_artifacts:
           path: build-diagnostics
           destination: stage-4-finish-build
+      - run:
+          name: Propagate compile failure only after saving resumable state
+          command: |
+            set -euo pipefail
+            status_file="$HOME/project/build-diagnostics/compile-window-4-exit.txt"
+            if [[ ! -s "$status_file" ]]; then
+              echo "COMPILE_EXIT_STATUS_MISSING=$status_file"
+              exit 90
+            fi
+            status="$(cat "$status_file")"
+            if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+              echo "BUILD_STAGE_FAILED_AFTER_CHECKPOINT_SAVE=true status=$status"
+              exit "$status"
+            fi
+            echo "BUILD_STAGE_HANDOVER_ALLOWED=true status=$status"
   stage-5-verify-publish:
     machine:
       image: ubuntu-2404:current
