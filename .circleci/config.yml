@@ -1770,6 +1770,21 @@ jobs:
             status="$(cat "$status_file")"
             if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
               echo "BUILD_STAGE_FAILED_AFTER_CHECKPOINT_SAVE=true status=$status"
+              log="$HOME/project/build-diagnostics/compile-window-3.log"
+              metrics="$HOME/project/build-diagnostics/compile-window-3-metrics.jsonl"
+              if [[ -s "$log" ]]; then
+                echo "===== COMPILE WINDOW 3 FAILURE CONTEXT (last 160 lines) ====="
+                tail -n 160 "$log"
+                echo "===== END COMPILE WINDOW 3 FAILURE CONTEXT ====="
+              else
+                echo "COMPILE_WINDOW_3_LOG_MISSING=$log"
+              fi
+              if [[ -s "$metrics" ]]; then
+                echo "===== COMPILE WINDOW 3 METRICS (last 40 lines) ====="
+                tail -n 40 "$metrics"
+                echo "===== END COMPILE WINDOW 3 METRICS ====="
+              fi
+              echo "CHECKPOINT_WAS_SAVED_BEFORE_FAILURE=true"
               exit "$status"
             fi
             echo "BUILD_STAGE_HANDOVER_ALLOWED=true status=$status"
