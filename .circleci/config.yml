@@ -86,11 +86,9 @@ commands:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
-            # The checked-out Sandium repository itself owns the stable sync-input
-            # files; there is no separate $ROOT/brave-core directory before source
-            # cache restoration. Snapshot from the checkout so the first step works
-            # on a clean runner.
-            SOURCE="$ROOT"
+            # Brave Core is checked out under brave-core for this workflow,
+            # matching the build workflows; Chromium is restored separately into src.
+            SOURCE="$ROOT/brave-core"
             SNAPSHOT="$ROOT/.sandium-source-cache-inputs"
             test -d "$SOURCE/.git"
             rm -rf "$SNAPSHOT"
@@ -2451,9 +2449,19 @@ jobs:
     resource_class: medium
     working_directory: ~/project
     steps:
-      - checkout
+      - checkout:
+          path: brave-core
       - snapshot-sandium-source-cache-inputs
       - restore-sandium-source
+      - run:
+          name: Place Brave Core checkout after restoring Chromium source
+          command: |
+            set -euo pipefail
+            test -d brave-core/.git
+            test ! -e src/brave
+            mkdir -p src
+            mv brave-core src/brave
+            test -d src/brave/.git
       - validate-sandium-source-cache-inputs
       - restore-sandium-build-output:
           stage_index: 1
