@@ -17,6 +17,9 @@ parameters:
   run_sandium_checkpoint_discovery_probe:
     type: boolean
     default: false
+  run_sandium_checkpoint_unit_tests:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -2435,6 +2438,28 @@ jobs:
       - run:
           name: Probe CircleCI API token and historical checkpoint artifact listing (no build)
           command: python3 ci/siso/checkpoint_discovery_probe.py
+  sandium-checkpoint-unit-tests:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Validate Python syntax for checkpoint recovery scripts
+          command: |
+            set -euo pipefail
+            python3 -m py_compile ci/siso/checkpoint.py ci/siso/build_state.py ci/siso/checkpoint_catalog.py ci/siso/checkpoint_artifact_discovery.py
+            echo "SANDIUM_CHECKPOINT_PY_COMPILE=PASS"
+      - run:
+          name: Run offline checkpoint and resumable-pipeline regression tests (no Chromium build)
+          command: |
+            set -euo pipefail
+            python3 tests/ci/test_siso_checkpoint_catalog.py
+            python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_siso_build_state.py
+            python3 tests/ci/test_resumable_pipeline_contract.py
+            echo "SANDIUM_CHECKPOINT_UNIT_TESTS=PASS"
   smoke-1-contract-and-foundation:
     machine:
       image: ubuntu-2404:current
@@ -2524,6 +2549,10 @@ workflows:
     when: << pipeline.parameters.run_sandium_checkpoint_discovery_probe >>
     jobs:
       - sandium-checkpoint-discovery-probe
+  sandium-checkpoint-unit-tests:
+    when: << pipeline.parameters.run_sandium_checkpoint_unit_tests >>
+    jobs:
+      - sandium-checkpoint-unit-tests
   # Optional standalone gate for diagnosis; production APK builds run the same gate in Stage 1.
   sandium-fast-regression:
     when: << pipeline.parameters.run_sandium_fast_regression >>
