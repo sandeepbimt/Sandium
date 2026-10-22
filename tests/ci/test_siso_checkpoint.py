@@ -90,23 +90,42 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("invalid Chromium version", result.stderr)
 
 
-    def test_pack_rejects_journal_without_siso_state(self):
+    def test_pack_quarantines_journal_without_siso_state_and_preserves_outputs(self):
         (self.output / ".siso_fs_state").unlink()
+        object_file = self.output / "obj/sample/sample.o"
         result = self.invoke("pack", "--stage", "stage-1")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("must be present together", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertFalse((self.output / ".siso_fs_state.journal").exists())
+        self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
+        self.assertTrue(object_file.is_file())
 
-    def test_pack_rejects_siso_state_without_journal(self):
+    def test_pack_quarantines_siso_state_without_journal_and_preserves_outputs(self):
         (self.output / ".siso_fs_state.journal").unlink()
+        object_file = self.output / "obj/sample/sample.o"
         result = self.invoke("pack", "--stage", "stage-1")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("must be present together", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertFalse((self.output / ".siso_fs_state").exists())
+        self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
+        self.assertTrue(object_file.is_file())
 
-    def test_pack_rejects_empty_siso_state_or_journal(self):
+    def test_pack_quarantines_dangling_siso_state_symlink(self):
+        (self.output / ".siso_fs_state").unlink()
+        (self.output / ".siso_fs_state").symlink_to(self.root / "missing-state-target")
+        result = self.invoke("pack", "--stage", "stage-1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        preserved = self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state"
+        self.assertTrue(preserved.is_symlink())
+        self.assertTrue((self.output / ".siso_fs_state.journal").is_file())
+
+    def test_pack_quarantines_empty_siso_state_or_journal(self):
         (self.output / ".siso_fs_state").write_bytes(b"")
         result = self.invoke("pack", "--stage", "stage-1")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("nonempty regular file", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
 
 
 if __name__ == "__main__":
