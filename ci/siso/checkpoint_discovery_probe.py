@@ -4,16 +4,32 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 
 API = "https://circleci.com/api/v2"
+# CircleCI's canonical project slug from Project Settings > Overview.
+DEFAULT_PROJECT_SLUG = "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+CURRENT_ENDPOINT = "not_started"
 
 
 def get_json(url: str, token: str) -> dict:
+    global CURRENT_ENDPOINT
+    path = urllib.parse.urlparse(url).path
+    if path.endswith("/me"):
+        CURRENT_ENDPOINT = "me"
+    elif "/project/" in path and path.endswith("/pipeline"):
+        CURRENT_ENDPOINT = "project_pipelines"
+    elif "/pipeline/" in path and path.endswith("/workflow"):
+        CURRENT_ENDPOINT = "pipeline_workflows"
+    elif "/workflow/" in path and path.endswith("/job"):
+        CURRENT_ENDPOINT = "workflow_jobs"
+    elif "/artifacts" in path:
+        CURRENT_ENDPOINT = "job_artifacts"
+    else:
+        CURRENT_ENDPOINT = "pagination_or_other"
     request = urllib.request.Request(
         url, headers={"Circle-Token": token, "Accept": "application/json"}
     )
@@ -38,32 +54,16 @@ def pages(url: str, token: str, key: str):
 
 
 def main() -> int:
+    global CURRENT_ENDPOINT
     token = next((os.environ.get(name, "").strip() for name in
                   ("CIRCLE_TOKEN", "CIRCLECI_API_TOKEN", "CIRCLECI_TOKEN")
                   if os.environ.get(name, "").strip()), "")
-    slug = os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
-    if not slug:
-        # Prefer the canonical VCS owner/repository from CircleCI's repository
-        # URL. CIRCLE_PROJECT_USERNAME can be an email/account label and is
-        # not guaranteed to be the GitHub owner segment.
-        repository_url = os.environ.get("CIRCLE_REPOSITORY_URL", "").strip()
-        if repository_url:
-            parsed = urllib.parse.urlparse(repository_url)
-            path = parsed.path.strip("/")
-            if parsed.hostname and parsed.hostname.lower() in ("github.com", "www.github.com"):
-                path = path[:-4] if path.lower().endswith(".git") else path
-                parts = path.split("/")
-                if len(parts) >= 2 and all(parts[:2]):
-                    slug = f"gh/{parts[0]}/{parts[1]}"
-        if not slug:
-            username = os.environ.get("CIRCLE_PROJECT_USERNAME", "").strip()
-            reponame = os.environ.get("CIRCLE_PROJECT_REPONAME", "").strip()
-            if username and reponame and "@" not in username:
-                slug = f"gh/{username}/{reponame}"
+    # An explicit override is available for future project migrations; otherwise
+    # use the verified CircleCI slug, not the GitHub-style slug from env vars.
+    slug = (os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
+            or DEFAULT_PROJECT_SLUG)
     branch = os.environ.get("CIRCLE_BRANCH", "").strip()
     if not branch:
-        # Manual/API-triggered pipelines may omit CIRCLE_BRANCH even though
-        # checkout has selected the configured branch.
         try:
             branch = subprocess.check_output(
                 ["git", "branch", "--show-current"],
@@ -74,19 +74,17 @@ def main() -> int:
     if not token:
         print("CHECKPOINT_PROBE=FAIL reason=token_missing")
         return 2
-    if not slug:
-        print("CHECKPOINT_PROBE=FAIL reason=project_slug_missing")
-        return 2
     if not branch:
         print("CHECKPOINT_PROBE=FAIL reason=branch_context_missing")
         return 2
 
     try:
-        # Validate the token independently from project lookup so a project
-        # slug/visibility 404 cannot be misreported as an authentication issue.
+        # Validate token independently, and report which API route fails without
+        # printing the token, request headers, or any sensitive response body.
         get_json(f"{API}/me", token)
         project = urllib.parse.quote(slug, safe="/")
-        pipeline_url = f"{API}/project/{project}/pipeline?branch={urllib.parse.quote(branch)}&page-size=20"
+        pipeline_url = (f"{API}/project/{project}/pipeline?"
+                        f"branch={urllib.parse.quote(branch)}&page-size=20")
         workflows_seen = 0
         build_jobs_seen = 0
         checkpoint_pairs_seen = 0
@@ -123,20 +121,19 @@ def main() -> int:
         if exc.code in (401, 403):
             reason = "auth_or_permission"
         elif exc.code == 404:
-            reason = "project_or_api_route_not_found"
+            reason = "not_found"
         else:
             reason = f"http_{exc.code}"
-        print(f"CHECKPOINT_PROBE=FAIL reason={reason}")
+        print(f"CHECKPOINT_PROBE=FAIL reason={reason} endpoint={CURRENT_ENDPOINT}")
         return 3
     except (urllib.error.URLError, TimeoutError):
-        print("CHECKPOINT_PROBE=FAIL reason=network_or_timeout")
+        print(f"CHECKPOINT_PROBE=FAIL reason=network_or_timeout endpoint={CURRENT_ENDPOINT}")
         return 4
     except (ValueError, json.JSONDecodeError):
-        print("CHECKPOINT_PROBE=FAIL reason=invalid_api_response")
+        print(f"CHECKPOINT_PROBE=FAIL reason=invalid_api_response endpoint={CURRENT_ENDPOINT}")
         return 5
     except Exception as exc:
-        # Report only the exception class; never print request headers or secret data.
-        print(f"CHECKPOINT_PROBE=FAIL reason={type(exc).__name__}")
+        print(f"CHECKPOINT_PROBE=FAIL reason={type(exc).__name__} endpoint={CURRENT_ENDPOINT}")
         return 6
 
 
