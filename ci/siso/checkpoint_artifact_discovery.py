@@ -75,13 +75,12 @@ def run(root: Path) -> int:
             try:
                 fetch(mu,token,mp); meta=json.loads(mp.read_text())
                 if not isinstance(meta,dict) or meta.get("schema") != 1: continue
-                if meta.get("source_commit") != expected_source: continue
                 fetch(au,token,ap)
                 if ap.stat().st_size != meta.get("archive_bytes"): continue
                 if hashlib.sha256(ap.read_bytes()).hexdigest() != meta.get("archive_sha256"): continue
                 if not isinstance(meta.get("progress"),dict): continue
-                # The candidate's own manifest is self-consistent; build_state.py below
-                # remains the authoritative current-source/GN compatibility gate.
+                # Do not require identical Git commit: CI-only changes can produce a new
+                # commit with identical build inputs. build_state.py below is authoritative.
                 usable.append((meta,ap,jobno))
             except (OSError,ValueError,KeyError,urllib.error.URLError):
                 continue
