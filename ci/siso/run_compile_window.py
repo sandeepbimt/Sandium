@@ -427,7 +427,7 @@ def main() -> int:
         remote_gate_pass_logged = False
 
         def process_text(text: str) -> None:
-            nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity
+            nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity, gate_failed, stop_reason
             if not text:
                 return
             last_activity = time.monotonic()
@@ -437,13 +437,19 @@ def main() -> int:
             log.flush()
             lower = text.lower()
             rolling = (rolling + lower)[-8192:]
-            if REGENERATE_NINJA.search(rolling):
-                if not regeneration_seen:
-                    regeneration_seen = True
-                    emit(
-                        log,
-                        "NINJA_GRAPH_REGENERATION=OBSERVED; allowing Ninja to regenerate the graph before continuing",
-                    )
+            if REGENERATE_NINJA.search(rolling) and not regeneration_seen:
+                regeneration_seen = True
+                gate_failed = True
+                stop_reason = "Ninja attempted to regenerate the prepared/restored graph"
+                emit(
+                    log,
+                    "NINJA_GRAPH_REGENERATION=FAIL; aborting this compile window to preserve outputs and prevent an unplanned graph rebuild",
+                )
+                # A continuation must use the already validated graph. Do not
+                # let Ninja silently regenerate it against a partially synced
+                # Brave checkout; that can invalidate action-frontier comparisons
+                # and waste the stage's compile budget.
+                stop_process_group(proc, grace_seconds=2)
             partial += text
             while "\n" in partial:
                 line, partial = partial.split("\n", 1)
@@ -532,7 +538,7 @@ def main() -> int:
             if match:
                 current_frontier.add(match.group(1).strip())
         if regeneration_seen:
-            emit(log, "NINJA_GRAPH_REGENERATION=COMPLETED_OR_CHILD_EXITED; inspect Ninja/GN diagnostics above")
+            emit(log, "NINJA_GRAPH_REGENERATION=FAIL_CLOSED; inspect Ninja/GN diagnostics above; restored graph was not allowed to regenerate")
         if not remote_seen and not remote_preflight_passed and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
             gate_failed = True
             stop_reason = stop_reason or "build finished without remote execution evidence and did not produce APK"
