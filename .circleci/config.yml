@@ -2477,7 +2477,7 @@ jobs:
             test -s "$META"
             EXPECTED_COMMIT="$(git -C "$ROOT/src/brave" rev-parse HEAD)"
             python3 "$STATE" check --mode cache --commit "$EXPECTED_COMMIT"
-            python3 - "$META" "$OUT/.sandium-build-state.json" "$EXPECTED_COMMIT" <<'PY'
+            python3 - "$META" "$OUT/.sandium-build-state.json" "$EXPECTED_COMMIT" \<<'PY'
             import json, sys
             from pathlib import Path
             meta = json.loads(Path(sys.argv[1]).read_text())
