@@ -157,6 +157,18 @@ def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, A
     }
     for key, path in paths.items():
         meta[key] = sha256_file(path)
+
+    # Persist measurable progress in the manifest so a future catalog can rank
+    # candidates by work completed rather than cache age or stage label alone.
+    object_count = sum(1 for path in output.rglob("*.o") if path.is_file())
+    archive_count = sum(1 for suffix in ("*.a", "*.so", "*.jar") for path in output.rglob(suffix) if path.is_file())
+    meta["progress"] = {
+        "compile_complete": state.get("compile_complete") is True,
+        "artifact_verified": state.get("artifact_verified") is True,
+        "object_file_count": object_count,
+        "linked_artifact_count": archive_count,
+        "output_bytes": sum(path.stat().st_size for path in output.rglob("*") if path.is_file()),
+    }
     for key, name in (("siso_state_sha256", ".siso_fs_state"),
                       ("siso_journal_sha256", ".siso_fs_state.journal")):
         path = output / name
