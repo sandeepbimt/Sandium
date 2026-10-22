@@ -106,6 +106,10 @@ class ResumablePipelineContractTests(unittest.TestCase):
             CONFIG,
         )
         self.assertIn("SANDIUM_AUTONINJA_BUILD_ENV_PREFLIGHT=PASS", CONFIG)
+        self.assertIn('if [[ ! -s "$DEPOT_TOOLS/python3_bin_reldir.txt" ]]', CONFIG)
+        self.assertIn('"$DEPOT_TOOLS/update_depot_tools"', CONFIG)
+        self.assertIn("SANDIUM_DEPOT_TOOLS_BOOTSTRAP=PASS", CONFIG)
+        self.assertIn('PATH: depotTools + ":"', CONFIG)
         self.assertIn("key: sandium-depot-tools-v1", CONFIG)
         wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
         self.assertIn('shutil.which("autoninja", path=env.get("PATH", ""))', wrapper)
