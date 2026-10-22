@@ -294,7 +294,12 @@ def run(root: Path) -> int:
                     cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 )
                 if "SANDIUM_CHECKPOINT_RESTORE=PASS" not in restored.stdout:
-                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=restore_integrity")
+                    # Preserve the actual validator reason in CI logs. The restore
+                    # script emits controlled diagnostics (not credentials); only
+                    # its final few non-empty lines are surfaced to avoid log floods.
+                    detail_lines = [line.strip() for line in restored.stdout.splitlines() if line.strip()]
+                    detail = " | ".join(detail_lines[-4:])[:700] or "no_restore_diagnostic"
+                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=restore_integrity detail={detail}")
                     shutil.rmtree(out, ignore_errors=True)
                     continue
                 check = subprocess.run(
