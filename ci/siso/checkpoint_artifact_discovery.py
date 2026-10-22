@@ -33,7 +33,8 @@ def pages(url, token, key):
 
 def fetch(url, token, path):
     if urllib.parse.urlparse(url).scheme != "https": raise ValueError("non-HTTPS artifact URL rejected")
-    req=urllib.request.Request(url, headers={"Circle-Token":token})
+    req=urllib.request.Request(url)
+    # CircleCI artifact URLs are signed URLs; never forward the API token to a redirect host.
     with urllib.request.urlopen(req, timeout=180) as response, path.open("wb") as out: shutil.copyfileobj(response,out)
 
 def run(root: Path) -> int:
