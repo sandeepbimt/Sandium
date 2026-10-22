@@ -18,15 +18,18 @@ def get_json(url, token):
     return value
 
 def pages(url, token, key):
+    base, _, query = url.partition("?")
+    params = urllib.parse.parse_qs(query, keep_blank_values=True)
     visited=set()
-    while url:
-        data=get_json(url, token)
+    while True:
+        current = base + ("?" + urllib.parse.urlencode({k: v[-1] for k, v in params.items()}) if params else "")
+        data=get_json(current, token)
         for item in data.get(key, []):
             if isinstance(item, dict): yield item
         nxt=data.get("next_page_token")
         if not nxt or str(nxt) in visited: break
         visited.add(str(nxt))
-        url += ("&" if "?" in url else "?") + urllib.parse.urlencode({"page-token":nxt})
+        params["page-token"]=[str(nxt)]
 
 def fetch(url, token, path):
     if urllib.parse.urlparse(url).scheme != "https": raise ValueError("non-HTTPS artifact URL rejected")
