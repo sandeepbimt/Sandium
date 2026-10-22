@@ -3,12 +3,42 @@
 from __future__ import annotations
 import hashlib, json, os, re, shutil, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
-from checkpoint_catalog import rank, compatible
+from checkpoint_catalog import rank
 
 API = "https://circleci.com/api/v2"
 JOB_RE = re.compile(r"stage-[1-5]-")
 META_RE = re.compile(r"(?:^|/)checkpoint-artifact/sandium-checkpoint\.meta$")
 ARCHIVE_RE = re.compile(r"(?:^|/)checkpoint-artifact/sandium-checkpoint\.tar\.zst$")
+
+def valid_manifest(meta):
+    """Reject malformed progress/identity fields before ranking a remote candidate."""
+    if not isinstance(meta, dict) or meta.get("schema") != 1:
+        return False
+    if not re.fullmatch(r"stage-[1-5]", str(meta.get("stage", ""))):
+        return False
+    for field in ("source_commit", "chromium_commit", "chromium_version", "target", "build_config", "build_input_fingerprint", "gn_args_sha256", "archive_sha256"):
+        value = meta.get(field)
+        if not isinstance(value, str) or not value:
+            return False
+    progress = meta.get("progress")
+    if not isinstance(progress, dict):
+        return False
+    if not isinstance(progress.get("compile_complete"), bool) or not isinstance(progress.get("artifact_verified"), bool):
+        return False
+    for field in ("object_file_count", "linked_artifact_count", "output_bytes"):
+        value = progress.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return False
+    return isinstance(meta.get("archive_bytes"), int) and meta["archive_bytes"] > 0
+
+def archive_integrity_matches(meta, archive_path):
+    """Validate downloaded bytes before a candidate can enter progress ranking."""
+    try:
+        return (valid_manifest(meta) and archive_path.is_file()
+                and archive_path.stat().st_size == meta["archive_bytes"]
+                and hashlib.sha256(archive_path.read_bytes()).hexdigest() == meta["archive_sha256"])
+    except OSError:
+        return False
 
 def get_json(url, token):
     req = urllib.request.Request(url, headers={"Circle-Token": token, "Accept": "application/json"})
@@ -78,11 +108,9 @@ def run(root: Path) -> int:
             mp,ap=td/f"{i}.meta",td/f"{i}.tar.zst"
             try:
                 fetch(mu,token,mp); meta=json.loads(mp.read_text())
-                if not isinstance(meta,dict) or meta.get("schema") != 1: continue
+                if not valid_manifest(meta): continue
                 fetch(au,token,ap)
-                if ap.stat().st_size != meta.get("archive_bytes"): continue
-                if hashlib.sha256(ap.read_bytes()).hexdigest() != meta.get("archive_sha256"): continue
-                if not isinstance(meta.get("progress"),dict): continue
+                if not archive_integrity_matches(meta, ap): continue
                 # Do not require identical Git commit: CI-only changes can produce a new
                 # commit with identical build inputs. build_state.py below is authoritative.
                 usable.append((meta,ap,jobno))
