@@ -14,6 +14,9 @@ parameters:
   run_sandium_compile_windows:
     type: boolean
     default: true
+  run_sandium_checkpoint_discovery_probe:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -2422,6 +2425,16 @@ jobs:
             print("APK_ARTIFACT_VERIFIED=true")
             print("SISO_REMOTE_BACKEND_PROVEN="+str(manifest.get("remote_execution_usage", {}).get("proven_from_siso_stats", False)).lower())
             PY
+  sandium-checkpoint-discovery-probe:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: small
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Probe CircleCI API token and historical checkpoint artifact listing (no build)
+          command: python3 ci/siso/checkpoint_discovery_probe.py
   smoke-1-contract-and-foundation:
     machine:
       image: ubuntu-2404:current
@@ -2507,6 +2520,10 @@ jobs:
           paths:
             - smoke-state/stage-5.json
 workflows:
+  sandium-checkpoint-discovery:
+    when: << pipeline.parameters.run_sandium_checkpoint_discovery_probe >>
+    jobs:
+      - sandium-checkpoint-discovery-probe
   # Optional standalone gate for diagnosis; production APK builds run the same gate in Stage 1.
   sandium-fast-regression:
     when: << pipeline.parameters.run_sandium_fast_regression >>
