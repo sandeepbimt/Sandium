@@ -634,10 +634,12 @@ jobs:
           name: Fast Siso compile-window regression gate (no Chromium restore/build)
           command: |
             set -euo pipefail
-            python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py ci/siso/checkpoint.py
+            python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py ci/siso/checkpoint.py ci/siso/checkpoint_catalog.py ci/siso/checkpoint_artifact_discovery.py
             python3 tests/ci/test_siso_remote_preflight.py
             python3 tests/ci/test_run_compile_window.py
             python3 tests/ci/test_siso_checkpoint.py
+            python3 tests/ci/test_siso_checkpoint_catalog.py
+            python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
   stage-1-source-foundation:
     machine:
       image: ubuntu-2404:current
