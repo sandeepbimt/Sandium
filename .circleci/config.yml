@@ -387,7 +387,7 @@ commands:
               echo "SANDIUM_AUTONINJA_PREFLIGHT=FAIL; depot_tools/autoninja is missing"
               exit 127
             }
-            echo "export PATH=$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:\\$PATH" >> "$BASH_ENV"
+            echo "export PATH=$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:\$PATH" >> "$BASH_ENV"
             export PATH="$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:$PATH"
             echo "SANDIUM_DEPOT_TOOLS_PATH=$DEPOT_TOOLS"
             echo "SANDIUM_DEPOT_TOOLS_REVISION=$(git -C "$DEPOT_TOOLS" rev-parse HEAD)"
