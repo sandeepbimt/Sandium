@@ -43,10 +43,23 @@ def main() -> int:
                   if os.environ.get(name, "").strip()), "")
     slug = os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
     if not slug:
-        username = os.environ.get("CIRCLE_PROJECT_USERNAME", "").strip()
-        reponame = os.environ.get("CIRCLE_PROJECT_REPONAME", "").strip()
-        if username and reponame:
-            slug = f"gh/{username}/{reponame}"
+        # Prefer the canonical VCS owner/repository from CircleCI's repository
+        # URL. CIRCLE_PROJECT_USERNAME can be an email/account label and is
+        # not guaranteed to be the GitHub owner segment.
+        repository_url = os.environ.get("CIRCLE_REPOSITORY_URL", "").strip()
+        if repository_url:
+            parsed = urllib.parse.urlparse(repository_url)
+            path = parsed.path.strip("/")
+            if parsed.hostname and parsed.hostname.lower() in ("github.com", "www.github.com"):
+                path = path[:-4] if path.lower().endswith(".git") else path
+                parts = path.split("/")
+                if len(parts) >= 2 and all(parts[:2]):
+                    slug = f"gh/{parts[0]}/{parts[1]}"
+        if not slug:
+            username = os.environ.get("CIRCLE_PROJECT_USERNAME", "").strip()
+            reponame = os.environ.get("CIRCLE_PROJECT_REPONAME", "").strip()
+            if username and reponame and "@" not in username:
+                slug = f"gh/{username}/{reponame}"
     branch = os.environ.get("CIRCLE_BRANCH", "").strip()
     if not branch:
         # Manual/API-triggered pipelines may omit CIRCLE_BRANCH even though
