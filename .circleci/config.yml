@@ -368,6 +368,48 @@ commands:
               mkdir -p sandium-output
               echo 'export SANDIUM_VERIFIED_APK_CACHE_HIT=false' >> "$BASH_ENV"
             fi
+  ensure-sandium-depot-tools:
+    steps:
+      - restore_cache:
+          keys:
+            - sandium-depot-tools-v1
+      - run:
+          name: Ensure autoninja is available to the Brave build environment
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            DEPOT_TOOLS="$HOME/depot_tools"
+            if [[ ! -x "$DEPOT_TOOLS/autoninja" ]]; then
+              rm -rf "$DEPOT_TOOLS"
+              git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT_TOOLS"
+            fi
+            test -x "$DEPOT_TOOLS/autoninja" || {
+              echo "SANDIUM_AUTONINJA_PREFLIGHT=FAIL; depot_tools/autoninja is missing"
+              exit 127
+            }
+            echo "export PATH=$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:\\$PATH" >> "$BASH_ENV"
+            export PATH="$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:$PATH"
+            echo "SANDIUM_DEPOT_TOOLS_PATH=$DEPOT_TOOLS"
+            echo "SANDIUM_DEPOT_TOOLS_REVISION=$(git -C "$DEPOT_TOOLS" rev-parse HEAD)"
+            echo "SANDIUM_AUTONINJA_PATH=$(command -v autoninja)"
+            cd "$ROOT/src/brave"
+            node --input-type=module - <<'NODE'
+            import { spawnSync } from 'node:child_process'
+            import config from './build/commands/lib/config.ts'
+            const options = config.defaultOptions
+            const lookup = spawnSync('bash', ['-c', 'command -v autoninja'], {
+              cwd: config.srcDir, env: options.env, encoding: 'utf8',
+            })
+            if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) {
+              throw new Error('autoninja is not resolvable with Brave build PATH: '
+                + (lookup.error?.message || lookup.stderr || 'command -v autoninja returned no path'))
+            }
+            console.log('SANDIUM_AUTONINJA_BUILD_ENV_PREFLIGHT=PASS path=' + lookup.stdout.trim())
+            NODE
+      - save_cache:
+          key: sandium-depot-tools-v1
+          paths:
+            - ~/depot_tools
   install-sandium-android-build-deps:
     steps:
       - run:
@@ -810,6 +852,7 @@ jobs:
           stage_index: 1
       - restore-sandium-siso-cache
       - install-sandium-android-build-deps
+      - ensure-sandium-depot-tools
       - configure-sandium-remote-cache
       - run:
           name: Preflight GN executable using the build environment
@@ -1217,6 +1260,7 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - ensure-sandium-depot-tools
       - configure-sandium-remote-cache
       - run:
           name: Rehydrate Brave Core DEPS and run hooks without refreshing pinned Chromium
@@ -1588,6 +1632,7 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - ensure-sandium-depot-tools
       - run:
           name: Preflight GN executable in this stage's fresh environment
           command: |
@@ -1840,6 +1885,7 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - ensure-sandium-depot-tools
       - run:
           name: Preflight GN executable in this stage's fresh environment
           command: |
@@ -2109,6 +2155,7 @@ jobs:
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
       - install-sandium-android-build-deps
+      - ensure-sandium-depot-tools
       - run:
           name: Preflight GN executable in this stage's fresh environment
           command: |
