@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,13 +41,31 @@ def main() -> int:
     token = next((os.environ.get(name, "").strip() for name in
                   ("CIRCLE_TOKEN", "CIRCLECI_API_TOKEN", "CIRCLECI_TOKEN")
                   if os.environ.get(name, "").strip()), "")
-    slug = os.environ.get("CIRCLE_PROJECT_SLUG", "")
-    branch = os.environ.get("CIRCLE_BRANCH", "")
+    slug = os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
+    if not slug:
+        username = os.environ.get("CIRCLE_PROJECT_USERNAME", "").strip()
+        reponame = os.environ.get("CIRCLE_PROJECT_REPONAME", "").strip()
+        if username and reponame:
+            slug = f"gh/{username}/{reponame}"
+    branch = os.environ.get("CIRCLE_BRANCH", "").strip()
+    if not branch:
+        # Manual/API-triggered pipelines may omit CIRCLE_BRANCH even though
+        # checkout has selected the configured branch.
+        try:
+            branch = subprocess.check_output(
+                ["git", "branch", "--show-current"],
+                text=True, stderr=subprocess.DEVNULL, timeout=5,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            branch = ""
     if not token:
         print("CHECKPOINT_PROBE=FAIL reason=token_missing")
         return 2
-    if not slug or not branch:
-        print("CHECKPOINT_PROBE=FAIL reason=project_context_missing")
+    if not slug:
+        print("CHECKPOINT_PROBE=FAIL reason=project_slug_missing")
+        return 2
+    if not branch:
+        print("CHECKPOINT_PROBE=FAIL reason=branch_context_missing")
         return 2
 
     try:
