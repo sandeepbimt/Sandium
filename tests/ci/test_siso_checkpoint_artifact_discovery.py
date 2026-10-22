@@ -106,13 +106,21 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
         missing = {key: value for key, value in meta.items() if key != "gn_args_sha256"}
         self.assertFalse(module.valid_manifest(missing))
 
-    def test_verified_checkpoint_ranks_above_larger_unverified_candidate(self):
+    def test_larger_compiled_checkpoint_ranks_above_verified_apk_flag(self):
         low = manifest(b"low archive", stage="stage-2")
         low["progress"]["object_file_count"] = 9000
         high = manifest(b"high archive", stage="stage-3")
         high["progress"]["artifact_verified"] = True
         high["progress"]["object_file_count"] = 2
-        self.assertGreater(module.rank(high), module.rank(low))
+        self.assertGreater(module.rank(low), module.rank(high))
+
+    def test_artifact_listing_failure_does_not_claim_no_checkpoint_exists(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("artifact_listing_errors", source)
+        self.assertIn("if not candidates and artifact_listing_errors:", source)
+        with patch.object(module, "pages", side_effect=RuntimeError("API unavailable")):
+            with self.assertRaises(RuntimeError):
+                module.discover_remote_urls("gh/sandeepbimt/Sandium", "build/sandium-resumable-v2", "token")
 
     def test_restore_loop_attempts_next_candidate_after_incompatibility(self):
         source = SCRIPT.read_text(encoding="utf-8")
