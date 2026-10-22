@@ -22,8 +22,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
             "  run_sandium_fast_regression:\n    type: boolean\n    default: false",
             CONFIG,
         )
-        workflow_start = CONFIG.index("  sandium-fast-regression:\\n")
-        workflow_end = CONFIG.index("  sandium-android-preflight:\\n", workflow_start)
+        workflow_start = CONFIG.index("  sandium-fast-regression:\n")
+        workflow_end = CONFIG.index("  sandium-android-preflight:\n", workflow_start)
         workflow = CONFIG[workflow_start:workflow_end]
         self.assertIn(
             "when: << pipeline.parameters.run_sandium_fast_regression >>",
