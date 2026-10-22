@@ -377,6 +377,12 @@ def main() -> int:
             "SISO_LIMITS": "local=8,remote=80",
             "SISO_CREDENTIAL_HELPER": str(brave / "ci/siso/buildbuddy-credential-helper.py"),
         })
+        autoninja = shutil.which("autoninja", path=env.get("PATH", ""))
+        if not autoninja:
+            emit(log, "SANDIUM_AUTONINJA_PREFLIGHT=FAIL; autoninja is not resolvable in the compile process PATH")
+            emit(log, "SANDIUM_AUTONINJA_EFFECTIVE_PATH=" + env.get("PATH", ""))
+            return 127
+        emit(log, "SANDIUM_AUTONINJA_PREFLIGHT=PASS path=" + autoninja)
         command = [
             "pnpm", "run", "build", "Debug",
             "--target_os=android",
