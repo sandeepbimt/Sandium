@@ -576,23 +576,16 @@ def main() -> int:
             gate_failed = True
             metrics = {}
         if metrics.get("remote_executed_action_records", 0) == 0 and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
-            if remote_preflight_passed:
-                emit(log, "CURRENT_WINDOW_REMOTE_EXECUTION=NOT_OBSERVED; preflight proof is reported separately")
-                emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=validated_current_workflow_preflight remote_executed_action_records=0")
-            else:
-                gate_failed = True
-                stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
-                emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0")
+            gate_failed = True
+            stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
+            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0 preflight_is_not_execution_proof=true")
         else:
             emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS remote_executed_action_records={metrics.get('remote_executed_action_records', 0)}")
         for key, value in metrics.items():
             emit(log, f"SISO_{key.upper()}={value}")
         emit(log, f"REMOTE_EXEC_LOG_SIGNATURE_COUNT={len(remote_signatures)}")
         if regeneration_seen:
-            # Ninja can legitimately regenerate when restored source metadata differs.
-            # Keep the compiled outputs and continue; a regeneration is diagnostic,
-            # not proof that prior object files were discarded.
-            emit(log, "INCREMENTAL_HANDOVER_GATE=REGENERATED_GRAPH_CONTINUED")
+            emit(log, "INCREMENTAL_HANDOVER_GATE=FAIL_CLOSED_GRAPH_REGENERATION")
         elif remote_seen:
             emit(log, "INCREMENTAL_HANDOVER_GATE=PASS")
         if siso_forced_kill:
