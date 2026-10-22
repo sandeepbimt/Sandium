@@ -90,6 +90,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         ]
         self.assertEqual(positions, sorted(positions))
 
+    def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
+        self.assertEqual(CONFIG.count("Publish stage-"), 5)
+        self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
+        self.assertIn("CROSS_WORKFLOW_CHECKPOINT=RESTORED", (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8"))
+
     def test_continuation_stages_never_cold_rebuild_after_checkpoint_miss(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn('if [[ "$cache_hit" != "true" && "$STAGE_INDEX" -ne 1 ]]; then', segment)

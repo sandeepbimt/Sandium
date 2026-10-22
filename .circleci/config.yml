@@ -256,6 +256,15 @@ commands:
               sudo apt-get install -y zstd
             fi
             zstd --version
+      - when:
+          condition:
+            equal: [1, << parameters.stage_index >>]
+          steps:
+            - run:
+                name: Discover and restore best compatible checkpoint from prior workflows
+                command: |
+                  set -euo pipefail
+                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
@@ -1123,6 +1132,14 @@ jobs:
           command: |
             set -euo pipefail
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-1
+      - run:
+          name: Publish stage-1 checkpoint files for cross-workflow recovery
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics/checkpoint-artifact
+            cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
+            cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
+            echo "CHECKPOINT_ARTIFACT_STAGED=stage-1"
       - save_cache:
           name: Save stage-1 resumable build checkpoint for the next stage or workflow
           key: sandium-checkpoint-v7-{{ .Branch }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}
@@ -1544,6 +1561,14 @@ jobs:
           command: |
             set -euo pipefail
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2
+      - run:
+          name: Publish stage-2 checkpoint files for cross-workflow recovery
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics/checkpoint-artifact
+            cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
+            cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
+            echo "CHECKPOINT_ARTIFACT_STAGED=stage-2"
       - save_cache:
           name: Save stage-2 resumable build checkpoint for the next stage or workflow
           key: sandium-checkpoint-v7-{{ .Branch }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}
@@ -1786,6 +1811,14 @@ jobs:
           command: |
             set -euo pipefail
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3
+      - run:
+          name: Publish stage-3 checkpoint files for cross-workflow recovery
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics/checkpoint-artifact
+            cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
+            cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
+            echo "CHECKPOINT_ARTIFACT_STAGED=stage-3"
       - save_cache:
           name: Save stage-3 resumable build checkpoint for the next stage or workflow
           key: sandium-checkpoint-v7-{{ .Branch }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}
@@ -2037,6 +2070,14 @@ jobs:
           command: |
             set -euo pipefail
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4
+      - run:
+          name: Publish stage-4 checkpoint files for cross-workflow recovery
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics/checkpoint-artifact
+            cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
+            cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
+            echo "CHECKPOINT_ARTIFACT_STAGED=stage-4"
       - save_cache:
           name: Save stage-4 resumable build checkpoint for the next stage or workflow
           key: sandium-checkpoint-v7-{{ .Branch }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}
@@ -2309,6 +2350,14 @@ jobs:
           command: |
             set -euo pipefail
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5
+      - run:
+          name: Publish stage-5 checkpoint files for cross-workflow recovery
+          command: |
+            set -euo pipefail
+            mkdir -p build-diagnostics/checkpoint-artifact
+            cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
+            cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
+            echo "CHECKPOINT_ARTIFACT_STAGED=stage-5"
       - save_cache:
           name: Save stage-5 resumable build checkpoint for the next stage or workflow
           key: sandium-checkpoint-v7-{{ .Branch }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}
