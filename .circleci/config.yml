@@ -198,6 +198,61 @@ commands:
               rm -f .gclient .gclient_entries .brave_latest_successful_sync.json .sandium-source-cache-manifest.json
               echo "SOURCE_CACHE=INVALID_COLD_START"
             fi
+  ensure-sandium-brave-child-dependencies:
+    steps:
+      - run:
+          name: Restore missing Brave child dependencies without syncing Chromium
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            BRAVE="$ROOT/src/brave"
+            OUT="$ROOT/src/out/android_Debug_arm64"
+            required=(
+              "$BRAVE/third_party/bip39wally-core-native/BUILD.gn"
+              "$BRAVE/vendor/bat-native-tweetnacl/BUILD.gn"
+            )
+            missing=false
+            for path in "${required[@]}"; do
+              if [[ ! -s "$path" ]]; then
+                echo "SANDIUM_REQUIRED_BRAVE_DEPENDENCY_MISSING=$path"
+                missing=true
+              fi
+            done
+            if [[ "$missing" == "true" ]]; then
+              test -s "$BRAVE/package.json"
+              test -s "$ROOT/src/DEPS"
+              before_commit="$(git -C "$ROOT/src" rev-parse HEAD)"
+              before_tag="$(git -C "$ROOT/src" describe --tags --exact-match HEAD)"
+              mkdir -p "$ROOT/build-diagnostics"
+              cd "$BRAVE"
+              set +e
+              pnpm run sync --target_os=android --target_arch=arm64 --no-history --sync_chromium=false 2>&1 | tee "$ROOT/build-diagnostics/continuation-brave-deps-sync.log"
+              sync_status=${PIPESTATUS[0]}
+              set -e
+              cd "$ROOT"
+              if [[ "$sync_status" -ne 0 ]]; then
+                echo "SANDIUM_CONTINUATION_BRAVE_DEPS_SYNC=FAIL status=$sync_status"
+                exit "$sync_status"
+              fi
+              after_commit="$(git -C "$ROOT/src" rev-parse HEAD)"
+              after_tag="$(git -C "$ROOT/src" describe --tags --exact-match HEAD)"
+              if [[ "$after_commit" != "$before_commit" || "$after_tag" != "$before_tag" ]]; then
+                echo "SANDIUM_CHROMIUM_PIN_PRESERVATION=FAIL before=$before_tag@$before_commit after=$after_tag@$after_commit"
+                exit 35
+              fi
+              echo "SANDIUM_CONTINUATION_BRAVE_DEPS_SYNC=PASS"
+            else
+              echo "SANDIUM_CONTINUATION_BRAVE_DEPS_SYNC=SKIPPED_ALL_REQUIRED_DEPS_PRESENT"
+            fi
+            for path in "${required[@]}"; do
+              test -s "$path" || {
+                echo "SANDIUM_REQUIRED_BRAVE_DEPENDENCY_STILL_MISSING=$path"
+                exit 33
+              }
+            done
+            test -s "$OUT/build.ninja"
+            test -s "$OUT/build.ninja.stamp"
+            echo "SANDIUM_REQUIRED_BRAVE_GN_DEPENDENCIES=PASS"
   restore-sandium-build-output:
     parameters:
       stage_index:
@@ -1678,6 +1733,7 @@ jobs:
               sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
+      - ensure-sandium-brave-child-dependencies
       - install-sandium-android-build-deps
       - ensure-sandium-depot-tools
       - run:
@@ -1939,6 +1995,7 @@ jobs:
               sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
+      - ensure-sandium-brave-child-dependencies
       - install-sandium-android-build-deps
       - ensure-sandium-depot-tools
       - run:
@@ -2217,6 +2274,7 @@ jobs:
               sha256sum src/brave/pnpm-lock.yaml | awk '{print $1}' > src/brave/.sandium-pnpm-lock.sha256
               echo "PNPM_DEPENDENCIES=INSTALLED"
             fi
+      - ensure-sandium-brave-child-dependencies
       - install-sandium-android-build-deps
       - ensure-sandium-depot-tools
       - run:
