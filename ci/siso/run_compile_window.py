@@ -294,7 +294,6 @@ def main() -> int:
     remote_signatures: set[str] = set()
     remote_seen = False
     regeneration_seen = False
-    regeneration_notice_logged = False
     timeout_seen = False
     gate_failed = False
     build_return_code: int | None = None
