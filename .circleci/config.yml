@@ -355,7 +355,7 @@ commands:
               fi
             else
               echo "BUILD_OUTPUT_CACHE=MISS_OR_INCOMPATIBLE stage=$STAGE_INDEX"
-              rm -rf "$OUT"
+              # Keep output intact until Stage 1 has proven no compatible checkpoint exists.
             fi
             if [[ "$cache_hit" == "true" ]]; then
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
