@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 
 API = "https://circleci.com/api/v2"
-DEFAULT_PROJECT_SLUG = "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2"
+DEFAULT_PROJECT_SLUG = "gh/sandeepbimt/Sandium"
 CURRENT_ENDPOINT = "not_started"
 
 
