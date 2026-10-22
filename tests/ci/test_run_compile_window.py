@@ -51,6 +51,10 @@ class ResetSisoInfoTests(unittest.TestCase):
         self.assertIn("NINJA_GRAPH_REGENERATION=FAIL_CLOSED", source)
         self.assertIn('stop_reason = "Ninja attempted to regenerate the prepared/restored graph"', source)
         self.assertIn("stop_process_group(proc, grace_seconds=2)", source)
+        self.assertIn("preflight_is_not_execution_proof=true", source)
+        self.assertIn("INCREMENTAL_PROGRESS_GATE=FAIL", source)
+        self.assertIn("ACTION_FRONTIER_CUMULATIVE_UNIQUE_LABEL_COUNT=", source)
+        self.assertNotIn("source=validated_current_workflow_preflight remote_executed_action_records=0", source)
 
     def test_replaces_symlink_without_truncating_its_target(self):
         with tempfile.TemporaryDirectory() as directory:
