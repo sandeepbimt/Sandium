@@ -2,8 +2,10 @@
 from __future__ import annotations
 import hashlib, importlib.util, tempfile, unittest
 from pathlib import Path
+import sys
 ROOT=Path(__file__).resolve().parents[2]
 SCRIPT=ROOT/"ci/siso/checkpoint_artifact_discovery.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec=importlib.util.spec_from_file_location("checkpoint_artifact_discovery",SCRIPT)
 assert spec and spec.loader
 module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
