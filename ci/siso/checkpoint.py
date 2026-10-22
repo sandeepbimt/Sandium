@@ -275,6 +275,19 @@ def restore(root: Path) -> int:
         print("SANDIUM_CHECKPOINT_RESTORE=PASS")
         print("SANDIUM_CHECKPOINT_STAGE={}".format(meta.get("stage", "unknown")))
         print("SANDIUM_CHECKPOINT_RESTORED_SHA256={}".format(meta["archive_sha256"]))
+        # Explicitly report whether the restored checkpoint carries resumable
+        # Siso filesystem metadata. Restore PASS alone permits both files to be
+        # absent; it must not be misread as proof that Siso state was restored.
+        siso_state = destination / ".siso_fs_state"
+        siso_journal = destination / ".siso_fs_state.journal"
+        print("SANDIUM_SISO_STATE_PRESENT=" + str(siso_state.is_file() and not siso_state.is_symlink()).lower())
+        print("SANDIUM_SISO_JOURNAL_PRESENT=" + str(siso_journal.is_file() and not siso_journal.is_symlink()).lower())
+        if siso_state.is_file() and not siso_state.is_symlink():
+            print("SANDIUM_SISO_STATE_BYTES=" + str(siso_state.stat().st_size))
+            print("SANDIUM_SISO_STATE_SHA256=" + sha256_file(siso_state))
+        if siso_journal.is_file() and not siso_journal.is_symlink():
+            print("SANDIUM_SISO_JOURNAL_BYTES=" + str(siso_journal.stat().st_size))
+            print("SANDIUM_SISO_JOURNAL_SHA256=" + sha256_file(siso_journal))
         return 0
     except (CheckpointError, OSError, ValueError) as exc:
         print("SANDIUM_CHECKPOINT_RESTORE=REJECTED ({})".format(exc))
