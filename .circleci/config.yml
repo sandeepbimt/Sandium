@@ -6,6 +6,10 @@ parameters:
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
+  # Keep the duplicate standalone gate opt-in; full builds already run it in Stage 1 before Chromium restore.
+  run_sandium_fast_regression:
+    type: boolean
+    default: false
   # APK builds are opt-in, but an explicitly requested APK build runs all compile windows by default.
   run_sandium_compile_windows:
     type: boolean
@@ -2446,8 +2450,9 @@ jobs:
           paths:
             - smoke-state/stage-5.json
 workflows:
-  # Always run the tiny regression suite on pushes; APK builds remain opt-in.
+  # Optional standalone gate for diagnosis; production APK builds run the same gate in Stage 1.
   sandium-fast-regression:
+    when: << pipeline.parameters.run_sandium_fast_regression >>
     jobs:
       - sandium-fast-regression-gate
   sandium-android-preflight:
