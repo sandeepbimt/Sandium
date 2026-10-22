@@ -2477,22 +2477,24 @@ jobs:
             test -s "$META"
             EXPECTED_COMMIT="$(git -C "$ROOT/src/brave" rev-parse HEAD)"
             python3 "$STATE" check --mode cache --commit "$EXPECTED_COMMIT"
-            python3 - "$META" "$OUT/.sandium-build-state.json" "$EXPECTED_COMMIT" \<<'PY'
+            python3 - "$META" "$OUT/.sandium-build-state.json" \<<'PY'
             import json, sys
             from pathlib import Path
             meta = json.loads(Path(sys.argv[1]).read_text())
             state = json.loads(Path(sys.argv[2]).read_text())
-            expected = sys.argv[3]
             fields = ("source_commit", "chromium_commit", "chromium_version",
                       "target", "build_config", "build_input_fingerprint", "gn_args_sha256")
             mismatches = [key for key in fields if meta.get(key) != state.get(key)]
             if mismatches:
                 raise SystemExit("CHECKPOINT_HANDOFF=FAIL metadata_state_mismatch=" + ",".join(mismatches))
-            if state.get("source_commit") != expected:
-                raise SystemExit("CHECKPOINT_HANDOFF=FAIL source_commit_mismatch")
+            # The cache-mode build_state check above validates current build-input
+            # compatibility. Exact Git HEAD equality is too strict for a checkpoint
+            # created before a CI-only commit; the manifest and state must agree
+            # with each other, while build_state.py decides whether inputs are reusable.
             progress = meta.get("progress", {})
             print("SANDIUM_CHECKPOINT_RESTORED_STAGE=" + str(meta.get("stage", "unknown")))
-            print("SANDIUM_CHECKPOINT_SOURCE_COMMIT_MATCH=PASS")
+            print("SANDIUM_CHECKPOINT_SOURCE_COMMIT=" + str(state.get("source_commit", "unknown")))
+            print("SANDIUM_CHECKPOINT_SOURCE_COMMIT_COMPATIBILITY=VALIDATED_BY_BUILD_STATE")
             print("SANDIUM_CHECKPOINT_BUILD_IDENTITY_MATCH=PASS")
             print("SANDIUM_CHECKPOINT_PROGRESS=" + json.dumps(progress, sort_keys=True))
             print("SANDIUM_CHECKPOINT_OUTPUT_BYTES=" + str(progress.get("output_bytes", "unknown")))
