@@ -241,7 +241,7 @@ def run(root: Path) -> int:
             return 0
         print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_MISSING_DISCOVERY_CONTEXT", file=sys.stderr)
         print("CROSS_WORKFLOW_CHECKPOINT_CONTEXT=" +
-              json.dumps({"branch_available": bool(branch), "slug_available": bool(slug),
+              json.dumps({"branch_available": bool(branch), "slug_available": bool(slug_candidates),
                           "source_commit_available": bool(expected_source)}, sort_keys=True),
               file=sys.stderr)
         return 78
@@ -252,7 +252,10 @@ def run(root: Path) -> int:
     manifest_destination = root / "sandium-checkpoint.meta"
     with tempfile.TemporaryDirectory(prefix="sandium-checkpoint-candidates-", dir=root) as temp_dir:
         temp = Path(temp_dir)
-        usable: list[tuple[dict[str, Any], Path, Path, str]] = []
+        # Candidate tuples carry an optional remote archive URL. Metadata is
+        # small, so rank all valid manifests first and download only one large
+        # archive at a time, starting with the highest-progress candidate.
+        usable: list[tuple[dict[str, Any], Path, Path, str, str | None]] = []
         local_archive: Path | None = None
         local_manifest: Path | None = None
         if existing_local:
@@ -260,7 +263,7 @@ def run(root: Path) -> int:
             local_archive, local_manifest = temp / "local-cache.tar.zst", temp / "local-cache.meta"
             shutil.copy2(source_archive, local_archive)
             shutil.copy2(source_manifest, local_manifest)
-            usable.append((local_meta, local_archive, local_manifest, "local-cache"))
+            usable.append((local_meta, local_archive, local_manifest, "local-cache", None))
 
         api_error: Exception | None = None
         remote_urls = []
@@ -288,11 +291,7 @@ def run(root: Path) -> int:
                 if not valid_manifest(metadata):
                     print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=invalid_metadata")
                     continue
-                fetch(archive_url, archive_path)
-                if not archive_integrity_matches(metadata, archive_path):
-                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=archive_integrity")
-                    continue
-                usable.append((metadata, archive_path, metadata_path, job_number))
+                usable.append((metadata, archive_path, metadata_path, job_number, archive_url))
             except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
                 print(f"CHECKPOINT_CANDIDATE_SKIPPED job={job_number} reason={type(exc).__name__}")
 
@@ -322,7 +321,19 @@ def run(root: Path) -> int:
         try:
             checkpoint_script = root / "src" / "brave" / "ci" / "siso" / "checkpoint.py"
             state_script = root / "src" / "brave" / "ci" / "siso" / "build_state.py"
-            for metadata, archive_path, metadata_path, job_number in usable:
+            for metadata, archive_path, metadata_path, job_number, archive_url in usable:
+                if archive_url is not None:
+                    try:
+                        print(f"CHECKPOINT_CANDIDATE_ARCHIVE_DOWNLOAD_START job={job_number} bytes={metadata.get('archive_bytes', 'unknown')}")
+                        fetch(archive_url, archive_path)
+                    except (OSError, ValueError, urllib.error.URLError) as exc:
+                        print(f"CHECKPOINT_CANDIDATE_SKIPPED job={job_number} reason=archive_download_{type(exc).__name__}")
+                        archive_path.unlink(missing_ok=True)
+                        continue
+                    if not archive_integrity_matches(metadata, archive_path):
+                        print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=archive_integrity")
+                        archive_path.unlink(missing_ok=True)
+                        continue
                 shutil.copy2(archive_path, archive_destination)
                 shutil.copy2(metadata_path, manifest_destination)
                 restored = subprocess.run(
