@@ -84,10 +84,10 @@ class ResumablePipelineContractTests(unittest.TestCase):
                     segment.index("- validate-sandium-source-cache-inputs"),
                 )
 
-    def test_full_build_reserves_about_30_minutes_for_each_compile_window(self):
+    def test_full_build_uses_adaptive_compile_budget_with_sub_hour_handover(self):
         # Source restore and GN preparation happen before Stage 1 compilation.
-        # Keep a bounded 30-minute compile window and a five-minute handover
-        # reserve within a 55-minute stage budget.
+        # Avoid a separate fixed compile cap; allow compilation until the
+        # stage budget reaches its five-minute handover reserve.
         self.assertEqual(CONFIG.count("--max-stage-seconds 3300"), 5)
         self.assertEqual(CONFIG.count("--handover-reserve-seconds 300"), 5)
         self.assertEqual(CONFIG.count("3300 - elapsed_seconds - 300"), 5)
@@ -96,6 +96,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertNotIn("--max-stage-seconds 3900", CONFIG)
         self.assertNotIn("--handover-reserve-seconds 600", CONFIG)
         self.assertNotIn("--max-compile-seconds 2400", CONFIG)
+        self.assertNotIn('remaining_compile_seconds=2400', CONFIG)
+        self.assertNotIn('remaining_compile_seconds=1800', CONFIG)
     def test_cache_manifest_binds_chromium_cache_to_brave_sync_inputs(self):
         self.assertIn("brave_sync_inputs_fingerprint", CONFIG)
         self.assertIn("source_cache_key.py", CONFIG)
