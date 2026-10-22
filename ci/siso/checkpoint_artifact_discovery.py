@@ -175,9 +175,10 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
                 archive_artifact = next((item for item in artifacts if ARCHIVE_RE.search(str(item.get("path", ""))) and item.get("url")), None)
                 if meta_artifact and archive_artifact:
                     candidates.append((str(meta_artifact["url"]), str(archive_artifact["url"]), str(job_number)))
-    # An empty candidate list is not proof that no checkpoints exist if any
-    # job's artifact listing failed. Signal incomplete discovery to the caller.
-    if not candidates and artifact_listing_errors:
+    # Any failed listing makes the historical inventory incomplete. Even if
+    # some candidates were found, do not proceed: they may not be the best or
+    # only compatible checkpoint. The caller must fail closed.
+    if artifact_listing_errors:
         raise RuntimeError(
             "artifact listing failed for " + str(len(artifact_listing_errors)) + " build-stage job(s)"
         )
@@ -347,14 +348,11 @@ def run(root: Path) -> int:
                     archive_destination.unlink(missing_ok=True)
                     manifest_destination.unlink(missing_ok=True)
 
-        print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
-        if api_error:
-            print("CROSS_WORKFLOW_CHECKPOINT=DISCOVERY_INCOMPLETE; refusing to authorize a cold start.", file=sys.stderr)
-            return 78
-        # All discovered candidates were invalid or incompatible. Only this
-        # fully completed search may authorize a genuine Stage 1 cold start.
-        (root / ".sandium-checkpoint-discovery-status").write_text("NO_COMPATIBLE_CANDIDATE\n", encoding="utf-8")
-        return 0
+        print("CROSS_WORKFLOW_CHECKPOINT=RESTORE_FAILED; refusing to authorize a cold start.", file=sys.stderr)
+        # We found at least one apparently usable candidate but none restored
+        # and passed compatibility checks. This is not equivalent to a completed
+        # search with no compatible candidate; preserve state and fail closed.
+        return 78
 
 
 def main() -> int:
