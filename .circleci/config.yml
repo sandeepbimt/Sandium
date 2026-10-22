@@ -504,6 +504,7 @@ jobs:
             python3 -m py_compile ci/siso/remote_preflight.py ci/siso/run_compile_window.py
             python3 tests/ci/test_siso_remote_preflight.py
             python3 tests/ci/test_run_compile_window.py
+            python3 tests/ci/test_siso_checkpoint.py
   stage-1-source-foundation:
     machine:
       image: ubuntu-2404:current
