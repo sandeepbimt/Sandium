@@ -41,10 +41,10 @@ class CheckpointCatalogTests(unittest.TestCase):
         high = manifest(stage="stage-2", objects=900)
         self.assertIs(catalog_module.choose([low, high], EXPECTED), high)
 
-    def test_verified_apk_beats_larger_incomplete_checkpoint(self):
+    def test_larger_compiled_checkpoint_beats_apk_flag_when_progress_is_greater(self):
         incomplete = manifest(objects=9000)
         complete = manifest(stage="stage-3", objects=2, complete=True, verified=True)
-        self.assertIs(catalog_module.choose([incomplete, complete], EXPECTED), complete)
+        self.assertIs(catalog_module.choose([incomplete, complete], EXPECTED), incomplete)
 
     def test_incompatible_or_malformed_candidates_are_ignored(self):
         wrong_source = manifest(objects=9999, source_commit="e" * 40)
