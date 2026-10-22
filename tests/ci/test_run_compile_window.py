@@ -45,6 +45,13 @@ class ResetSisoInfoTests(unittest.TestCase):
             "compile-window script references undeclared argparse attributes",
         )
 
+    def test_ninja_graph_regeneration_fails_closed_instead_of_rebuilding(self):
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertIn("NINJA_GRAPH_REGENERATION=FAIL; aborting this compile window", source)
+        self.assertIn("NINJA_GRAPH_REGENERATION=FAIL_CLOSED", source)
+        self.assertIn('stop_reason = "Ninja attempted to regenerate the prepared/restored graph"', source)
+        self.assertIn("stop_process_group(proc, grace_seconds=2)", source)
+
     def test_replaces_symlink_without_truncating_its_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
