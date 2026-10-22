@@ -234,7 +234,7 @@ def run(root: Path) -> int:
             ).strip()
         except (OSError, subprocess.SubprocessError):
             expected_source = ""
-    if not branch or not slug or not expected_source:
+    if not branch or not slug_candidates or not expected_source:
         if existing_local:
             print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_DISCOVERY_CONTEXT_LOCAL_CHECKPOINT_AVAILABLE")
             (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\n", encoding="utf-8")
