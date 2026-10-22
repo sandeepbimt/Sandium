@@ -332,9 +332,26 @@ def run(root: Path) -> int:
         return 78
 
 
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(os.environ.get("CIRCLE_WORKING_DIRECTORY") or os.getcwd()),
+        help="CircleCI project root (defaults to the current working directory)",
+    )
+    args = parser.parse_args()
+    # CircleCI environment variables may contain a literal ~/ prefix; expand it
+    # before resolving so paths never become <cwd>/~/project.
+    root = Path(os.path.expandvars(str(args.root))).expanduser().resolve()
+    return run(root)
+
+
 if __name__ == "__main__":
     try:
-        raise SystemExit(run(Path(os.environ.get("CIRCLE_WORKING_DIRECTORY", os.getcwd()))))
+        raise SystemExit(main())
     except Exception as exc:
         print("CROSS_WORKFLOW_CHECKPOINT=API_ERROR " + str(exc), file=sys.stderr)
         raise SystemExit(78)
