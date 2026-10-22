@@ -69,6 +69,9 @@ def main() -> int:
         return 2
 
     try:
+        # Validate the token independently from project lookup so a project
+        # slug/visibility 404 cannot be misreported as an authentication issue.
+        get_json(f"{API}/me", token)
         project = urllib.parse.quote(slug, safe="/")
         pipeline_url = f"{API}/project/{project}/pipeline?branch={urllib.parse.quote(branch)}&page-size=20"
         workflows_seen = 0
@@ -104,7 +107,12 @@ def main() -> int:
         print("CHECKPOINT_PROBE_ARTIFACTS_DOWNLOADED=0")
         return 0
     except urllib.error.HTTPError as exc:
-        reason = "auth_or_permission" if exc.code in (401, 403) else f"http_{exc.code}"
+        if exc.code in (401, 403):
+            reason = "auth_or_permission"
+        elif exc.code == 404:
+            reason = "project_or_api_route_not_found"
+        else:
+            reason = f"http_{exc.code}"
         print(f"CHECKPOINT_PROBE=FAIL reason={reason}")
         return 3
     except (urllib.error.URLError, TimeoutError):
