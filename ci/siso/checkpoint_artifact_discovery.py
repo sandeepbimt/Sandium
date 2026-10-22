@@ -191,14 +191,39 @@ def run(root: Path) -> int:
         print("Set a CircleCI personal API token as CIRCLE_TOKEN (or CIRCLECI_API_TOKEN/CIRCLECI_TOKEN) in project or context environment variables.", file=sys.stderr)
         return 78
 
-    branch = os.environ.get("CIRCLE_BRANCH", "")
-    slug = os.environ.get("CIRCLE_PROJECT_SLUG", "")
-    expected_source = os.environ.get("CIRCLE_SHA1", "")
+    # Some manually triggered CircleCI pipelines omit one or more standard
+    # context variables. Derive missing values from the checkout and the
+    # canonical CircleCI slug rather than blocking a valid historical lookup.
+    branch = os.environ.get("CIRCLE_BRANCH", "").strip()
+    if not branch:
+        try:
+            branch = subprocess.check_output(
+                ["git", "-C", str(root / "src" / "brave"), "branch", "--show-current"],
+                text=True, stderr=subprocess.DEVNULL, timeout=5,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            branch = ""
+    slug = (os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
+            or os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
+            or "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2")
+    expected_source = os.environ.get("CIRCLE_SHA1", "").strip()
+    if not expected_source:
+        try:
+            expected_source = subprocess.check_output(
+                ["git", "-C", str(root / "src" / "brave"), "rev-parse", "HEAD"],
+                text=True, stderr=subprocess.DEVNULL, timeout=5,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            expected_source = ""
     if not branch or not slug or not expected_source:
         if existing_local:
             print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_DISCOVERY_CONTEXT_LOCAL_CHECKPOINT_AVAILABLE")
             return 0
         print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_MISSING_DISCOVERY_CONTEXT", file=sys.stderr)
+        print("CROSS_WORKFLOW_CHECKPOINT_CONTEXT=" +
+              json.dumps({"branch_available": bool(branch), "slug_available": bool(slug),
+                          "source_commit_available": bool(expected_source)}, sort_keys=True),
+              file=sys.stderr)
         return 78
 
     root.mkdir(parents=True, exist_ok=True)
