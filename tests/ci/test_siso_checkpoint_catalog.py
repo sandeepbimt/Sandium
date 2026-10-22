@@ -57,4 +57,5 @@ class CheckpointCatalogTests(unittest.TestCase):
         self.assertIsNone(catalog_module.choose([manifest(source_commit="e" * 40)], EXPECTED))
 
 
-if __name__ == "__main__":\n    unittest.main()
+if __name__ == "__main__":
+    unittest.main()
