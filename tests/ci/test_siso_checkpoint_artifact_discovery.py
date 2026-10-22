@@ -117,16 +117,18 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
     def test_artifact_listing_failure_does_not_claim_no_checkpoint_exists(self):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("artifact_listing_errors", source)
-        self.assertIn("if not candidates and artifact_listing_errors:", source)
+        self.assertIn("if artifact_listing_errors:", source)
         def fake_pages(url, token, key):
-            if "/pipeline?" in url:
-                yield {"id": "pipeline-1"}
-            elif "/workflow" in url:
-                yield {"id": "workflow-1"}
+            # Match the most specific endpoint first: job URLs also contain
+            # "/workflow/", so the workflow branch must not shadow the job.
+            if "/artifacts" in url:
+                raise RuntimeError("artifact API unavailable")
             elif "/job" in url:
                 yield {"name": "stage-2-compile-continuation", "job_number": 123}
-            elif "/artifacts" in url:
-                raise RuntimeError("artifact API unavailable")
+            elif "/workflow" in url:
+                yield {"id": "workflow-1"}
+            elif "/pipeline?" in url:
+                yield {"id": "pipeline-1"}
 
         with patch.object(module, "pages", side_effect=fake_pages):
             with self.assertRaisesRegex(RuntimeError, "artifact listing failed"):
