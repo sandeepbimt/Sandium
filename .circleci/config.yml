@@ -990,7 +990,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-1 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-1 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -1448,7 +1448,7 @@ jobs:
             else
               echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
             fi
-            python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-2 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+            python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-2 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --metrics-poll-interval-seconds 15
             status=$?
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
@@ -1697,7 +1697,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-3 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-3 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
@@ -1933,7 +1933,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-4 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-4 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
@@ -2203,7 +2203,7 @@ jobs:
                 else
                   echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
                 fi
-                python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-5 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+                python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-5 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --metrics-poll-interval-seconds 15
                 status=$?
                 set -e
               fi
