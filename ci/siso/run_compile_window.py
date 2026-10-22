@@ -189,7 +189,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--stage", choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5"), required=True)
     parser.add_argument("--stage-start-epoch-file", type=Path, required=True)
-    parser.add_argument("--max-stage-seconds", type=int, default=3900)
+    parser.add_argument("--max-stage-seconds", type=int, default=3300)
     parser.add_argument("--handover-reserve-seconds", type=int, default=300)
     parser.add_argument("--max-compile-seconds", type=int, default=1800)
     parser.add_argument("--metrics-poll-interval-seconds", type=int, default=15)
