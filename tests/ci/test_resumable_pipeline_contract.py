@@ -79,6 +79,23 @@ class ResumablePipelineContractTests(unittest.TestCase):
                     segment.index("Propagate compile failure only after saving resumable state"),
                 )
 
+
+    def test_stage_one_prioritizes_cumulative_checkpoint_stages(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        start = segment.index("Restore highest-stage prior-workflow SANDIUM checkpoint candidate")
+        candidate = segment[start:]
+        positions = [
+            candidate.index(f"sandium-checkpoint-v7-{{{{ .Branch }}}}-stage-{stage}-")
+            for stage in (5, 4, 3, 2, 1)
+        ]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_continuation_stages_never_cold_rebuild_after_checkpoint_miss(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        self.assertIn('if [[ "$cache_hit" != "true" && "$STAGE_INDEX" -ne 1 ]]; then', segment)
+        self.assertIn("REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true", segment)
+        self.assertIn("exit 42", segment)
+
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [
             ("stage-2-graph-and-compile-window", "stage-3-compile-continuation"),

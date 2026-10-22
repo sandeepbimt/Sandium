@@ -195,13 +195,19 @@ commands:
           condition:
             equal: [1, << parameters.stage_index >>]
           steps:
-            # Match the SANDFOX pattern: one branch-wide prefix selects the
-            # newest saved checkpoint regardless of which stage produced it.
-            # Restore first; this run validates archive integrity and build compatibility.
+            # Checkpoints are cumulative: stage N contains useful work from stages 1..N.
+            # Try higher stages first so a lower-stage cache saved more recently cannot
+            # mask a later-stage checkpoint. Within each stage, CircleCI still chooses
+            # the newest matching cache; manifest/build-state validation rejects
+            # corrupt or incompatible candidates.
             - restore_cache:
-                name: Restore latest prior-workflow SANDIUM checkpoint from any stage
+                name: Restore highest-stage prior-workflow SANDIUM checkpoint candidate
                 keys:
-                  - sandium-checkpoint-v7-{{ .Branch }}-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-5-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-4-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-3-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-2-
+                  - sandium-checkpoint-v7-{{ .Branch }}-stage-1-
       - when:
           condition:
             equal: [2, << parameters.stage_index >>]
