@@ -177,6 +177,8 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
 
 def run(root: Path) -> int:
     root = root.resolve()
+    # Never let a stale marker from an earlier invocation authorize a cold start.
+    (root / ".sandium-checkpoint-discovery-status").unlink(missing_ok=True)
     # CircleCI does not provide CIRCLE_TOKEN by default. Permit common custom
     # secret names so a correctly configured project/context works without code edits.
     token = next((os.environ.get(name, "").strip() for name in
