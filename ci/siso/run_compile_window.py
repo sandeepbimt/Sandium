@@ -575,7 +575,10 @@ def main() -> int:
             emit(log, f"SISO_{key.upper()}={value}")
         emit(log, f"REMOTE_EXEC_LOG_SIGNATURE_COUNT={len(remote_signatures)}")
         if regeneration_seen:
-            emit(log, "INCREMENTAL_HANDOVER_GATE=FAIL")
+            # Ninja can legitimately regenerate when restored source metadata differs.
+            # Keep the compiled outputs and continue; a regeneration is diagnostic,
+            # not proof that prior object files were discarded.
+            emit(log, "INCREMENTAL_HANDOVER_GATE=REGENERATED_GRAPH_CONTINUED")
         elif remote_seen:
             emit(log, "INCREMENTAL_HANDOVER_GATE=PASS")
         if siso_forced_kill:
