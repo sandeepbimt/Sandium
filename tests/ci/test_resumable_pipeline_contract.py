@@ -15,6 +15,23 @@ def job_segment(name: str, following: str) -> str:
 
 
 class ResumablePipelineContractTests(unittest.TestCase):
+    def test_duplicate_fast_regression_workflow_is_opt_in(self):
+        # A production full build runs this gate inside Stage 1 before Chromium
+        # restore. Do not spend credits running the same gate again on every push.
+        self.assertIn(
+            "  run_sandium_fast_regression:\n    type: boolean\n    default: false",
+            CONFIG,
+        )
+        workflow_start = CONFIG.index("  sandium-fast-regression:\\n")
+        workflow_end = CONFIG.index("  sandium-android-preflight:\\n", workflow_start)
+        workflow = CONFIG[workflow_start:workflow_end]
+        self.assertIn(
+            "when: << pipeline.parameters.run_sandium_fast_regression >>",
+            workflow,
+        )
+        stage_one = job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window")
+        self.assertIn("Fast Siso preflight regression gate before Chromium restore", stage_one)
+
     def test_all_five_production_stages_are_serialized(self):
         names = [
             "stage-1-source-foundation",
