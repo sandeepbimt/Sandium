@@ -118,8 +118,18 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("artifact_listing_errors", source)
         self.assertIn("if not candidates and artifact_listing_errors:", source)
-        with patch.object(module, "pages", side_effect=RuntimeError("API unavailable")):
-            with self.assertRaises(RuntimeError):
+        def fake_pages(url, token, key):
+            if "/pipeline?" in url:
+                yield {"id": "pipeline-1"}
+            elif "/workflow" in url:
+                yield {"id": "workflow-1"}
+            elif "/job" in url:
+                yield {"name": "stage-2-compile-continuation", "job_number": 123}
+            elif "/artifacts" in url:
+                raise RuntimeError("artifact API unavailable")
+
+        with patch.object(module, "pages", side_effect=fake_pages):
+            with self.assertRaisesRegex(RuntimeError, "artifact listing failed"):
                 module.discover_remote_urls("gh/sandeepbimt/Sandium", "build/sandium-resumable-v2", "token")
 
     def test_restore_loop_attempts_next_candidate_after_incompatibility(self):
