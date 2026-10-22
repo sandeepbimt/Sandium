@@ -146,6 +146,7 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
     slugq = urllib.parse.quote(slug, safe="/")
     url = f"{API}/project/{slugq}/pipeline?branch={urllib.parse.quote(branch)}&page-size=100"
     candidates: list[tuple[str, str, str]] = []
+    artifact_listing_errors: list[str] = []
     for index, pipeline in enumerate(pages(url, token, "items")):
         if index >= 40:
             break
@@ -166,12 +167,20 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
                 try:
                     artifacts = list(pages(artifacts_url, token, "items"))
                 except Exception as exc:
-                    print(f"ARTIFACT_LIST_SKIPPED job={job_number} reason={type(exc).__name__}")
+                    reason = f"job={job_number} reason={type(exc).__name__}"
+                    artifact_listing_errors.append(reason)
+                    print(f"ARTIFACT_LIST_SKIPPED {reason}")
                     continue
                 meta_artifact = next((item for item in artifacts if META_RE.search(str(item.get("path", ""))) and item.get("url")), None)
                 archive_artifact = next((item for item in artifacts if ARCHIVE_RE.search(str(item.get("path", ""))) and item.get("url")), None)
                 if meta_artifact and archive_artifact:
                     candidates.append((str(meta_artifact["url"]), str(archive_artifact["url"]), str(job_number)))
+    # An empty candidate list is not proof that no checkpoints exist if any
+    # job's artifact listing failed. Signal incomplete discovery to the caller.
+    if not candidates and artifact_listing_errors:
+        raise RuntimeError(
+            "artifact listing failed for " + str(len(artifact_listing_errors)) + " build-stage job(s)"
+        )
     return candidates
 
 
