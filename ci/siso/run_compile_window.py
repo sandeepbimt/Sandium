@@ -539,9 +539,17 @@ def main() -> int:
                 current_frontier.add(match.group(1).strip())
         if regeneration_seen:
             emit(log, "NINJA_GRAPH_REGENERATION=FAIL_CLOSED; inspect Ninja/GN diagnostics above; restored graph was not allowed to regenerate")
-        if not remote_seen and not remote_preflight_passed and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
+        if not remote_seen and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
             gate_failed = True
-            stop_reason = stop_reason or "build finished without remote execution evidence and did not produce APK"
+            stop_reason = stop_reason or (
+                "compile window recorded no actual remote-executed Siso actions; "
+                "preflight proof alone is not compile-window execution evidence"
+            )
+            emit(
+                log,
+                "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL source=compile_window "
+                "remote_executed_action_records=0 preflight_is_not_execution_proof=true",
+            )
 
         # Wait for Siso to close its state/journal before writing a checkpoint.
         siso_forced_kill = False
@@ -600,9 +608,27 @@ def main() -> int:
         emit(log, f"ACTION_FRONTIER_PRIOR_UNIQUE_LABEL_COUNT={len(prior_frontier)}")
         emit(log, f"ACTION_FRONTIER_CURRENT_UNIQUE_LABEL_COUNT={len(current_frontier)}")
         new_frontier = current_frontier - prior_frontier
+        overlap_frontier = current_frontier & prior_frontier
+        cumulative_frontier = prior_frontier | current_frontier
+        emit(log, f"ACTION_FRONTIER_OVERLAP_UNIQUE_LABEL_COUNT={len(overlap_frontier)}")
         emit(log, f"ACTION_FRONTIER_NEW_UNIQUE_LABEL_COUNT={len(new_frontier)}")
+        emit(log, f"ACTION_FRONTIER_CUMULATIVE_UNIQUE_LABEL_COUNT={len(cumulative_frontier)}")
+        emit(log, f"ACTION_FRONTIER_NEW_LABEL_SHARE_PERCENT={100.0 * len(new_frontier) / max(1, len(current_frontier)):.2f}")
+        output_delta = outputs_after - outputs_before
+        apk_ready = apk.is_file() and apk.stat().st_size >= 1_000_000
+        if not apk_ready and not new_frontier and output_delta <= 0:
+            gate_failed = True
+            stop_reason = stop_reason or "no incremental progress: no new action labels, no new build outputs, and no APK"
+            emit(log, "INCREMENTAL_PROGRESS_GATE=FAIL new_action_labels=0 build_output_delta=0 apk_present=false")
+        else:
+            emit(
+                log,
+                "INCREMENTAL_PROGRESS_GATE=PASS "
+                f"new_action_labels={len(new_frontier)} build_output_delta={output_delta} "
+                f"apk_present={str(apk_ready).lower()}",
+            )
         prior_frontier_path.write_text(
-            "".join(label + "\n" for label in sorted(prior_frontier | current_frontier)),
+            "".join(label + "\n" for label in sorted(cumulative_frontier)),
             encoding="utf-8",
         )
         emit(log, "SISO_STATE_PAIR_MEASUREMENT_PHASE=AFTER_SHUTDOWN")
