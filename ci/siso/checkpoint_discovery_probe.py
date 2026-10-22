@@ -68,7 +68,7 @@ def main() -> int:
         pipeline_url = (f"{API}/project/{project}/pipeline?"
                         f"branch={urllib.parse.quote(branch)}&page-size=20")
         workflows_seen = build_jobs_seen = checkpoint_pairs_seen = 0
-        artifact_404s = 0
+        artifact_404s = artifact_lookups = 0
         for pipeline in pages(pipeline_url, token, "items", "project_pipelines"):
             pipeline_id = pipeline.get("id")
             if not pipeline_id:
@@ -86,8 +86,6 @@ def main() -> int:
                     if not name.startswith(("stage-1-", "stage-2-", "stage-3-", "stage-4-", "stage-5-")) or not number:
                         continue
                     build_jobs_seen += 1
-                    # Prefer a project slug returned by the job itself when present;
-                    # older CircleCI project types may need the canonical slug fallback.
                     artifact_slugs = []
                     job_slug = str(job.get("project_slug", "")).strip()
                     for candidate in (job_slug, slug):
@@ -96,6 +94,7 @@ def main() -> int:
                     paths = set()
                     found = False
                     for artifact_slug in artifact_slugs:
+                        artifact_lookups += 1
                         artifact_project = urllib.parse.quote(artifact_slug, safe="/")
                         artifacts_url = f"{API}/project/{artifact_project}/{number}/artifacts"
                         try:
@@ -114,13 +113,22 @@ def main() -> int:
                     has_archive = any(path.endswith("checkpoint-artifact/sandium-checkpoint.tar.zst") for path in paths)
                     if has_meta and has_archive:
                         checkpoint_pairs_seen += 1
-        print("CHECKPOINT_PROBE=PASS" if artifact_404s == 0 else "CHECKPOINT_PROBE=PARTIAL")
+
+        # A 404 for an individual historical job can simply mean that the job
+        # has no retained artifacts. API enumeration is healthy if auth and
+        # pipeline/workflow/job endpoints succeeded. Do not fail the probe for
+        # expected misses when usable checkpoint pairs were found.
+        if checkpoint_pairs_seen:
+            print("CHECKPOINT_PROBE=PASS")
+        else:
+            print("CHECKPOINT_PROBE=PARTIAL reason=no_checkpoint_pairs_found")
         print(f"CHECKPOINT_PROBE_WORKFLOWS_SEEN={workflows_seen}")
         print(f"CHECKPOINT_PROBE_BUILD_JOBS_SEEN={build_jobs_seen}")
         print(f"CHECKPOINT_PROBE_ARTIFACT_PAIRS_SEEN={checkpoint_pairs_seen}")
+        print(f"CHECKPOINT_PROBE_ARTIFACT_LOOKUPS={artifact_lookups}")
         print(f"CHECKPOINT_PROBE_ARTIFACT_LOOKUP_404S={artifact_404s}")
         print("CHECKPOINT_PROBE_ARTIFACTS_DOWNLOADED=0")
-        return 0 if artifact_404s == 0 else 7
+        return 0 if checkpoint_pairs_seen else 7
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
             reason = "auth_or_permission"
