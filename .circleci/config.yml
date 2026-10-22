@@ -383,17 +383,28 @@ commands:
               rm -rf "$DEPOT_TOOLS"
               git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT_TOOLS"
             fi
+            # A fresh depot_tools checkout has wrappers but may not yet have
+            # its hermetic Python bootstrap. Ensure it before any wrapper runs.
+            if [[ ! -s "$DEPOT_TOOLS/python3_bin_reldir.txt" ]]; then
+              echo "SANDIUM_DEPOT_TOOLS_BOOTSTRAP=START"
+              "$DEPOT_TOOLS/update_depot_tools"
+            fi
+            test -s "$DEPOT_TOOLS/python3_bin_reldir.txt" || {
+              echo "SANDIUM_DEPOT_TOOLS_BOOTSTRAP=FAIL; python3_bin_reldir.txt missing after update_depot_tools"
+              exit 127
+            }
             test -x "$DEPOT_TOOLS/autoninja" || {
               echo "SANDIUM_AUTONINJA_PREFLIGHT=FAIL; depot_tools/autoninja is missing"
               exit 127
             }
+            echo "SANDIUM_DEPOT_TOOLS_BOOTSTRAP=PASS"
             echo "export PATH=$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:\$PATH" >> "$BASH_ENV"
             export PATH="$DEPOT_TOOLS:$ROOT/src/buildtools/linux64:$PATH"
             echo "SANDIUM_DEPOT_TOOLS_PATH=$DEPOT_TOOLS"
             echo "SANDIUM_DEPOT_TOOLS_REVISION=$(git -C "$DEPOT_TOOLS" rev-parse HEAD)"
             echo "SANDIUM_AUTONINJA_PATH=$(command -v autoninja)"
             cd "$ROOT/src/brave"
-            node --input-type=module -e 'import { spawnSync } from "node:child_process"; import config from "./build/commands/lib/config.ts"; const options = config.defaultOptions; const lookup = spawnSync("bash", ["-c", "command -v autoninja"], { cwd: config.srcDir, env: options.env, encoding: "utf8" }); if (lookup.error || lookup.status !== 0 || !lookup.stdout.trim()) { console.error("autoninja is not resolvable with Brave build PATH: " + (lookup.error?.message || lookup.stderr || "command -v autoninja returned no path")); process.exit(1); } console.log("SANDIUM_AUTONINJA_BUILD_ENV_PREFLIGHT=PASS path=" + lookup.stdout.trim());'
+            node --input-type=module -e 'import { spawnSync } from "node:child_process"; import config from "./build/commands/lib/config.ts"; const options = config.defaultOptions; const depotTools = process.env.HOME + "/depot_tools"; const baseEnv = options.env || process.env; const env = { ...baseEnv, PATH: depotTools + ":" + (baseEnv.PATH || process.env.PATH || "") }; const lookup = spawnSync("bash", ["-c", "command -v autoninja"], { cwd: config.srcDir, env, encoding: "utf8" }); const resolved = lookup.stdout.trim(); if (lookup.error || lookup.status !== 0 || !resolved.startsWith(depotTools + "/")) { console.error("autoninja must resolve from initialized depot_tools: " + (lookup.error?.message || lookup.stderr || resolved || "no path")); process.exit(1); } console.log("SANDIUM_AUTONINJA_BUILD_ENV_PREFLIGHT=PASS path=" + resolved);'
       - save_cache:
           key: sandium-depot-tools-v1
           paths:
