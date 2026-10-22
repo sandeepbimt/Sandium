@@ -45,9 +45,15 @@ def main() -> int:
     token = next((os.environ.get(name, "").strip() for name in
                   ("CIRCLE_TOKEN", "CIRCLECI_API_TOKEN", "CIRCLECI_TOKEN")
                   if os.environ.get(name, "").strip()), "")
-    slug = (os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
-            or os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
-            or DEFAULT_PROJECT_SLUG)
+    slug_candidates = []
+    for candidate in (
+        os.environ.get("CIRCLE_PROJECT_SLUG", "").strip(),
+        os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip(),
+        DEFAULT_PROJECT_SLUG,
+        "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2",
+    ):
+        if candidate and candidate not in slug_candidates:
+            slug_candidates.append(candidate)
     branch = os.environ.get("CIRCLE_BRANCH", "").strip()
     if not branch:
         try:
@@ -66,12 +72,38 @@ def main() -> int:
 
     try:
         get_json(f"{API}/me", token, "token_validation_me")
-        project = urllib.parse.quote(slug, safe="/")
-        pipeline_url = (f"{API}/project/{project}/pipeline?"
-                        f"branch={urllib.parse.quote(branch)}&page-size=20")
+        pipelines = None
+        slug = ""
+        last_not_found = None
+        for candidate in slug_candidates:
+            project = urllib.parse.quote(candidate, safe="/")
+            pipeline_url = (f"{API}/project/{project}/pipeline?"
+                            f"branch={urllib.parse.quote(branch, safe='')}&page-size=20")
+            try:
+                # Fetch the first page here so a 404 for one slug does not hide
+                # another valid CircleCI project identifier.
+                first_page = get_json(pipeline_url, token, "project_pipelines")
+                slug = candidate
+                pipelines = list(first_page.get("items", []))
+                next_page = first_page.get("next_page_token")
+                while next_page:
+                    separator = "&" if "?" in pipeline_url else "?"
+                    page_url = pipeline_url + separator + urllib.parse.urlencode({"page-token": next_page})
+                    page = get_json(page_url, token, "project_pipelines")
+                    pipelines.extend(item for item in page.get("items", []) if isinstance(item, dict))
+                    next_page = page.get("next_page_token")
+                print("CHECKPOINT_PROBE_PROJECT_SLUG_SOURCE=resolved_candidate")
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    last_not_found = exc
+                    continue
+                raise
+        if pipelines is None:
+            raise last_not_found or RuntimeError("no project slug candidates")
         workflows_seen = build_jobs_seen = checkpoint_pairs_seen = 0
         artifact_404s = artifact_lookups = 0
-        for pipeline in pages(pipeline_url, token, "items", "project_pipelines"):
+        for pipeline in pipelines:
             pipeline_id = pipeline.get("id")
             if not pipeline_id:
                 continue
