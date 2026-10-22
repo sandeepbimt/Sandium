@@ -103,6 +103,24 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("exit 42", segment)
         self.assertNotIn("REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true", segment)
 
+    def test_continuation_stages_repair_missing_brave_deps_before_graph_preparation(self):
+        command = CONFIG[CONFIG.index("  ensure-sandium-brave-child-dependencies:"):CONFIG.index("  restore-sandium-build-output:")]
+        self.assertIn("third_party/bip39wally-core-native/BUILD.gn", command)
+        self.assertIn("pnpm run sync --target_os=android --target_arch=arm64 --no-history --sync_chromium=false", command)
+        self.assertIn("SANDIUM_CHROMIUM_PIN_PRESERVATION=FAIL", command)
+        for current, following in [
+            ("stage-3-compile-continuation", "stage-4-finish-and-package"),
+            ("stage-4-finish-and-package", "stage-5-verify-publish"),
+            ("stage-5-verify-publish", "smoke-1-contract-and-foundation"),
+        ]:
+            with self.subTest(stage=current):
+                segment = job_segment(current, following)
+                self.assertIn("- ensure-sandium-brave-child-dependencies", segment)
+                self.assertLess(
+                    segment.index("- ensure-sandium-brave-child-dependencies"),
+                    segment.index("Prepare source overlay and branding before GN"),
+                )
+
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [
             ("stage-2-graph-and-compile-window", "stage-3-compile-continuation"),
