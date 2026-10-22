@@ -34,6 +34,25 @@ class RemotePreflightTests(unittest.TestCase):
         self.assertTrue(hasattr(preflight, "tempfile"))
         self.assertTrue(callable(preflight.tempfile.TemporaryDirectory))
 
+    def test_preflight_prioritizes_the_depot_tools_checkout_that_owns_autoninja(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src"
+            source.mkdir()
+            chosen_depot_tools = root / "depot_tools"
+            vendor_depot_tools = root / "brave" / "vendor" / "depot_tools"
+            original = {
+                "PATH": str(vendor_depot_tools) + preflight.os.pathsep + "/usr/bin",
+            }
+            configured = preflight.configure_depot_tools_path(
+                original, str(chosen_depot_tools / "autoninja"), source
+            )
+            entries = configured["PATH"].split(preflight.os.pathsep)
+            self.assertEqual(entries[0], str(chosen_depot_tools))
+            self.assertEqual(entries[1], str(source / "buildtools/linux64"))
+            self.assertEqual(entries[2], original["PATH"])
+            self.assertEqual(original["PATH"], str(vendor_depot_tools) + preflight.os.pathsep + "/usr/bin")
+
     def test_generated_siso_environment_checks_endpoint_without_assuming_instance_flag(self):
         preflight.validate_generated_siso_environment("remote.buildbuddy.io:443")
         with self.assertRaisesRegex(ValueError, "remote.buildbuddy.io:443"):
