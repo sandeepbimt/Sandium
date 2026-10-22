@@ -136,9 +136,21 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
 
     def test_restore_loop_attempts_next_candidate_after_incompatibility(self):
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("for metadata, archive_path, metadata_path, job_number in usable:", source)
+        self.assertIn("for metadata, archive_path, metadata_path, job_number, archive_url in usable:", source)
         self.assertIn("CROSS_WORKFLOW_CHECKPOINT=INCOMPATIBLE", source)
         self.assertIn("trying next candidate", source)
+
+    def test_remote_archives_are_downloaded_only_after_metadata_ranking(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        sort_at = source.index("usable.sort(key=lambda item: rank(item[0]), reverse=True)")
+        download_at = source.index("CHECKPOINT_CANDIDATE_ARCHIVE_DOWNLOAD_START")
+        self.assertLess(sort_at, download_at)
+        self.assertIn("if archive_url is not None:", source)
+
+    def test_missing_context_uses_slug_candidate_list_not_removed_variable(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"slug_available": bool(slug_candidates)', source)
+        self.assertNotIn('"slug_available": bool(slug),', source)
 
     def test_failed_candidate_restores_preexisting_output_and_cache_pair(self):
         data = b"local checkpoint"
