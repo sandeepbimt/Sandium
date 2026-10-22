@@ -1,6 +1,6 @@
 """Tests for SANDIUM's resumable, compressed Android build checkpoints."""
 from __future__ import annotations
-import hashlib, json, os, shutil, subprocess, sys, tempfile, unittest
+import hashlib, importlib.util, json, os, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -126,6 +126,47 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
+
+
+class SisoCheckpointPairNormalizationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("sandium_checkpoint", SCRIPT)
+        assert spec and spec.loader
+        cls.checkpoint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.checkpoint)
+
+    def test_quarantines_orphan_journal_without_removing_build_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "src/out/android_Debug_arm64"
+            output.mkdir(parents=True)
+            (output / ".siso_fs_state.journal").write_text("journal", encoding="utf-8")
+            object_file = output / "obj/sample.o"
+            object_file.parent.mkdir(parents=True)
+            object_file.write_bytes(b"compiled-object")
+
+            self.checkpoint.quarantine_incomplete_siso_checkpoint_pair(output, root, "stage-1")
+
+            self.assertFalse((output / ".siso_fs_state.journal").exists())
+            self.assertTrue((root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
+            self.assertEqual(object_file.read_bytes(), b"compiled-object")
+
+    def test_quarantines_dangling_state_symlink_and_orphan_journal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "src/out/android_Debug_arm64"
+            output.mkdir(parents=True)
+            (output / ".siso_fs_state").symlink_to(root / "missing-state")
+            (output / ".siso_fs_state.journal").write_text("journal", encoding="utf-8")
+
+            self.checkpoint.quarantine_incomplete_siso_checkpoint_pair(output, root, "stage-2")
+
+            diagnostics = root / "build-diagnostics/siso-checkpoint-orphans"
+            self.assertTrue((diagnostics / "stage-2-.siso_fs_state").is_symlink())
+            self.assertTrue((diagnostics / "stage-2-.siso_fs_state.journal").is_file())
+            self.assertFalse((output / ".siso_fs_state").is_symlink())
+            self.assertFalse((output / ".siso_fs_state.journal").exists())
 
 
 if __name__ == "__main__":
