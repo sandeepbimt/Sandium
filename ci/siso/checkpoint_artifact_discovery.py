@@ -216,9 +216,15 @@ def run(root: Path) -> int:
             ).strip()
         except (OSError, subprocess.SubprocessError):
             branch = ""
-    slug = (os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
-            or os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
-            or "gh/sandeepbimt/Sandium")
+    slug_candidates = []
+    for candidate in (
+        os.environ.get("CIRCLE_PROJECT_SLUG", "").strip(),
+        os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip(),
+        "gh/sandeepbimt/Sandium",
+        "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2",
+    ):
+        if candidate and candidate not in slug_candidates:
+            slug_candidates.append(candidate)
     expected_source = os.environ.get("CIRCLE_SHA1", "").strip()
     if not expected_source:
         try:
@@ -257,11 +263,22 @@ def run(root: Path) -> int:
             usable.append((local_meta, local_archive, local_manifest, "local-cache"))
 
         api_error: Exception | None = None
-        try:
-            remote_urls = discover_remote_urls(slug, branch, token)
-        except Exception as exc:
-            remote_urls = []
-            api_error = exc
+        remote_urls = []
+        for candidate_slug in slug_candidates:
+            try:
+                remote_urls = discover_remote_urls(candidate_slug, branch, token)
+                print("CROSS_WORKFLOW_CHECKPOINT_PROJECT_SLUG=resolved_candidate")
+                api_error = None
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    api_error = exc
+                    continue
+                api_error = exc
+                break
+            except Exception as exc:
+                api_error = exc
+                break
 
         for index, (metadata_url, archive_url, job_number) in enumerate(remote_urls):
             metadata_path, archive_path = temp / f"remote-{index}.meta", temp / f"remote-{index}.tar.zst"
