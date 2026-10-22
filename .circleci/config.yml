@@ -976,7 +976,6 @@ jobs:
               started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
               elapsed_seconds="$(( $(date +%s) - started_at ))"
               remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
-              if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
               if [[ "$remaining_compile_seconds" -le 0 ]]; then
                 echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
                 exit 5
@@ -1434,7 +1433,6 @@ jobs:
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
             remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
-            if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
               exit 5
@@ -1684,7 +1682,6 @@ jobs:
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
             remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
-            if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
               exit 5
@@ -1920,7 +1917,6 @@ jobs:
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
             remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
-            if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
               exit 5
@@ -2189,7 +2185,6 @@ jobs:
               started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
               elapsed_seconds="$(( $(date +%s) - started_at ))"
               remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
-              if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
               if [[ "$remaining_compile_seconds" -le 0 ]]; then
                 echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; preserving state and handover time"
                 status=5
