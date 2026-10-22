@@ -42,16 +42,50 @@ def required_file(path: Path) -> None:
 
 
 
-def validate_siso_checkpoint_pair(output: Path) -> None:
-    """Reject half-written Siso filesystem state/journal handovers.
+def _path_entry_exists(path: Path) -> bool:
+    """Include dangling symlinks, which Path.exists() intentionally ignores."""
+    return path.exists() or path.is_symlink()
 
-    Siso's state and journal may both be absent, but a checkpoint must not
-    claim a consistent handover when only one member of the pair exists.
+
+def quarantine_incomplete_siso_checkpoint_pair(output: Path, root: Path, stage: str) -> None:
+    """Preserve, but exclude, an unusable partial Siso state/journal pair.
+
+    A one-sided or malformed pair cannot safely resume Siso state. Move any
+    present entries outside the checkpointed output tree, keeping all compiled
+    outputs intact. Siso can rebuild its metadata from the retained outputs.
     """
     state_path = output / ".siso_fs_state"
     journal_path = output / ".siso_fs_state.journal"
-    state_exists = state_path.exists()
-    journal_exists = journal_path.exists()
+    paths = (state_path, journal_path)
+    valid = all(
+        path.is_file() and not path.is_symlink() and path.stat().st_size > 0
+        for path in paths
+    )
+    if valid or not any(_path_entry_exists(path) for path in paths):
+        return
+
+    diagnostics = root / "build-diagnostics" / "siso-checkpoint-orphans"
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        if not _path_entry_exists(path):
+            continue
+        base = diagnostics / f"{stage}-{path.name}"
+        destination = base
+        suffix = 1
+        while _path_entry_exists(destination):
+            destination = diagnostics / f"{base.name}-{suffix}"
+            suffix += 1
+        shutil.move(str(path), str(destination))
+        print(f"SANDIUM_SISO_CHECKPOINT_ORPHAN_PRESERVED={destination}")
+    print("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT; incomplete pair quarantined; build outputs preserved")
+
+
+def validate_siso_checkpoint_pair(output: Path) -> None:
+    """Reject any malformed Siso pair after pack-time normalization."""
+    state_path = output / ".siso_fs_state"
+    journal_path = output / ".siso_fs_state.journal"
+    state_exists = _path_entry_exists(state_path)
+    journal_exists = _path_entry_exists(journal_path)
     if state_exists != journal_exists:
         raise CheckpointError(
             "Siso filesystem state and journal must be present together "
@@ -59,7 +93,7 @@ def validate_siso_checkpoint_pair(output: Path) -> None:
         )
     if state_exists:
         for path in (state_path, journal_path):
-            if not path.is_file() or path.stat().st_size == 0:
+            if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
                 raise CheckpointError(
                     "Siso checkpoint file is not a nonempty regular file: {}".format(path.name)
                 )
@@ -139,6 +173,9 @@ def pack(root: Path, stage: str) -> None:
         raise CheckpointError("Expected Chromium source/output directory is missing")
     state = read_json(output / STATE_NAME)
     validate_state(state)
+    # Siso may leave an orphan journal or dangling state symlink on shutdown.
+    # Quarantine that invalid pair before archiving; never discard build outputs.
+    quarantine_incomplete_siso_checkpoint_pair(output, root, stage)
     archive, manifest = root / "sandium-checkpoint.tar.zst", root / "sandium-checkpoint.meta"
     fd, temp_name = tempfile.mkstemp(prefix=".sandium-checkpoint-", suffix=".tar.zst.tmp", dir=root)
     os.close(fd)
