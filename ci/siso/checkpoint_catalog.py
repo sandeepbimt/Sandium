@@ -62,11 +62,11 @@ def rank(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
     stage_match = STAGE_RE.fullmatch(candidate["stage"])
     stage = int(stage_match.group(1)) if stage_match else 0
     return (
-        int(progress["artifact_verified"]),
-        int(progress["compile_complete"]),
         progress["object_file_count"],
         progress["linked_artifact_count"],
         progress["output_bytes"],
+        int(progress["compile_complete"]),
+        int(progress["artifact_verified"]),
         f"{stage:01d}:{candidate.get('created_at_utc', '')}",
     )
 
