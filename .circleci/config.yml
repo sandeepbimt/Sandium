@@ -2,7 +2,7 @@ version: 2.1
 parameters:
   run_sandium_android_apk_build:
     type: boolean
-    default: true
+    default: false
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
