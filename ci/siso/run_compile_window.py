@@ -191,7 +191,6 @@ def main() -> int:
     parser.add_argument("--stage-start-epoch-file", type=Path, required=True)
     parser.add_argument("--max-stage-seconds", type=int, default=3300)
     parser.add_argument("--handover-reserve-seconds", type=int, default=300)
-    parser.add_argument("--max-compile-seconds", type=int, default=1800)
     parser.add_argument("--metrics-poll-interval-seconds", type=int, default=15)
     args = parser.parse_args()
 
@@ -230,7 +229,10 @@ def main() -> int:
         print(f"SANDIUM_STAGE_BUDGET=FAIL; cannot read stage start timestamp: {exc}", file=sys.stderr)
         return 5
     elapsed_before_compile = max(0, int(time.time()) - stage_started)
-    remaining = min(args.max_compile_seconds, args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds)
+    # Do not impose a separate fixed compile timeout. Use all time available
+    # in this CircleCI stage while reserving a bounded handover window for
+    # graceful Siso/Ninja shutdown, checkpoint packaging, and artifact upload.
+    remaining = args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds
 
     if apk.is_file() and apk.stat().st_size >= 1_000_000:
         with log_path.open("w", encoding="utf-8", errors="replace") as log:
