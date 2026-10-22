@@ -90,9 +90,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
         # reserve within a 55-minute stage budget.
         self.assertEqual(CONFIG.count("--max-stage-seconds 3300"), 5)
         self.assertEqual(CONFIG.count("--handover-reserve-seconds 300"), 5)
-        self.assertEqual(CONFIG.count("--max-compile-seconds 1800"), 5)
         self.assertEqual(CONFIG.count("3300 - elapsed_seconds - 300"), 5)
-        self.assertEqual(CONFIG.count("-gt 1800"), 5)
+        self.assertNotIn("--max-compile-seconds", CONFIG)
         self.assertNotIn("--max-stage-seconds 3000", CONFIG)
         self.assertNotIn("--max-stage-seconds 3900", CONFIG)
         self.assertNotIn("--handover-reserve-seconds 600", CONFIG)
