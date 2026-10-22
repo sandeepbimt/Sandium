@@ -51,6 +51,10 @@ class CheckpointTests(unittest.TestCase):
         restored = self.invoke("restore")
         self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
         self.assertIn("SANDIUM_CHECKPOINT_RESTORE=PASS", restored.stdout)
+        self.assertIn("SANDIUM_SISO_STATE_PRESENT=true", restored.stdout)
+        self.assertIn("SANDIUM_SISO_JOURNAL_PRESENT=true", restored.stdout)
+        self.assertIn("SANDIUM_SISO_STATE_SHA256=", restored.stdout)
+        self.assertIn("SANDIUM_SISO_JOURNAL_SHA256=", restored.stdout)
         actual = self.output / "obj/sample/sample.o"
         self.assertEqual(actual.stat().st_mtime_ns, expected_mtime)
         self.assertEqual(hashlib.sha256(actual.read_bytes()).hexdigest(), digest)
