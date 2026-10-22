@@ -84,6 +84,18 @@ class ResumablePipelineContractTests(unittest.TestCase):
                     segment.index("- validate-sandium-source-cache-inputs"),
                 )
 
+    def test_full_build_reserves_about_30_minutes_for_each_compile_window(self):
+        # Source restore and GN preparation happen before Stage 1 compilation.
+        # Keep a bounded 30-minute compile window and a five-minute handover
+        # reserve within a 65-minute stage budget.
+        self.assertEqual(CONFIG.count("--max-stage-seconds 3900"), 5)
+        self.assertEqual(CONFIG.count("--handover-reserve-seconds 300"), 5)
+        self.assertEqual(CONFIG.count("--max-compile-seconds 1800"), 5)
+        self.assertEqual(CONFIG.count("3900 - elapsed_seconds - 300"), 5)
+        self.assertEqual(CONFIG.count("-gt 1800"), 5)
+        self.assertNotIn("--max-stage-seconds 3000", CONFIG)
+        self.assertNotIn("--handover-reserve-seconds 600", CONFIG)
+        self.assertNotIn("--max-compile-seconds 2400", CONFIG)
     def test_cache_manifest_binds_chromium_cache_to_brave_sync_inputs(self):
         self.assertIn("brave_sync_inputs_fingerprint", CONFIG)
         self.assertIn("source_cache_key.py", CONFIG)
