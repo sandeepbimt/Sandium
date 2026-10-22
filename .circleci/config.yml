@@ -2576,6 +2576,7 @@ jobs:
           name: Run offline checkpoint and resumable-pipeline regression tests (no Chromium build)
           command: |
             set -euo pipefail
+            python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
             python3 tests/ci/test_siso_build_state.py
