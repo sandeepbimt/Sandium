@@ -86,7 +86,11 @@ commands:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
-            SOURCE="$ROOT/brave-core"
+            # The checked-out Sandium repository itself owns the stable sync-input
+            # files; there is no separate $ROOT/brave-core directory before source
+            # cache restoration. Snapshot from the checkout so the first step works
+            # on a clean runner.
+            SOURCE="$ROOT"
             SNAPSHOT="$ROOT/.sandium-source-cache-inputs"
             test -d "$SOURCE/.git"
             rm -rf "$SNAPSHOT"
