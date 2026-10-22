@@ -98,6 +98,19 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertNotIn("--max-compile-seconds 2400", CONFIG)
         self.assertNotIn('remaining_compile_seconds=2400', CONFIG)
         self.assertNotIn('remaining_compile_seconds=1800', CONFIG)
+    def test_all_stages_provision_autoninja_before_full_build_work(self):
+        self.assertIn("ensure-sandium-depot-tools:", CONFIG)
+        self.assertEqual(CONFIG.count("- ensure-sandium-depot-tools"), 5)
+        self.assertIn(
+            "git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git",
+            CONFIG,
+        )
+        self.assertIn("SANDIUM_AUTONINJA_BUILD_ENV_PREFLIGHT=PASS", CONFIG)
+        self.assertIn("key: sandium-depot-tools-v1", CONFIG)
+        wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
+        self.assertIn('shutil.which("autoninja", path=env.get("PATH", ""))', wrapper)
+        self.assertIn("SANDIUM_AUTONINJA_PREFLIGHT=FAIL", wrapper)
+
     def test_cache_manifest_binds_chromium_cache_to_brave_sync_inputs(self):
         self.assertIn("brave_sync_inputs_fingerprint", CONFIG)
         self.assertIn("source_cache_key.py", CONFIG)
