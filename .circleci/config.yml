@@ -20,6 +20,9 @@ parameters:
   run_sandium_checkpoint_unit_tests:
     type: boolean
     default: false
+  run_sandium_checkpoint_restore_validation:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -2438,6 +2441,25 @@ jobs:
       - run:
           name: Probe CircleCI API token and historical checkpoint artifact listing (no build)
           command: python3 ci/siso/checkpoint_discovery_probe.py
+  sandium-checkpoint-restore-validation:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    working_directory: ~/project
+    steps:
+      - checkout
+      - snapshot-sandium-source-cache-inputs
+      - restore-sandium-source
+      - validate-sandium-source-cache-inputs
+      - restore-sandium-build-output:
+          stage_index: 1
+      - run:
+          name: Confirm restored checkpoint state without compiling Chromium
+          command: |
+            set -euo pipefail
+            test -s src/out/android_Debug_arm64/.sandium-build-state.json
+            python3 src/brave/ci/siso/build_state.py check --mode cache
+            echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=PASS"
   sandium-checkpoint-unit-tests:
     machine:
       image: ubuntu-2404:current
@@ -2553,6 +2575,10 @@ workflows:
     when: << pipeline.parameters.run_sandium_checkpoint_unit_tests >>
     jobs:
       - sandium-checkpoint-unit-tests
+  sandium-checkpoint-restore-validation:
+    when: << pipeline.parameters.run_sandium_checkpoint_restore_validation >>
+    jobs:
+      - sandium-checkpoint-restore-validation
   # Optional standalone gate for diagnosis; production APK builds run the same gate in Stage 1.
   sandium-fast-regression:
     when: << pipeline.parameters.run_sandium_fast_regression >>
