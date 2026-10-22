@@ -218,7 +218,7 @@ def run(root: Path) -> int:
             branch = ""
     slug = (os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
             or os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
-            or "circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2")
+            or "gh/sandeepbimt/Sandium")
     expected_source = os.environ.get("CIRCLE_SHA1", "").strip()
     if not expected_source:
         try:
