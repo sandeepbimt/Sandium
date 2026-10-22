@@ -81,5 +81,75 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
                 self.assertEqual(module.run(Path(tmp)), 78)
 
 
+    def test_artifact_paths_require_both_metadata_and_archive(self):
+        self.assertTrue(module.META_RE.search("stage-2-finish-build/checkpoint-artifact/sandium-checkpoint.meta"))
+        self.assertTrue(module.ARCHIVE_RE.search("stage-2-finish-build/checkpoint-artifact/sandium-checkpoint.tar.zst"))
+        self.assertFalse(module.META_RE.search("stage-2-finish-build/sandium-checkpoint.meta"))
+
+    def test_only_build_stage_jobs_are_considered(self):
+        self.assertTrue(module.JOB_RE.match("stage-1-source-foundation"))
+        self.assertTrue(module.JOB_RE.match("stage-5-verify-publish"))
+        self.assertFalse(module.JOB_RE.match("smoke-1-contract-and-foundation"))
+
+    def test_corrupt_archive_is_rejected_before_ranking(self):
+        archive = b"test archive bytes"
+        meta = manifest(archive)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.tar.zst"
+            path.write_bytes(archive + b"corrupt")
+            self.assertFalse(module.archive_integrity_matches(meta, path))
+
+    def test_malformed_progress_and_identity_are_rejected(self):
+        meta = manifest(b"test archive bytes")
+        malformed = {**meta, "progress": {**meta["progress"], "object_file_count": -1}}
+        self.assertFalse(module.valid_manifest(malformed))
+        missing = {key: value for key, value in meta.items() if key != "gn_args_sha256"}
+        self.assertFalse(module.valid_manifest(missing))
+
+    def test_verified_checkpoint_ranks_above_larger_unverified_candidate(self):
+        low = manifest(b"low archive", stage="stage-2")
+        low["progress"]["object_file_count"] = 9000
+        high = manifest(b"high archive", stage="stage-3")
+        high["progress"]["artifact_verified"] = True
+        high["progress"]["object_file_count"] = 2
+        self.assertGreater(module.rank(high), module.rank(low))
+
+    def test_restore_loop_attempts_next_candidate_after_incompatibility(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("for metadata, archive_path, metadata_path, job_number in usable:", source)
+        self.assertIn("CROSS_WORKFLOW_CHECKPOINT=INCOMPATIBLE", source)
+        self.assertIn("trying next candidate", source)
+
+    def test_failed_candidate_restores_preexisting_output_and_cache_pair(self):
+        data = b"local checkpoint"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "sandium-checkpoint.tar.zst"
+            meta_path = root / "sandium-checkpoint.meta"
+            archive.write_bytes(data)
+            meta_path.write_text(json.dumps(manifest(data)), encoding="utf-8")
+            out = root / "src/out/android_Debug_arm64"
+            out.mkdir(parents=True)
+            sentinel = out / "keep.txt"
+            sentinel.write_text("prior output", encoding="utf-8")
+            env = {
+                "CIRCLE_TOKEN": "test-token",
+                "CIRCLE_BRANCH": "build/sandium-resumable-v2",
+                "CIRCLE_PROJECT_SLUG": "gh/sandeepbimt/Sandium",
+                "CIRCLE_SHA1": "e" * 40,
+            }
+            failed_restore = __import__("subprocess").CompletedProcess(
+                args=["checkpoint.py", "restore"], returncode=1,
+                stdout="SANDIUM_CHECKPOINT_RESTORE=REJECTED",
+            )
+            with patch.dict(os.environ, env, clear=False):
+                with patch.object(module, "discover_remote_urls", return_value=[]):
+                    with patch.object(module.subprocess, "run", return_value=failed_restore):
+                        self.assertEqual(module.run(root), 78)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "prior output")
+            self.assertEqual(archive.read_bytes(), data)
+            self.assertEqual(json.loads(meta_path.read_text(encoding="utf-8")), manifest(data))
+
+
 if __name__ == "__main__":
     unittest.main()
