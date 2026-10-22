@@ -357,18 +357,23 @@ commands:
               echo "BUILD_OUTPUT_CACHE=MISS_OR_INCOMPATIBLE stage=$STAGE_INDEX"
               rm -rf "$OUT"
             fi
-            if [[ "$cache_hit" != "true" ]]; then
-              echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=FAIL; stage $STAGE_INDEX has no validated reusable checkpoint"
-              echo "REQUIRED_PRIOR_WORK_CHECKPOINT=MISS"
-              echo "REFUSING_COLD_REBUILD_IN_EVERY_STAGE=true"
-              exit 42
-            fi
             if [[ "$cache_hit" == "true" ]]; then
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=PASS"
+              echo "SANDIUM_CHECKPOINT_RESUME=RESTORED_PRIOR_COMPILED_WORK"
             else
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=false' >> "$BASH_ENV"
-              echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=STAGE1_COLD_START_ALLOWED"
+              if [[ "$STAGE_INDEX" == "1" && -s .sandium-checkpoint-discovery-status ]] &&
+                 grep -Fxq "NO_COMPATIBLE_CANDIDATE" .sandium-checkpoint-discovery-status; then
+                echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=STAGE1_COLD_START_ALLOWED reason=discovery_completed_no_compatible_checkpoint"
+                echo "SANDIUM_CHECKPOINT_RESUME=NO_COMPATIBLE_PRIOR_WORK_FOUND"
+                rm -rf "$OUT"
+              else
+                echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=FAIL; stage $STAGE_INDEX has no validated reusable checkpoint and no safe cold-start authorization" >&2
+                echo "REQUIRED_PRIOR_WORK_CHECKPOINT=MISS"
+                echo "REFUSING_UNVERIFIED_COLD_REBUILD=true"
+                exit 42
+              fi
             fi
   restore-sandium-siso-cache:
     steps:
@@ -642,15 +647,8 @@ jobs:
       - run:
           name: Start stage budget clock before restoration and handover
           command: date +%s > "$HOME/.sandium-stage-start-epoch"
-      - restore-sandium-apk-cache
-      - run:
-          name: Exit Stage 1 immediately when a verified APK is reusable
-          command: |
-            set -euo pipefail
-            if [[ "${SANDIUM_VERIFIED_APK_CACHE_HIT:-false}" == "true" ]]; then
-              echo "VERIFIED_APK_REUSED=true; skipping source sync, dependencies, GN and compilation"
-              circleci-agent step halt
-            fi
+      # Do not short-circuit on APK existence: Stage 1 must resume compatible compiled work.
+      # The cumulative build-output checkpoint, not the APK cache, determines resume state.
       - checkout:
           path: brave-core
       # Catch Python syntax/runtime-import regressions before restoring/syncing
