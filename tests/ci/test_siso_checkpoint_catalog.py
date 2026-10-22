@@ -56,6 +56,12 @@ class CheckpointCatalogTests(unittest.TestCase):
     def test_no_compatible_candidate_returns_none(self):
         self.assertIsNone(catalog_module.choose([manifest(source_commit="e" * 40)], EXPECTED))
 
+    
+    def test_boolean_progress_count_is_rejected(self):
+        malformed = manifest()
+        malformed["progress"]["object_file_count"] = True
+        self.assertFalse(catalog_module.compatible(malformed, EXPECTED))
+
 
 if __name__ == "__main__":
     unittest.main()

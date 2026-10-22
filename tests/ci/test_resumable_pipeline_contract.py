@@ -95,11 +95,13 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
         self.assertIn("CROSS_WORKFLOW_CHECKPOINT=RESTORED", (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8"))
 
-    def test_continuation_stages_never_cold_rebuild_after_checkpoint_miss(self):
+    def test_all_stages_fail_closed_after_checkpoint_miss(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
-        self.assertIn('if [[ "$cache_hit" != "true" && "$STAGE_INDEX" -ne 1 ]]; then', segment)
-        self.assertIn("REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true", segment)
+        self.assertIn('if [[ "$cache_hit" != "true" ]]; then', segment)
+        self.assertIn("REQUIRED_PRIOR_WORK_CHECKPOINT=MISS", segment)
+        self.assertIn("REFUSING_COLD_REBUILD_IN_EVERY_STAGE=true", segment)
         self.assertIn("exit 42", segment)
+        self.assertNotIn("REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true", segment)
 
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [

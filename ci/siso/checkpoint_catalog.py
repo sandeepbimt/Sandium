@@ -51,7 +51,7 @@ def compatible(candidate: dict[str, Any], expected: dict[str, Any]) -> bool:
         if not isinstance(progress.get(field), bool):
             return False
     for field in ("object_file_count", "linked_artifact_count", "output_bytes"):
-        if not isinstance(progress.get(field), int) or progress[field] < 0:
+        if not isinstance(progress.get(field), int) or isinstance(progress[field], bool) or progress[field] < 0:
             return False
     return True
 

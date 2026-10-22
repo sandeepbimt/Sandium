@@ -1,146 +1,310 @@
 #!/usr/bin/env python3
-"""Recover the best compatible checkpoint published by an earlier CircleCI workflow."""
+"""Restore the highest-progress compatible checkpoint from earlier CircleCI workflows.
+
+CircleCI cache prefix restoration is a useful fallback, but it cannot enumerate
+all historical checkpoints or rank them by completed work. Published artifacts
+provide that catalog when a personal CircleCI API token is available.
+"""
 from __future__ import annotations
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
+from typing import Any
+
 from checkpoint_catalog import rank
 
 API = "https://circleci.com/api/v2"
 JOB_RE = re.compile(r"stage-[1-5]-")
 META_RE = re.compile(r"(?:^|/)checkpoint-artifact/sandium-checkpoint\.meta$")
 ARCHIVE_RE = re.compile(r"(?:^|/)checkpoint-artifact/sandium-checkpoint\.tar\.zst$")
+IDENTITY_FIELDS = (
+    "source_commit", "chromium_commit", "chromium_version", "target",
+    "build_config", "build_input_fingerprint", "gn_args_sha256",
+)
 
-def valid_manifest(meta):
-    """Reject malformed progress/identity fields before ranking a remote candidate."""
+
+def valid_manifest(meta: Any) -> bool:
+    """Reject malformed checkpoint metadata before it can be ranked or restored."""
     if not isinstance(meta, dict) or meta.get("schema") != 1:
         return False
     if not re.fullmatch(r"stage-[1-5]", str(meta.get("stage", ""))):
         return False
-    for field in ("source_commit", "chromium_commit", "chromium_version", "target", "build_config", "build_input_fingerprint", "gn_args_sha256", "archive_sha256"):
+    if meta.get("output_rel_path") != "out/android_Debug_arm64":
+        return False
+    if meta.get("target") != "android-arm64-debug-apk" or meta.get("build_config") != "Debug":
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40}", str(meta.get("source_commit", ""))):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40}", str(meta.get("chromium_commit", ""))):
+        return False
+    if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", str(meta.get("chromium_version", ""))):
+        return False
+    for field in ("build_input_fingerprint", "gn_args_sha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(meta.get(field, ""))):
+            return False
+    for field in (*IDENTITY_FIELDS, "archive_sha256"):
         value = meta.get(field)
         if not isinstance(value, str) or not value:
             return False
+    if not re.fullmatch(r"[0-9a-f]{64}", meta["archive_sha256"]):
+        return False
     progress = meta.get("progress")
     if not isinstance(progress, dict):
         return False
-    if not isinstance(progress.get("compile_complete"), bool) or not isinstance(progress.get("artifact_verified"), bool):
-        return False
+    for field in ("compile_complete", "artifact_verified"):
+        if not isinstance(progress.get(field), bool):
+            return False
     for field in ("object_file_count", "linked_artifact_count", "output_bytes"):
         value = progress.get(field)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             return False
-    return isinstance(meta.get("archive_bytes"), int) and meta["archive_bytes"] > 0
+    size = meta.get("archive_bytes")
+    return isinstance(size, int) and not isinstance(size, bool) and size > 0
 
-def archive_integrity_matches(meta, archive_path):
-    """Validate downloaded bytes before a candidate can enter progress ranking."""
+
+def sha256_file(path: Path) -> str:
+    """Hash large checkpoint archives incrementally rather than loading them into RAM."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def archive_integrity_matches(meta: Any, archive_path: Path) -> bool:
+    """Validate metadata, byte count, and archive digest without a large allocation."""
     try:
-        return (valid_manifest(meta) and archive_path.is_file()
-                and archive_path.stat().st_size == meta["archive_bytes"]
-                and hashlib.sha256(archive_path.read_bytes()).hexdigest() == meta["archive_sha256"])
+        return (
+            valid_manifest(meta)
+            and archive_path.is_file()
+            and archive_path.stat().st_size == meta["archive_bytes"]
+            and sha256_file(archive_path) == meta["archive_sha256"]
+        )
     except OSError:
         return False
 
-def get_json(url, token):
+
+def local_checkpoint(root: Path) -> tuple[dict[str, Any], Path, Path] | None:
+    """Return a validated cache checkpoint already restored by CircleCI, if present."""
+    meta_path = root / "sandium-checkpoint.meta"
+    archive_path = root / "sandium-checkpoint.tar.zst"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not archive_integrity_matches(meta, archive_path):
+        return None
+    return meta, archive_path, meta_path
+
+
+def get_json(url: str, token: str) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Circle-Token": token, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as response:
         value = json.loads(response.read().decode("utf-8"))
-    if not isinstance(value, dict): raise ValueError("CircleCI returned invalid JSON object")
+    if not isinstance(value, dict):
+        raise ValueError("CircleCI returned invalid JSON object")
     return value
 
-def pages(url, token, key):
+
+def pages(url: str, token: str, key: str):
     base, _, query = url.partition("?")
     params = urllib.parse.parse_qs(query, keep_blank_values=True)
-    visited=set()
+    visited: set[str] = set()
     while True:
         current = base + ("?" + urllib.parse.urlencode({k: v[-1] for k, v in params.items()}) if params else "")
-        data=get_json(current, token)
+        data = get_json(current, token)
         for item in data.get(key, []):
-            if isinstance(item, dict): yield item
-        nxt=data.get("next_page_token")
-        if not nxt or str(nxt) in visited: break
-        visited.add(str(nxt))
-        params["page-token"]=[str(nxt)]
+            if isinstance(item, dict):
+                yield item
+        next_token = data.get("next_page_token")
+        if not next_token or str(next_token) in visited:
+            break
+        visited.add(str(next_token))
+        params["page-token"] = [str(next_token)]
 
-def fetch(url, token, path):
-    if urllib.parse.urlparse(url).scheme != "https": raise ValueError("non-HTTPS artifact URL rejected")
-    req=urllib.request.Request(url)
-    # CircleCI artifact URLs are signed URLs; never forward the API token to a redirect host.
-    with urllib.request.urlopen(req, timeout=180) as response, path.open("wb") as out: shutil.copyfileobj(response,out)
+
+def fetch(url: str, path: Path) -> None:
+    """Fetch a signed artifact URL without ever forwarding the API token to it."""
+    if urllib.parse.urlparse(url).scheme != "https":
+        raise ValueError("non-HTTPS artifact URL rejected")
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=180) as response, path.open("wb") as out:
+        shutil.copyfileobj(response, out)
+
+
+def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, str, str]]:
+    """List all discoverable metadata/archive URL pairs from recent build-stage jobs."""
+    slugq = urllib.parse.quote(slug, safe="/")
+    url = f"{API}/project/{slugq}/pipeline?branch={urllib.parse.quote(branch)}&page-size=100"
+    candidates: list[tuple[str, str, str]] = []
+    for index, pipeline in enumerate(pages(url, token, "items")):
+        if index >= 40:
+            break
+        pipeline_id = pipeline.get("id")
+        if not pipeline_id:
+            continue
+        workflow_url = f"{API}/pipeline/{urllib.parse.quote(str(pipeline_id), safe='')}/workflow"
+        for workflow in pages(workflow_url, token, "items"):
+            workflow_id = workflow.get("id")
+            if not workflow_id:
+                continue
+            job_url = f"{API}/workflow/{urllib.parse.quote(str(workflow_id), safe='')}/job"
+            for job in pages(job_url, token, "items"):
+                job_name, job_number = str(job.get("name", "")), job.get("job_number")
+                if not JOB_RE.match(job_name) or not job_number:
+                    continue
+                artifacts_url = f"{API}/project/{slugq}/{job_number}/artifacts"
+                try:
+                    artifacts = list(pages(artifacts_url, token, "items"))
+                except Exception as exc:
+                    print(f"ARTIFACT_LIST_SKIPPED job={job_number} reason={type(exc).__name__}")
+                    continue
+                meta_artifact = next((item for item in artifacts if META_RE.search(str(item.get("path", ""))) and item.get("url")), None)
+                archive_artifact = next((item for item in artifacts if ARCHIVE_RE.search(str(item.get("path", ""))) and item.get("url")), None)
+                if meta_artifact and archive_artifact:
+                    candidates.append((str(meta_artifact["url"]), str(archive_artifact["url"]), str(job_number)))
+    return candidates
+
 
 def run(root: Path) -> int:
-    token=os.environ.get("CIRCLE_TOKEN","")
+    root = root.resolve()
+    # CircleCI does not provide CIRCLE_TOKEN by default. Permit common custom
+    # secret names so a correctly configured project/context works without code edits.
+    token = next((os.environ.get(name, "").strip() for name in
+                  ("CIRCLE_TOKEN", "CIRCLECI_API_TOKEN", "CIRCLECI_TOKEN")
+                  if os.environ.get(name, "").strip()), "")
+    existing_local = local_checkpoint(root)
     if not token:
-        print("CROSS_WORKFLOW_CHECKPOINT=SKIP_NO_TOKEN"); return 0
-    branch=os.environ.get("CIRCLE_BRANCH","")
-    slug=os.environ.get("CIRCLE_PROJECT_SLUG","")
-    if not branch or not slug:
-        print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_BRANCH_OR_PROJECT"); return 0
-    expected_source=os.environ.get("CIRCLE_SHA1","")
-    if not expected_source:
-        print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_SOURCE_SHA"); return 0
-    slugq=urllib.parse.quote(slug,safe="/")
-    url=f"{API}/project/{slugq}/pipeline?branch={urllib.parse.quote(branch)}&page-size=100"
-    candidates=[]
-    for pi,pipeline in enumerate(pages(url,token,"items")):
-        if pi >= 40: break
-        pid=pipeline.get("id")
-        if not pid: continue
-        wurl=f"{API}/pipeline/{urllib.parse.quote(str(pid),safe='')}/workflow"
-        for workflow in pages(wurl,token,"items"):
-            wid=workflow.get("id")
-            if not wid: continue
-            for job in pages(f"{API}/workflow/{urllib.parse.quote(str(wid),safe='')}/job",token,"items"):
-                if not JOB_RE.match(str(job.get("name",""))) or not job.get("job_number"): continue
-                try:
-                    arts=list(pages(f"{API}/project/{slugq}/{job['job_number']}/artifacts",token,"items"))
-                except Exception as exc:
-                    print(f"ARTIFACT_LIST_SKIPPED job={job.get('job_number')} reason={type(exc).__name__}")
-                    continue
-                meta_art=next((a for a in arts if META_RE.search(str(a.get("path",""))) and a.get("url")),None)
-                arc_art=next((a for a in arts if ARCHIVE_RE.search(str(a.get("path",""))) and a.get("url")),None)
-                if meta_art and arc_art: candidates.append((meta_art["url"],arc_art["url"],job.get("job_number")))
-    if not candidates:
-        print("CROSS_WORKFLOW_CHECKPOINT=MISS"); return 0
-    root=root.resolve()
-    with tempfile.TemporaryDirectory(prefix="sandium-checkpoint-candidates-",dir=root) as td:
-        td=Path(td); usable=[]
-        for i,(mu,au,jobno) in enumerate(candidates):
-            mp,ap=td/f"{i}.meta",td/f"{i}.tar.zst"
-            try:
-                fetch(mu,token,mp); meta=json.loads(mp.read_text())
-                if not valid_manifest(meta): continue
-                fetch(au,token,ap)
-                if not archive_integrity_matches(meta, ap): continue
-                # Do not require identical Git commit: CI-only changes can produce a new
-                # commit with identical build inputs. build_state.py below is authoritative.
-                usable.append((meta,ap,jobno))
-            except (OSError,ValueError,KeyError,urllib.error.URLError):
-                continue
-        usable.sort(key=lambda item:rank(item[0]),reverse=True)
-        for meta,archive,jobno in usable:
-            # Restore each candidate in isolation from any previous failed attempt.
-            out=root/"src"/"out"/"android_Debug_arm64"
-            shutil.rmtree(out,ignore_errors=True)
-            shutil.copy2(archive,root/"sandium-checkpoint.tar.zst")
-            manifest_source=next((mp for mp in td.glob("*.meta") if json.loads(mp.read_text()).get("archive_sha256")==meta.get("archive_sha256")),None)
-            if manifest_source is None: continue
-            shutil.copy2(manifest_source,root/"sandium-checkpoint.meta")
-            cp=root/"src"/"brave"/"ci"/"siso"/"checkpoint.py"
-            state=root/"src"/"brave"/"ci"/"siso"/"build_state.py"
-            restored=subprocess.run([sys.executable,str(cp),"restore","--root",str(root)],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-            if "SANDIUM_CHECKPOINT_RESTORE=PASS" not in restored.stdout: continue
-            check=subprocess.run([sys.executable,str(state),"check","--mode","cache","--commit",expected_source],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-            if check.returncode == 0:
-                print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED job={jobno} stage={meta.get('stage')}")
-                print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS="+json.dumps(meta["progress"],sort_keys=True))
-                return 0
-            print(f"CROSS_WORKFLOW_CHECKPOINT=INCOMPATIBLE job={jobno}; trying next candidate")
-            shutil.rmtree(out,ignore_errors=True)
-    print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
-    return 0
+        if existing_local:
+            print("CROSS_WORKFLOW_CHECKPOINT=SKIP_NO_TOKEN_LOCAL_CHECKPOINT_AVAILABLE")
+            return 0
+        print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_NO_TOKEN", file=sys.stderr)
+        print("Set a CircleCI personal API token as CIRCLE_TOKEN (or CIRCLECI_API_TOKEN/CIRCLECI_TOKEN) in project or context environment variables.", file=sys.stderr)
+        return 78
 
-if __name__=="__main__":
-    try: raise SystemExit(run(Path(os.environ.get("CIRCLE_WORKING_DIRECTORY",os.getcwd()))))
+    branch = os.environ.get("CIRCLE_BRANCH", "")
+    slug = os.environ.get("CIRCLE_PROJECT_SLUG", "")
+    expected_source = os.environ.get("CIRCLE_SHA1", "")
+    if not branch or not slug or not expected_source:
+        if existing_local:
+            print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_DISCOVERY_CONTEXT_LOCAL_CHECKPOINT_AVAILABLE")
+            return 0
+        print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_MISSING_DISCOVERY_CONTEXT", file=sys.stderr)
+        return 78
+
+    root.mkdir(parents=True, exist_ok=True)
+    out = root / "src" / "out" / "android_Debug_arm64"
+    archive_destination = root / "sandium-checkpoint.tar.zst"
+    manifest_destination = root / "sandium-checkpoint.meta"
+    with tempfile.TemporaryDirectory(prefix="sandium-checkpoint-candidates-", dir=root) as temp_dir:
+        temp = Path(temp_dir)
+        usable: list[tuple[dict[str, Any], Path, Path, str]] = []
+        local_archive: Path | None = None
+        local_manifest: Path | None = None
+        if existing_local:
+            local_meta, source_archive, source_manifest = existing_local
+            local_archive, local_manifest = temp / "local-cache.tar.zst", temp / "local-cache.meta"
+            shutil.copy2(source_archive, local_archive)
+            shutil.copy2(source_manifest, local_manifest)
+            usable.append((local_meta, local_archive, local_manifest, "local-cache"))
+
+        api_error: Exception | None = None
+        try:
+            remote_urls = discover_remote_urls(slug, branch, token)
+        except Exception as exc:
+            remote_urls = []
+            api_error = exc
+
+        for index, (metadata_url, archive_url, job_number) in enumerate(remote_urls):
+            metadata_path, archive_path = temp / f"remote-{index}.meta", temp / f"remote-{index}.tar.zst"
+            try:
+                fetch(metadata_url, metadata_path)
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if not valid_manifest(metadata):
+                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=invalid_metadata")
+                    continue
+                fetch(archive_url, archive_path)
+                if not archive_integrity_matches(metadata, archive_path):
+                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=archive_integrity")
+                    continue
+                usable.append((metadata, archive_path, metadata_path, job_number))
+            except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
+                print(f"CHECKPOINT_CANDIDATE_SKIPPED job={job_number} reason={type(exc).__name__}")
+
+        if api_error:
+            print(f"CROSS_WORKFLOW_CHECKPOINT=API_ERROR_FALLBACK reason={type(api_error).__name__}")
+        usable.sort(key=lambda item: rank(item[0]), reverse=True)
+        if not usable:
+            print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
+            if api_error:
+                print("Set/check the CircleCI personal API token and permissions before retrying.", file=sys.stderr)
+            return 78
+
+        # Preserve any pre-existing output while candidates are tried. A corrupt
+        # or incompatible top-ranked archive must not destroy a usable local cache.
+        output_backup = temp / "preexisting-output"
+        had_output = out.exists() or out.is_symlink()
+        if had_output:
+            output_backup.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(out, output_backup)
+
+        succeeded = False
+        try:
+            checkpoint_script = root / "src" / "brave" / "ci" / "siso" / "checkpoint.py"
+            state_script = root / "src" / "brave" / "ci" / "siso" / "build_state.py"
+            for metadata, archive_path, metadata_path, job_number in usable:
+                shutil.copy2(archive_path, archive_destination)
+                shutil.copy2(metadata_path, manifest_destination)
+                restored = subprocess.run(
+                    [sys.executable, str(checkpoint_script), "restore", "--root", str(root)],
+                    cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                )
+                if "SANDIUM_CHECKPOINT_RESTORE=PASS" not in restored.stdout:
+                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=restore_integrity")
+                    shutil.rmtree(out, ignore_errors=True)
+                    continue
+                check = subprocess.run(
+                    [sys.executable, str(state_script), "check", "--mode", "cache", "--commit", expected_source],
+                    cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                )
+                if check.returncode == 0:
+                    print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED job={job_number} stage={metadata.get('stage')}")
+                    print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS=" + json.dumps(metadata["progress"], sort_keys=True))
+                    succeeded = True
+                    return 0
+                print(f"CROSS_WORKFLOW_CHECKPOINT=INCOMPATIBLE job={job_number}; trying next candidate")
+                shutil.rmtree(out, ignore_errors=True)
+        finally:
+            if not succeeded:
+                shutil.rmtree(out, ignore_errors=True)
+                if had_output and (output_backup.exists() or output_backup.is_symlink()):
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(output_backup, out)
+                # Restore the original cache pair so the next pipeline step may
+                # use it as a safe fallback; otherwise remove the last bad candidate.
+                if existing_local and local_archive and local_manifest:
+                    shutil.copy2(local_archive, archive_destination)
+                    shutil.copy2(local_manifest, manifest_destination)
+                else:
+                    archive_destination.unlink(missing_ok=True)
+                    manifest_destination.unlink(missing_ok=True)
+
+        print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
+        return 78
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(run(Path(os.environ.get("CIRCLE_WORKING_DIRECTORY", os.getcwd()))))
     except Exception as exc:
-        print("CROSS_WORKFLOW_CHECKPOINT=API_ERROR "+str(exc),file=sys.stderr)
-        raise SystemExit(0)
+        print("CROSS_WORKFLOW_CHECKPOINT=API_ERROR " + str(exc), file=sys.stderr)
+        raise SystemExit(78)
