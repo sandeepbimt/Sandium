@@ -45,7 +45,9 @@ def main() -> int:
     token = next((os.environ.get(name, "").strip() for name in
                   ("CIRCLE_TOKEN", "CIRCLECI_API_TOKEN", "CIRCLECI_TOKEN")
                   if os.environ.get(name, "").strip()), "")
-    slug = os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip() or DEFAULT_PROJECT_SLUG
+    slug = (os.environ.get("CIRCLE_PROJECT_SLUG", "").strip()
+            or os.environ.get("SANDIUM_CIRCLECI_PROJECT_SLUG", "").strip()
+            or DEFAULT_PROJECT_SLUG)
     branch = os.environ.get("CIRCLE_BRANCH", "").strip()
     if not branch:
         try:
