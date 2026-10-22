@@ -118,7 +118,8 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
         preserved = self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state"
         self.assertTrue(preserved.is_symlink())
-        self.assertTrue((self.output / ".siso_fs_state.journal").is_file())
+        self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
+        self.assertFalse((self.output / ".siso_fs_state.journal").exists())
 
     def test_pack_quarantines_empty_siso_state_or_journal(self):
         (self.output / ".siso_fs_state").write_bytes(b"")
