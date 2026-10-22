@@ -95,13 +95,21 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
         self.assertIn("CROSS_WORKFLOW_CHECKPOINT=RESTORED", (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8"))
 
-    def test_all_stages_fail_closed_after_checkpoint_miss(self):
+    def test_stage_one_resumes_prior_work_and_only_cold_starts_after_complete_discovery(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
-        self.assertIn('if [[ "$cache_hit" != "true" ]]; then', segment)
-        self.assertIn("REQUIRED_PRIOR_WORK_CHECKPOINT=MISS", segment)
-        self.assertIn("REFUSING_COLD_REBUILD_IN_EVERY_STAGE=true", segment)
+        self.assertIn("SANDIUM_CHECKPOINT_RESUME=RESTORED_PRIOR_COMPILED_WORK", segment)
+        self.assertIn('grep -Fxq "NO_COMPATIBLE_CANDIDATE" .sandium-checkpoint-discovery-status', segment)
+        self.assertIn("STAGE1_COLD_START_ALLOWED reason=discovery_completed_no_compatible_checkpoint", segment)
+        self.assertIn("REFUSING_UNVERIFIED_COLD_REBUILD=true", segment)
         self.assertIn("exit 42", segment)
-        self.assertNotIn("REFUSING_COLD_REBUILD_IN_CONTINUATION_STAGE=true", segment)
+        stage_one = job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window")
+        self.assertNotIn("- restore-sandium-apk-cache", stage_one)
+        self.assertNotIn("Exit Stage 1 immediately when a verified APK is reusable", stage_one)
+
+    def test_checkpoint_discovery_only_authorizes_cold_start_after_complete_search(self):
+        discovery = (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8")
+        self.assertIn('write_text("NO_COMPATIBLE_CANDIDATE', discovery)
+        self.assertIn("DISCOVERY_INCOMPLETE", discovery)
 
     def test_continuation_stages_repair_missing_brave_deps_before_graph_preparation(self):
         command = CONFIG[CONFIG.index("  ensure-sandium-brave-child-dependencies:"):CONFIG.index("  restore-sandium-build-output:")]
