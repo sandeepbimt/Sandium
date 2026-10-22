@@ -186,7 +186,7 @@ def run(root: Path) -> int:
     if not token:
         if existing_local:
             print("CROSS_WORKFLOW_CHECKPOINT=SKIP_NO_TOKEN_LOCAL_CHECKPOINT_AVAILABLE")
-            (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\\n", encoding="utf-8")
+            (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\n", encoding="utf-8")
             return 0
         print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_NO_TOKEN", file=sys.stderr)
         print("Set a CircleCI personal API token as CIRCLE_TOKEN (or CIRCLECI_API_TOKEN/CIRCLECI_TOKEN) in project or context environment variables.", file=sys.stderr)
@@ -219,7 +219,7 @@ def run(root: Path) -> int:
     if not branch or not slug or not expected_source:
         if existing_local:
             print("CROSS_WORKFLOW_CHECKPOINT=SKIP_MISSING_DISCOVERY_CONTEXT_LOCAL_CHECKPOINT_AVAILABLE")
-            (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\\n", encoding="utf-8")
+            (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\n", encoding="utf-8")
             return 0
         print("CROSS_WORKFLOW_CHECKPOINT=BLOCKED_MISSING_DISCOVERY_CONTEXT", file=sys.stderr)
         print("CROSS_WORKFLOW_CHECKPOINT_CONTEXT=" +
@@ -278,7 +278,7 @@ def run(root: Path) -> int:
                 return 78
             # A fresh Stage 1 build is safe only after historical checkpoint
             # discovery completed successfully and found no compatible candidate.
-            (root / ".sandium-checkpoint-discovery-status").write_text("NO_COMPATIBLE_CANDIDATE\\n", encoding="utf-8")
+            (root / ".sandium-checkpoint-discovery-status").write_text("NO_COMPATIBLE_CANDIDATE\n", encoding="utf-8")
             return 0
 
         # Preserve any pre-existing output while candidates are tried. A corrupt
@@ -316,7 +316,7 @@ def run(root: Path) -> int:
                 if check.returncode == 0:
                     print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED job={job_number} stage={metadata.get('stage')}")
                     print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS=" + json.dumps(metadata["progress"], sort_keys=True))
-                    (root / ".sandium-checkpoint-discovery-status").write_text("RESTORED\\n", encoding="utf-8")
+                    (root / ".sandium-checkpoint-discovery-status").write_text("RESTORED\n", encoding="utf-8")
                     succeeded = True
                     return 0
                 print(f"CROSS_WORKFLOW_CHECKPOINT=INCOMPATIBLE job={job_number}; trying next candidate")
@@ -337,7 +337,13 @@ def run(root: Path) -> int:
                     manifest_destination.unlink(missing_ok=True)
 
         print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
-        return 78
+        if api_error:
+            print("CROSS_WORKFLOW_CHECKPOINT=DISCOVERY_INCOMPLETE; refusing to authorize a cold start.", file=sys.stderr)
+            return 78
+        # All discovered candidates were invalid or incompatible. Only this
+        # fully completed search may authorize a genuine Stage 1 cold start.
+        (root / ".sandium-checkpoint-discovery-status").write_text("NO_COMPATIBLE_CANDIDATE\n", encoding="utf-8")
+        return 0
 
 
 def main() -> int:
