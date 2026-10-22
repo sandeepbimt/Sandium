@@ -29,6 +29,18 @@ HANDOVER_RESERVE_SECONDS = 600
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def configure_depot_tools_path(env: dict[str, str], autoninja: str, source: Path) -> dict[str, str]:
+    """Prioritize the depot_tools checkout that owns the selected autoninja."""
+    configured = dict(env)
+    depot_tools = str(Path(autoninja).resolve().parent)
+    buildtools = str(source / "buildtools/linux64")
+    existing = configured.get("PATH", "")
+    configured["PATH"] = os.pathsep.join(
+        item for item in (depot_tools, buildtools, existing) if item
+    )
+    return configured
+
+
 def write_probe_files(out: Path, compiler: Path) -> tuple[Path, Path]:
     """Create a two-input, one-action Ninja graph isolated from Chromium's GN graph."""
     if not compiler.is_file() or not os.access(compiler, os.X_OK):
@@ -249,10 +261,17 @@ def run(root: Path) -> int:
     compiler = source / "third_party/llvm-build/Release+Asserts/bin/clang++"
     _, probe_ninja = write_probe_files(out, compiler)
 
-    autoninja = shutil.which("autoninja") or str(brave / "vendor/depot_tools/autoninja")
-    if not Path(autoninja).is_file() or not os.access(autoninja, os.X_OK):
+    external_autoninja = Path.home() / "depot_tools" / "autoninja"
+    autoninja = (
+        str(external_autoninja)
+        if external_autoninja.is_file() and os.access(external_autoninja, os.X_OK)
+        else shutil.which("autoninja")
+    )
+    if not autoninja or not Path(autoninja).is_file() or not os.access(autoninja, os.X_OK):
         raise ValueError("autoninja is not executable in the configured build environment")
-    env["PATH"] = str(brave / "vendor/depot_tools") + os.pathsep + str(source / "buildtools/linux64") + os.pathsep + env.get("PATH", "")
+    env = configure_depot_tools_path(env, autoninja, source)
+    print("REMOTE_PREFLIGHT_AUTONINJA=" + str(Path(autoninja).resolve()), flush=True)
+    print("REMOTE_PREFLIGHT_DEPOT_TOOLS_PATH=" + str(Path(autoninja).resolve().parent), flush=True)
     salt = "sandium-remote-preflight-" + uuid.uuid4().hex
     command = [
         autoninja, "-C", str(out), "-f", probe_ninja.name, PROBE_TARGET,
