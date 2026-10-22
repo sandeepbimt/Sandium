@@ -2428,7 +2428,7 @@ jobs:
   sandium-checkpoint-discovery-probe:
     machine:
       image: ubuntu-2404:current
-    resource_class: small
+    resource_class: medium
     working_directory: ~/project
     steps:
       - checkout
