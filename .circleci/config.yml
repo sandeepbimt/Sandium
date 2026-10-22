@@ -975,7 +975,7 @@ jobs:
             else
               started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
               elapsed_seconds="$(( $(date +%s) - started_at ))"
-              remaining_compile_seconds="$(( 3900 - elapsed_seconds - 300 ))"
+              remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
               if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
               if [[ "$remaining_compile_seconds" -le 0 ]]; then
                 echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
@@ -990,7 +990,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-1 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3900 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-1 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -1433,7 +1433,7 @@ jobs:
             cd src/brave
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
-            remaining_compile_seconds="$(( 3900 - elapsed_seconds - 300 ))"
+            remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
             if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
@@ -1448,7 +1448,7 @@ jobs:
             else
               echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
             fi
-            python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-2 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3900 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+            python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-2 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
             status=$?
             set -e
             echo "$status" > "$HOME/project/build-diagnostics/compile-window-2-exit.txt"
@@ -1683,7 +1683,7 @@ jobs:
               set +e
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
-            remaining_compile_seconds="$(( 3900 - elapsed_seconds - 300 ))"
+            remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
             if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
@@ -1697,7 +1697,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-3 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3900 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-3 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-3-exit.txt"
@@ -1919,7 +1919,7 @@ jobs:
               set +e
             started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
             elapsed_seconds="$(( $(date +%s) - started_at ))"
-            remaining_compile_seconds="$(( 3900 - elapsed_seconds - 300 ))"
+            remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
             if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
             if [[ "$remaining_compile_seconds" -le 0 ]]; then
               echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; refusing to compile without handover margin"
@@ -1933,7 +1933,7 @@ jobs:
               else
                 echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
               fi
-              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-4 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3900 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+              python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-4 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
               status=$?
               set -e
               echo "$status" > "$HOME/project/build-diagnostics/compile-window-4-exit.txt"
@@ -2188,7 +2188,7 @@ jobs:
               cd src/brave
               started_at="$(cat "$HOME/.sandium-stage-start-epoch")"
               elapsed_seconds="$(( $(date +%s) - started_at ))"
-              remaining_compile_seconds="$(( 3900 - elapsed_seconds - 300 ))"
+              remaining_compile_seconds="$(( 3300 - elapsed_seconds - 300 ))"
               if [[ "$remaining_compile_seconds" -gt 1800 ]]; then remaining_compile_seconds=2400; fi
               if [[ "$remaining_compile_seconds" -le 0 ]]; then
                 echo "STAGE_TIME_BUDGET_EXHAUSTED: elapsed=${elapsed_seconds}s; preserving state and handover time"
@@ -2203,7 +2203,7 @@ jobs:
                 else
                   echo "GN_GRAPH_MODE=REUSE_RESTORED_CHECKPOINT"
                 fi
-                python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-5 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3900 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
+                python3 "$HOME/project/src/brave/ci/siso/run_compile_window.py" --root "$HOME/project" --stage stage-5 --stage-start-epoch-file "$HOME/.sandium-stage-start-epoch" --max-stage-seconds 3300 --handover-reserve-seconds 300 --max-compile-seconds 1800 --metrics-poll-interval-seconds 15
                 status=$?
                 set -e
               fi
