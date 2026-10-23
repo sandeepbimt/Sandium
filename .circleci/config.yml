@@ -339,7 +339,7 @@ commands:
                 name: Discover and restore best compatible checkpoint from prior workflows
                 command: |
                   set -euo pipefail
-                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project" --require-siso-state
+                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
@@ -362,10 +362,19 @@ commands:
                   -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]; then
               siso_pair_valid=true
             fi
-            if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]] &&
+            if [[ -d "$OUT" ]] &&
                python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
               cache_hit=true
-              echo "BUILD_OUTPUT_CACHE=COMPATIBLE_RESUMABLE_SISO"
+              if [[ "$siso_pair_valid" == "true" ]]; then
+                echo "BUILD_OUTPUT_CACHE=COMPATIBLE_RESUMABLE_SISO"
+                echo "SANDIUM_RESUME_MODE=FULL_SISO_STATE_AND_OUTPUTS"
+              else
+                # A missing Siso state pair must not invalidate compatible compiled
+                # outputs. Ninja/Siso can re-evaluate output timestamps and compile
+                # only stale/missing outputs; never discard the restored output tree.
+                echo "BUILD_OUTPUT_CACHE=COMPATIBLE_OUTPUTS_ONLY"
+                echo "SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS"
+              fi
               if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
                 echo 'export SANDIUM_COMPILED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               fi
