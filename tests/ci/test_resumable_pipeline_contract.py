@@ -34,11 +34,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
 
     def test_stage1_bootstrap_is_opt_in_and_does_not_schedule_continuation(self):
         self.assertIn(
-            "  run_sandium_stage1_bootstrap:\\n    type: boolean\\n    default: false",
+            "  run_sandium_stage1_bootstrap:\n    type: boolean\n    default: false",
             CONFIG,
         )
-        start = CONFIG.index("  sandium-stage1-bootstrap:\\n")
-        end = CONFIG.index("  sandium-android-preflight:\\n", start)
+        start = CONFIG.index("  sandium-stage1-bootstrap:\n")
+        end = CONFIG.index("  sandium-android-preflight:\n", start)
         workflow = CONFIG[start:end]
         self.assertIn("<< pipeline.parameters.run_sandium_stage1_bootstrap >>", workflow)
         self.assertIn("<< pipeline.parameters.run_sandium_compile_windows >>", workflow)
