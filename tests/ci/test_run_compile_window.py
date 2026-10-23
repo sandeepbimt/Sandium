@@ -47,10 +47,12 @@ class ResetSisoInfoTests(unittest.TestCase):
 
     def test_ninja_graph_regeneration_is_allowed_but_build_gates_remain_mandatory(self):
         source = MODULE_PATH.read_text(encoding="utf-8")
-        self.assertIn("NINJA_GRAPH_REGENERATION=DETECTED; allowing graph refresh", source)
+        self.assertIn("NINJA_GRAPH_REGENERATION=DETECTED; graph refresh allowed", source)
         self.assertIn("NINJA_GRAPH_REGENERATION=ALLOWED_FOR_GRAPH_REFRESH", source)
-        self.assertIn("115000-task", source)
-        self.assertIn("REMAINING_TASK_BUDGET_GATE=FAIL", source)
+        self.assertIn("TASK_COUNT_POLICY=REPORT_RESIDUAL_NOT_RAW_DENOMINATOR", source)
+        self.assertIn("NINJA_ESTIMATED_REMAINING", source)
+        self.assertNotIn("REMAINING_TASK_BUDGET_GATE", source)
+        self.assertNotIn("115000-task", source)
         self.assertIn("preflight_is_not_execution_proof=true", source)
         self.assertIn("INCREMENTAL_PROGRESS_GATE=FAIL", source)
         self.assertIn("ACTION_FRONTIER_CUMULATIVE_UNIQUE_LABEL_COUNT=", source)
