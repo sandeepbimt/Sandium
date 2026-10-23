@@ -368,9 +368,11 @@ commands:
             else
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=false' >> "$BASH_ENV"
               if [[ "$STAGE_INDEX" == "1" && -s .sandium-checkpoint-discovery-status ]] &&
-                 grep -Fxq "NO_COMPATIBLE_CANDIDATE" .sandium-checkpoint-discovery-status; then
-                echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=STAGE1_COLD_START_ALLOWED reason=discovery_completed_no_compatible_checkpoint"
+                 { grep -Fxq "NO_COMPATIBLE_CANDIDATE" .sandium-checkpoint-discovery-status ||
+                   grep -Fxq "NO_RESUMABLE_SISO_CANDIDATE" .sandium-checkpoint-discovery-status; }; then
+                echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=STAGE1_COLD_START_ALLOWED reason=historical_discovery_complete_no_resumable_checkpoint"
                 echo "SANDIUM_CHECKPOINT_RESUME=NO_COMPATIBLE_PRIOR_WORK_FOUND"
+                echo "SANDIUM_COLD_START_AUTHORIZATION=GRANTED_BY_COMPLETE_DISCOVERY"
                 rm -rf "$OUT"
               else
                 echo "SANDIUM_CHECKPOINT_HANDOVER_GATE=FAIL; stage $STAGE_INDEX has no validated reusable checkpoint and no safe cold-start authorization" >&2
