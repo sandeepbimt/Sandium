@@ -32,6 +32,20 @@ class ResumablePipelineContractTests(unittest.TestCase):
         stage_one = job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window")
         self.assertIn("Fast Siso preflight regression gate before Chromium restore", stage_one)
 
+    def test_stage1_bootstrap_is_opt_in_and_does_not_schedule_continuation(self):
+        self.assertIn(
+            "  run_sandium_stage1_bootstrap:\\n    type: boolean\\n    default: false",
+            CONFIG,
+        )
+        start = CONFIG.index("  sandium-stage1-bootstrap:\\n")
+        end = CONFIG.index("  sandium-android-preflight:\\n", start)
+        workflow = CONFIG[start:end]
+        self.assertIn("<< pipeline.parameters.run_sandium_stage1_bootstrap >>", workflow)
+        self.assertIn("<< pipeline.parameters.run_sandium_compile_windows >>", workflow)
+        self.assertIn("not: << pipeline.parameters.run_sandium_android_apk_build >>", workflow)
+        self.assertIn("      - stage-1-source-foundation", workflow)
+        self.assertNotIn("stage-2-graph-and-compile-window", workflow)
+
     def test_all_five_production_stages_are_serialized(self):
         names = [
             "stage-1-source-foundation",
