@@ -1203,11 +1203,20 @@ jobs:
           name: Pack stage-1 cumulative Siso checkpoint
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-1"
+              echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
+              exit 0
+            fi
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-1
       - run:
           name: Publish stage-1 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-1 reason=preflight_only"
+              exit 0
+            fi
             mkdir -p build-diagnostics/checkpoint-artifact
             cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
             cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
@@ -1632,11 +1641,20 @@ jobs:
           name: Pack stage-2 cumulative Siso checkpoint
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-2"
+              echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
+              exit 0
+            fi
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2
       - run:
           name: Publish stage-2 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-2 reason=preflight_only"
+              exit 0
+            fi
             mkdir -p build-diagnostics/checkpoint-artifact
             cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
             cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
@@ -1895,11 +1913,20 @@ jobs:
           name: Pack stage-3 cumulative Siso checkpoint
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-3"
+              echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
+              exit 0
+            fi
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3
       - run:
           name: Publish stage-3 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-3 reason=preflight_only"
+              exit 0
+            fi
             mkdir -p build-diagnostics/checkpoint-artifact
             cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
             cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
@@ -2167,11 +2194,20 @@ jobs:
           name: Pack stage-4 cumulative Siso checkpoint
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-4"
+              echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
+              exit 0
+            fi
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4
       - run:
           name: Publish stage-4 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-4 reason=preflight_only"
+              exit 0
+            fi
             mkdir -p build-diagnostics/checkpoint-artifact
             cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
             cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
@@ -2460,11 +2496,20 @@ jobs:
           name: Pack stage-5 cumulative Siso checkpoint
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-5"
+              echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
+              exit 0
+            fi
             python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5
       - run:
           name: Publish stage-5 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+              echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-5 reason=preflight_only"
+              exit 0
+            fi
             mkdir -p build-diagnostics/checkpoint-artifact
             cp -f sandium-checkpoint.tar.zst sandium-checkpoint.meta build-diagnostics/checkpoint-artifact/
             cp -f sandium-action-frontier.txt build-diagnostics/checkpoint-artifact/ 2>/dev/null || true
