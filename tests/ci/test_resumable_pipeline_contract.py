@@ -137,15 +137,16 @@ class ResumablePipelineContractTests(unittest.TestCase):
         ]:
             with self.subTest(stage=current):
                 segment = job_segment(current, following)
-                gate = segment.index("SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=")
+                gate = segment.index("# Recheck critical Brave GN inputs immediately before Siso starts.")
                 compile_window = segment.index("run_compile_window.py")
                 self.assertLess(gate, compile_window)
                 gate_text = segment[gate:compile_window]
+                self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=", gate_text)
                 self.assertIn("bip39wally-core-native/BUILD.gn", gate_text)
                 self.assertIn("bat-native-tweetnacl/BUILD.gn", gate_text)
-                self.assertIn('"$HOME/project/$OUT/build.ninja"', segment[gate:compile_window])
-                self.assertIn('"$HOME/project/$OUT/build.ninja.stamp"', segment[gate:compile_window])
-                self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=PASS", segment[gate:compile_window])
+                self.assertIn('"$HOME/project/$OUT/build.ninja"', gate_text)
+                self.assertIn('"$HOME/project/$OUT/build.ninja.stamp"', gate_text)
+                self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=PASS", gate_text)
 
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [
