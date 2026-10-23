@@ -1,0 +1,55 @@
+name: Strict Siso remote-proof tests (Python only)
+
+on:
+  push:
+    branches:
+      - fix/strict-siso-remote-proof
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strict-siso-proof-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python regression suite only (no Chromium build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sparse-checkout CI and test inputs only
+        uses: actions/checkout@v4
+        with:
+          # Avoid downloading the multi-gigabyte browser source tree for Python-only tests.
+          filter: blob:none
+          sparse-checkout: |
+            .circleci
+            .github
+            build
+            ci
+            tests
+            .gclient
+            .gitmodules
+            DEPS
+            README.md
+            package.json
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile-check CI Python sources
+        run: |
+          python -m compileall -q ci/siso tests/ci
+
+      - name: Run targeted compile-window regressions
+        run: python tests/ci/test_run_compile_window.py
+
+      - name: Run remote-metrics gate tests
+        run: python tests/ci/test_run_compile_window_metrics.py
+
+      - name: Run broader CI Python unit suite
+        run: python -m unittest discover -s tests/ci -p 'test_*.py' -v

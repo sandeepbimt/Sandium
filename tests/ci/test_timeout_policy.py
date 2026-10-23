@@ -1,4 +1,4 @@
-"""Regression checks for SANDIUM's build-budget-only timeout policy."""
+"""Regression checks for SANDIUM's isolated-probe and stage-budget timeout policy."""
 
 from pathlib import Path
 import re
@@ -11,8 +11,9 @@ CONFIG = (ROOT / ".circleci/config.yml").read_text(encoding="utf-8")
 
 
 class TimeoutPolicyTests(unittest.TestCase):
-    def test_remote_preflight_has_no_arbitrary_subprocess_timeout(self):
-        self.assertNotIn("PROBE_TIMEOUT_SECONDS", PREFLIGHT)
+    def test_remote_preflight_uses_bounded_probe_timeout_not_shell_timeout_wrapper(self):
+        self.assertIn("PROBE_TIMEOUT_SECONDS = 60", PREFLIGHT)
+        self.assertIn("probe_timeout = min(PROBE_TIMEOUT_SECONDS, max(1, available // 3))", PREFLIGHT)
         self.assertNotRegex(PREFLIGHT, r"subprocess\.run\([\s\S]{0,500}?timeout\s*=")
         self.assertNotIn('shutil.which("timeout")', PREFLIGHT)
 
@@ -24,8 +25,10 @@ class TimeoutPolicyTests(unittest.TestCase):
     def test_compile_deadline_reserves_checkpoint_handover_time(self):
         self.assertIn("args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds", CONTROLLER)
         self.assertIn("elapsed >= remaining", CONTROLLER)
-        self.assertIn("--handover-reserve-seconds 600", CONFIG)
-        self.assertIn("--max-compile-seconds 2400", CONFIG)
+        # Each CircleCI stage uses the full sub-hour budget while reserving
+        # five minutes for Siso shutdown, checkpoint packaging and upload.
+        self.assertIn("--handover-reserve-seconds 300", CONFIG)
+        self.assertIn("--max-stage-seconds 3300", CONFIG)
 
     def test_circleci_quiet_step_watchdog_does_not_preempt_one_hour_stage_limit(self):
         values = re.findall(r"no_output_timeout:\s*(\S+)", CONFIG)

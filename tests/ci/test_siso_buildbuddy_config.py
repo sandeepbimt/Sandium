@@ -147,9 +147,15 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertEqual(second.count(writer.BEGIN_MARKER), 1)
         self.assertEqual(second.count(writer.END_MARKER), 1)
 
+    def test_default_instance_is_allowed_by_current_config_contract(self):
+        env_file = writer.apply_config(self.core, self.make_env(instance="default"))
+        content = env_file.read_text(encoding="utf-8")
+        self.assertIn("projects_chrome_custom_vars_reapi_instance=default", content)
+        self.assertNotIn("MUST-NEVER-BE-WRITTEN", content)
+
     def test_non_sandium_namespace_is_rejected(self):
         with self.assertRaises(ValueError):
-            writer.apply_config(self.core, self.make_env(instance="default"))
+            writer.apply_config(self.core, self.make_env(instance="other/team"))
         self.assertFalse((self.core / ".env").exists())
 
     def test_unreviewed_endpoint_is_rejected(self):
@@ -170,11 +176,12 @@ class RuntimeConfigTests(unittest.TestCase):
 
 
 class BackendConfigTests(unittest.TestCase):
-    def test_backend_uses_digest_pinned_image_without_google_worker_labels(self):
+    def test_backend_leaves_unverified_worker_image_unpinned_without_google_worker_labels(self):
         content = BACKEND_PATH.read_text(encoding="utf-8")
         self.assertIn("OSFamily", content)
-        self.assertIn("docker://gcr.io/chops-public-images-prod/rbe/siso-chromium/linux@sha256:d7cb1ab14a0f20aa669c23f22c15a9dead761dcac19f43985bf9dd5f41fbef3a", content)
-        self.assertEqual(content.count('"container-image"'), 2)
+        # The runtime policy deliberately lets BuildBuddy choose its default
+        # image until a specific digest is validated against the service.
+        self.assertNotIn('"container-image"', content)
         self.assertNotIn('"label:action_default"', content)
         self.assertNotIn('"label:action_large"', content)
 
