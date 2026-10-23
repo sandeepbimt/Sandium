@@ -163,11 +163,36 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
                 job_name, job_number = str(job.get("name", "")), job.get("job_number")
                 if not JOB_RE.match(job_name) or not job_number:
                     continue
-                artifacts_url = f"{API}/project/{slugq}/{job_number}/artifacts"
-                try:
-                    artifacts = list(pages(artifacts_url, token, "items"))
-                except Exception as exc:
-                    reason = f"job={job_number} reason={type(exc).__name__}"
+                # The job's own project_slug is authoritative for its artifact
+                # endpoint. Older workflows may have no artifacts at all (404),
+                # which is an expected historical miss, not an API outage.
+                artifact_slugs = []
+                job_slug = str(job.get("project_slug", "")).strip()
+                for candidate_slug in (job_slug, slug):
+                    if candidate_slug and candidate_slug not in artifact_slugs:
+                        artifact_slugs.append(candidate_slug)
+                artifacts = None
+                last_error = None
+                for artifact_slug in artifact_slugs:
+                    artifact_project = urllib.parse.quote(artifact_slug, safe="/")
+                    artifacts_url = f"{API}/project/{artifact_project}/{job_number}/artifacts"
+                    try:
+                        artifacts = list(pages(artifacts_url, token, "items"))
+                        break
+                    except urllib.error.HTTPError as exc:
+                        if exc.code == 404:
+                            last_error = exc
+                            continue
+                        last_error = exc
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        break
+                if artifacts is None:
+                    if isinstance(last_error, urllib.error.HTTPError) and last_error.code == 404:
+                        print(f"ARTIFACT_LIST_NO_ARTIFACTS job={job_number} status=404")
+                        continue
+                    reason = f"job={job_number} reason={type(last_error).__name__ if last_error else 'unknown'}"
                     artifact_listing_errors.append(reason)
                     print(f"ARTIFACT_LIST_SKIPPED {reason}")
                     continue
