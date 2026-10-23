@@ -80,12 +80,21 @@ def quarantine_incomplete_siso_checkpoint_pair(output: Path, root: Path, stage: 
     print("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT; incomplete pair quarantined; build outputs preserved")
 
 
-def validate_siso_checkpoint_pair(output: Path) -> None:
-    """Reject any malformed Siso pair after pack-time normalization."""
+def validate_siso_checkpoint_pair(output: Path, *, require_pair: bool = False) -> None:
+    """Validate Siso state; optionally require it for a resumable checkpoint.
+
+    Restore remains backward-compatible with older output-only checkpoints, but
+    newly packed checkpoints must carry both nonempty Siso state files. Otherwise
+    they can restore compiled outputs while silently losing filesystem-state reuse.
+    """
     state_path = output / ".siso_fs_state"
     journal_path = output / ".siso_fs_state.journal"
     state_exists = _path_entry_exists(state_path)
     journal_exists = _path_entry_exists(journal_path)
+    if require_pair and not state_exists and not journal_exists:
+        raise CheckpointError(
+            "Cannot pack a resumable checkpoint without Siso filesystem state and journal"
+        )
     if state_exists != journal_exists:
         raise CheckpointError(
             "Siso filesystem state and journal must be present together "
@@ -136,7 +145,7 @@ def list_members(archive: Path) -> list[str]:
 
 
 def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, Any]:
-    validate_siso_checkpoint_pair(output)
+    validate_siso_checkpoint_pair(output, require_pair=True)
     paths = {
         "state_sha256": output / STATE_NAME,
         "args_gn_sha256": output / "args.gn",
