@@ -84,18 +84,29 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("SANDIUM_CHECKPOINT_RESTORE=REJECTED", result.stdout)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "existing output")
 
-    def test_pack_rejects_checkpoint_when_both_siso_state_files_are_absent(self):
+    def test_output_only_checkpoint_round_trip_preserves_compiled_outputs(self):
         (self.output / ".siso_fs_state").unlink()
         (self.output / ".siso_fs_state.journal").unlink()
         object_file = self.output / "obj/sample/sample.o"
+        expected = object_file.read_bytes()
 
-        result = self.invoke("pack", "--stage", "stage-1")
+        packed = self.invoke("pack", "--stage", "stage-1")
 
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("without Siso filesystem state and journal", result.stderr)
-        self.assertTrue(object_file.is_file(), "compiled output must be preserved")
-        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
-        self.assertFalse((self.root / "sandium-checkpoint.meta").exists())
+        self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
+        self.assertIn("SANDIUM_CHECKPOINT_PACK=PASS", packed.stdout)
+        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUTS_ONLY_INCREMENTAL", packed.stdout)
+        meta = json.loads((self.root / "sandium-checkpoint.meta").read_text(encoding="utf-8"))
+        self.assertIsNone(meta["siso_state_sha256"])
+        self.assertIsNone(meta["siso_journal_sha256"])
+
+        shutil.rmtree(self.output)
+        restored = self.invoke("restore")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertIn("SANDIUM_CHECKPOINT_RESTORE=PASS", restored.stdout)
+        self.assertIn("SANDIUM_SISO_STATE_PRESENT=false", restored.stdout)
+        self.assertIn("SANDIUM_SISO_JOURNAL_PRESENT=false", restored.stdout)
+        self.assertEqual((self.output / "obj/sample/sample.o").read_bytes(), expected)
+        self.assertTrue((self.output / "build.ninja").is_file())
 
     def test_pack_rejects_bad_chromium_version(self):
         path = self.output / ".sandium-build-state.json"
