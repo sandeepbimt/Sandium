@@ -46,6 +46,27 @@ def manifest(archive: bytes, **overrides):
 
 
 class CheckpointArtifactDiscoveryTests(unittest.TestCase):
+    def test_resumable_candidate_requires_both_sha256_digests(self):
+        data = b"checkpoint"
+        output_only = manifest(data)
+        resumable = manifest(
+            data,
+            siso_state_sha256="e" * 64,
+            siso_journal_sha256="f" * 64,
+        )
+        one_sided = manifest(data, siso_state_sha256="e" * 64)
+        self.assertFalse(module.has_siso_state_pair(output_only))
+        self.assertFalse(module.has_siso_state_pair(one_sided))
+        self.assertTrue(module.has_siso_state_pair(resumable))
+
+    def test_require_siso_state_filters_before_archive_download(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        filter_at = source.index("resumable = [item for item in usable if has_siso_state_pair(item[0])]")
+        download_at = source.index("CHECKPOINT_CANDIDATE_ARCHIVE_DOWNLOAD_START")
+        self.assertLess(filter_at, download_at)
+        self.assertIn("--require-siso-state", source)
+        self.assertIn("CROSS_WORKFLOW_CHECKPOINT=NO_RESUMABLE_SISO_CANDIDATE", source)
+
     def test_boolean_archive_size_is_rejected(self):
         data = b"checkpoint"
         self.assertFalse(module.valid_manifest(manifest(data, archive_bytes=True)))
