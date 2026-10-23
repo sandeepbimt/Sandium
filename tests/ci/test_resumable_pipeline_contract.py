@@ -139,15 +139,16 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('if [[ -d "$OUT" ]] &&', segment)
         self.assertNotIn('if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]]', segment)
 
-    def test_stage_one_resumes_prior_work_and_only_cold_starts_after_complete_discovery(self):
+    def test_stage_one_refuses_cold_start_when_prior_work_is_missing(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn("SANDIUM_CHECKPOINT_RESUME=RESTORED_PRIOR_COMPILED_WORK", segment)
         self.assertIn('grep -Fxq "NO_COMPATIBLE_CANDIDATE" .sandium-checkpoint-discovery-status', segment)
         self.assertIn('grep -Fxq "NO_RESUMABLE_SISO_CANDIDATE" .sandium-checkpoint-discovery-status', segment)
-        self.assertIn("STAGE1_COLD_START_ALLOWED reason=historical_discovery_complete_no_resumable_checkpoint", segment)
-        self.assertIn("SANDIUM_COLD_START_AUTHORIZATION=GRANTED_BY_COMPLETE_DISCOVERY", segment)
+        self.assertIn("no compatible prior-work checkpoint exists; cold start is prohibited", segment)
+        self.assertIn("REQUIRED_PRIOR_WORK_CHECKPOINT=MISS", segment)
         self.assertIn("REFUSING_UNVERIFIED_COLD_REBUILD=true", segment)
         self.assertIn("exit 42", segment)
+        self.assertNotIn('rm -rf "$OUT"', segment)
         stage_one = job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window")
         self.assertNotIn("- restore-sandium-apk-cache", stage_one)
         self.assertNotIn("Exit Stage 1 immediately when a verified APK is reusable", stage_one)
