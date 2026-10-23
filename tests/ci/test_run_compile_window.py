@@ -60,13 +60,14 @@ class ResetSisoInfoTests(unittest.TestCase):
         self.assertNotIn('stop_reason = "Ninja attempted to regenerate the prepared/restored graph"', source)
         self.assertNotIn("source=validated_current_workflow_preflight remote_executed_action_records=0", source)
 
-    def test_remote_gate_accepts_only_current_run_action_specific_log_evidence_as_fallback(self):
+    def test_remote_log_signatures_are_diagnostic_only_not_execution_proof(self):
         source = MODULE_PATH.read_text(encoding="utf-8")
         self.assertIn("remote_signatures.add(line.strip())", source)
-        self.assertIn("remote_seen = True", source)
-        self.assertIn("source=current_run_siso_action_logs", source)
-        self.assertIn("remote_action_signatures=0", source)
-        self.assertIn("no actual remote-executed Siso actions were evidenced by metrics or current-run per-action logs", source)
+        self.assertIn("remote_log_signatures_diagnostic_only=true", source)
+        self.assertNotIn("source=current_run_siso_action_logs", source)
+        self.assertNotIn("remote_seen = True", source.split("def process_text", 1)[1].split("try:", 1)[0])
+        self.assertIn("remote_executed_action_records=0", source)
+        self.assertIn("structured metrics", source)
         self.assertNotIn("remote_seen = True  # preflight", source)
 
     def test_replaces_symlink_without_truncating_its_target(self):
