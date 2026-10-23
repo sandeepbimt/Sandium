@@ -2589,8 +2589,11 @@ jobs:
             print("SANDIUM_CHECKPOINT_SELECTED_SOURCE_COMMIT=" + str(meta.get("source_commit", "unknown")))
             print("SANDIUM_CHECKPOINT_SELECTED_CHROMIUM_COMMIT=" + str(meta.get("chromium_commit", "unknown")))
             print("SANDIUM_CHECKPOINT_SELECTED_PROGRESS=" + json.dumps(meta.get("progress", {}), sort_keys=True))
-            print("SANDIUM_CHECKPOINT_SELECTED_SISO_STATE_SHA256=" + str(meta.get("siso_state_sha256")))
-            print("SANDIUM_CHECKPOINT_SELECTED_SISO_JOURNAL_SHA256=" + str(meta.get("siso_journal_sha256")))
+            print("SANDIUM_CHECKPOINT_SELECTED_BUILD_STATE_SHA256=" + str(meta.get("state_sha256")))
+            out=Path(sys.argv[1]).parent / "src" / "out" / "android_Debug_arm64"
+            for name in (".siso_fs_state", ".siso_fs_state.journal"):
+                path=out / name
+                print("SANDIUM_CHECKPOINT_" + name.upper().replace(".", "_") + "_PRESENT=" + str(path.is_file() and path.stat().st_size > 0).lower())
             PY
             elif [[ "$STATUS" == "NO_COMPATIBLE_CANDIDATE" ]]; then
               echo "SANDIUM_CHECKPOINT_DISCOVERY=COMPLETE_NO_COMPATIBLE_CANDIDATE"
@@ -2765,7 +2768,7 @@ jobs:
           paths:
             - smoke-state/stage-5.json
 workflows:
-  sandium-checkpoint-discovery:
+  sandium-checkpoint-discovery-probe:
     when: << pipeline.parameters.run_sandium_checkpoint_discovery_probe >>
     jobs:
       - sandium-checkpoint-discovery-probe
