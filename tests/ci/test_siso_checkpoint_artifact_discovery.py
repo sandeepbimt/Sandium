@@ -67,6 +67,36 @@ class CheckpointArtifactDiscoveryTests(unittest.TestCase):
         self.assertIn("--require-siso-state", source)
         self.assertIn("CROSS_WORKFLOW_CHECKPOINT=NO_RESUMABLE_SISO_CANDIDATE", source)
 
+    def test_require_siso_state_does_not_claim_none_when_historical_search_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = {
+                "CIRCLE_TOKEN": "test-token",
+                "CIRCLE_BRANCH": "build/sandium-resumable-v2",
+                "CIRCLE_PROJECT_SLUG": "gh/sandeepbimt/Sandium",
+                "CIRCLE_SHA1": "a" * 40,
+            }
+            with patch.dict(os.environ, env, clear=False):
+                with patch.object(module, "discover_remote_urls", side_effect=RuntimeError("artifact listing failed")):
+                    self.assertEqual(module.run(root, require_siso_state=True), 78)
+            status = (root / ".sandium-checkpoint-discovery-status").read_text(encoding="utf-8")
+            self.assertEqual(status.strip(), "DISCOVERY_INCOMPLETE")
+
+    def test_require_siso_state_reports_no_candidate_only_after_complete_search(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = {
+                "CIRCLE_TOKEN": "test-token",
+                "CIRCLE_BRANCH": "build/sandium-resumable-v2",
+                "CIRCLE_PROJECT_SLUG": "gh/sandeepbimt/Sandium",
+                "CIRCLE_SHA1": "a" * 40,
+            }
+            with patch.dict(os.environ, env, clear=False):
+                with patch.object(module, "discover_remote_urls", return_value=[]):
+                    self.assertEqual(module.run(root, require_siso_state=True), 0)
+            status = (root / ".sandium-checkpoint-discovery-status").read_text(encoding="utf-8")
+            self.assertEqual(status.strip(), "NO_RESUMABLE_SISO_CANDIDATE")
+
     def test_boolean_archive_size_is_rejected(self):
         data = b"checkpoint"
         self.assertFalse(module.valid_manifest(manifest(data, archive_bytes=True)))
