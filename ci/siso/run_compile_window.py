@@ -29,6 +29,7 @@ REMOTE_SIGNATURES = (
 )
 REGENERATE_NINJA = re.compile(r"regenerating ninja files", re.IGNORECASE)
 PROGRESS_LINE = re.compile(r"^\[[0-9]+/[0-9]+\]\s+\S+\s+F\s+(.*)$")
+TASK_PROGRESS = re.compile(r"^\\[(\\d+)/(\\d+)\\]")
 
 
 def emit(log: Any, message: str) -> None:
@@ -319,6 +320,12 @@ def main() -> int:
         snap = state_file_snapshot(out_dir / state_name)
         state_start[state_name] = (bool(snap.get("present")), int(snap.get("bytes", 0)))
     current_frontier: set[str] = set()
+    # Siso can initially report a provisional graph size and then settle it.
+    # Require the settled remaining-work estimate to stay below the user's 115k cap.
+    latest_progress_total: int | None = None
+    first_progress_at: float | None = None
+    last_progress_total_change_at: float | None = None
+    task_budget_pass_logged = False
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
     remote_seen = False
@@ -454,6 +461,7 @@ def main() -> int:
 
         def process_text(text: str) -> None:
             nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity, gate_failed, stop_reason
+            nonlocal latest_progress_total, first_progress_at, last_progress_total_change_at
             if not text:
                 return
             last_activity = time.monotonic()
@@ -479,6 +487,14 @@ def main() -> int:
             partial += text
             while "\n" in partial:
                 line, partial = partial.split("\n", 1)
+                task_match = TASK_PROGRESS.match(line.strip())
+                if task_match:
+                    observed_total = int(task_match.group(2))
+                    if latest_progress_total != observed_total:
+                        latest_progress_total = observed_total
+                        last_progress_total_change_at = time.monotonic()
+                    if first_progress_at is None:
+                        first_progress_at = time.monotonic()
                 match = PROGRESS_LINE.match(line.strip())
                 if match:
                     label = match.group(1).strip()
@@ -491,6 +507,34 @@ def main() -> int:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
+                if (
+                    proc.poll() is None
+                    and latest_progress_total is not None
+                    and first_progress_at is not None
+                    and last_progress_total_change_at is not None
+                    and elapsed >= 60
+                    and now - last_progress_total_change_at >= 20
+                ):
+                    if latest_progress_total > 115000:
+                        gate_failed = True
+                        stop_reason = (
+                            f"settled remaining task count {latest_progress_total} exceeds "
+                            "the 115000-task ceiling; refusing a near-cold expensive compile"
+                        )
+                        emit(
+                            log,
+                            f"REMAINING_TASK_BUDGET_GATE=FAIL total={latest_progress_total} "
+                            "max=115000 stable_seconds="
+                            f"{int(now - last_progress_total_change_at)}",
+                        )
+                        stop_process_group(proc)
+                    elif not task_budget_pass_logged:
+                        emit(
+                            log,
+                            f"REMAINING_TASK_BUDGET_GATE=PASS total={latest_progress_total} max=115000 "
+                            f"seconds_since_first_progress={int(now - first_progress_at)}",
+                        )
+                        task_budget_pass_logged = True
                 if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
                     last_metrics_poll = now
                     try:
