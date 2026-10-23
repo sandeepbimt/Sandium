@@ -15,7 +15,7 @@ class TimeoutPolicyTests(unittest.TestCase):
         self.assertIn("PROBE_TIMEOUT_SECONDS = 60", PREFLIGHT)
         self.assertIn("probe_timeout = min(PROBE_TIMEOUT_SECONDS, max(1, available // 3))", PREFLIGHT)
         self.assertIn('raise ValueError("Strict-remote probe failed with exit code " + str(status))', PREFLIGHT)
-        self.assertNotRegex(PREFLIGHT, r"subprocess\\.run\\([\\s\\S]{0,500}?timeout\\s*=")
+        self.assertNotRegex(PREFLIGHT, r"subprocess\.run\([\s\S]{0,500}?timeout\s*=")
         self.assertNotIn('shutil.which("timeout")', PREFLIGHT)
 
     def test_remote_execution_is_not_killed_by_a_short_elapsed_gate(self):
