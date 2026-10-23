@@ -344,7 +344,7 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
             if not usable:
                 print("CROSS_WORKFLOW_CHECKPOINT=NO_RESUMABLE_SISO_CANDIDATE")
                 (root / ".sandium-checkpoint-discovery-status").write_text(
-                    "NO_RESUMABLE_SISO_CANDIDATE\\n", encoding="utf-8"
+                    "NO_RESUMABLE_SISO_CANDIDATE\n", encoding="utf-8"
                 )
                 return 0
         if not usable:
