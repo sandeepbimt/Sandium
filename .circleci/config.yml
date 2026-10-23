@@ -2591,9 +2591,17 @@ jobs:
             print("SANDIUM_CHECKPOINT_SELECTED_PROGRESS=" + json.dumps(meta.get("progress", {}), sort_keys=True))
             print("SANDIUM_CHECKPOINT_SELECTED_BUILD_STATE_SHA256=" + str(meta.get("state_sha256")))
             out=Path(sys.argv[1]).parent / "src" / "out" / "android_Debug_arm64"
+            siso_present = []
             for name in (".siso_fs_state", ".siso_fs_state.journal"):
                 path=out / name
-                print("SANDIUM_CHECKPOINT_" + name.upper().replace(".", "_") + "_PRESENT=" + str(path.is_file() and path.stat().st_size > 0).lower())
+                present=path.is_file() and not path.is_symlink() and path.stat().st_size > 0
+                siso_present.append(present)
+                print("SANDIUM_CHECKPOINT_" + name.upper().replace(".", "_") + "_PRESENT=" + str(present).lower())
+            if all(siso_present):
+                print("SANDIUM_CHECKPOINT_RESUMABILITY=RESUMABLE_SISO_STATE")
+            else:
+                print("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUT_ONLY_SISO_STATE_MISSING")
+                print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
             PY
             elif [[ "$STATUS" == "NO_COMPATIBLE_CANDIDATE" ]]; then
               echo "SANDIUM_CHECKPOINT_DISCOVERY=COMPLETE_NO_COMPATIBLE_CANDIDATE"
