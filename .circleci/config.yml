@@ -7,7 +7,7 @@ parameters:
   # and publishes a resumable checkpoint without scheduling Stages 2–5.
   run_sandium_stage1_bootstrap:
     type: boolean
-    default: true
+    default: false
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
