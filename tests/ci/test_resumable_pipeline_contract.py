@@ -216,6 +216,17 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("Snapshot stable source-cache identity files before restoring Chromium", CONFIG)
         self.assertIn("Save Chromium source for reuse across branches with identical sync inputs", CONFIG)
 
+    def test_compile_window_reports_siso_state_persistence_before_and_after_shutdown(self):
+        wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
+        self.assertIn("def state_file_snapshot(", wrapper)
+        self.assertIn("STAGE_START_SISO_STATE_PAIR_VALID", wrapper)
+        self.assertIn("STAGE_END_SISO_STATE_PAIR_VALID", wrapper)
+        self.assertIn("SISO_STATE_TRANSITION_", wrapper)
+        self.assertIn("SISO_SHUTDOWN_FORCED_KILL=", wrapper)
+        self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_MISSING_OR_INVALID_AFTER_SHUTDOWN", wrapper)
+        self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_UNCHANGED", wrapper)
+        self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_CHANGED_OR_REWRITTEN", wrapper)
+
     def test_siso_action_cache_is_shared_across_branches(self):
         self.assertIn("sandium-siso-v4-android-debug-arm64-", CONFIG)
         for stage in range(1, 6):
