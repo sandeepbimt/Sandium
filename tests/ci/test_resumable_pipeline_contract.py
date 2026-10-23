@@ -158,12 +158,14 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('write_text("NO_COMPATIBLE_CANDIDATE', discovery)
         self.assertIn("DISCOVERY_INCOMPLETE", discovery)
 
-    def test_compile_window_refuses_a_settled_remaining_task_count_over_115k(self):
+    def test_compile_window_reports_residual_work_not_a_raw_task_ceiling(self):
         wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
         self.assertIn('TASK_PROGRESS = re.compile(r"^\\[(\\d+)/(\\d+)\\]")', wrapper)
-        self.assertIn("latest_progress_total > 115000", wrapper)
-        self.assertIn("REMAINING_TASK_BUDGET_GATE=FAIL", wrapper)
-        self.assertIn("REMAINING_TASK_BUDGET_GATE=PASS", wrapper)
+        self.assertIn("latest_progress_completed", wrapper)
+        self.assertIn("NINJA_ESTIMATED_REMAINING", wrapper)
+        self.assertIn("TASK_COUNT_POLICY=REPORT_RESIDUAL_NOT_RAW_DENOMINATOR", wrapper)
+        self.assertNotIn("latest_progress_total > 115000", wrapper)
+        self.assertNotIn("REMAINING_TASK_BUDGET_GATE", wrapper)
 
     def test_continuation_stages_repair_missing_brave_deps_before_graph_preparation(self):
         command = CONFIG[CONFIG.index("  ensure-sandium-brave-child-dependencies:"):CONFIG.index("  restore-sandium-build-output:")]
