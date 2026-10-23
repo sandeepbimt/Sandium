@@ -56,12 +56,24 @@ def compatible(candidate: dict[str, Any], expected: dict[str, Any]) -> bool:
     return True
 
 
-def rank(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, str]:
-    """Rank by real completion/progress; stage and timestamp are tie-breakers."""
+def rank(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, int, str]:
+    """Prefer checkpoints with a complete Siso pair, then rank by measured progress.
+
+    A manifest with both Siso hashes can resume filesystem-state reuse. Older
+    output-only checkpoints remain eligible as a fallback, but must not outrank
+    a resumable candidate merely because they contain more output files.
+    """
     progress = candidate["progress"]
     stage_match = STAGE_RE.fullmatch(candidate["stage"])
     stage = int(stage_match.group(1)) if stage_match else 0
+    siso_state = candidate.get("siso_state_sha256")
+    siso_journal = candidate.get("siso_journal_sha256")
+    resumable = int(
+        isinstance(siso_state, str) and len(siso_state) == 64
+        and isinstance(siso_journal, str) and len(siso_journal) == 64
+    )
     return (
+        resumable,
         progress["object_file_count"],
         progress["linked_artifact_count"],
         progress["output_bytes"],
