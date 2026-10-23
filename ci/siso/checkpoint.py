@@ -145,10 +145,10 @@ def list_members(archive: Path) -> list[str]:
     return names
 
 
-def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, Any]:
-    # Compiled outputs remain reusable even when Siso drops its state file at shutdown.
-    # The checkpoint manifest records missing state hashes as null; never fabricate Siso state.
-    validate_siso_checkpoint_pair(output, require_pair=False)
+def metadata_for(output: Path, state: dict[str, Any], stage: str, *, require_siso_state: bool = False) -> dict[str, Any]:
+    # Strict compile-window handovers require the Siso state/journal pair. The
+    # permissive mode remains available for explicitly output-only checkpoints.
+    validate_siso_checkpoint_pair(output, require_pair=require_siso_state)
     paths = {
         "state_sha256": output / STATE_NAME,
         "args_gn_sha256": output / "args.gn",
@@ -188,7 +188,7 @@ def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, A
     return meta
 
 
-def pack(root: Path, stage: str) -> None:
+def pack(root: Path, stage: str, *, require_siso_state: bool = False) -> None:
     root = root.resolve()
     if stage not in ALLOWED_STAGES:
         raise CheckpointError("Unsupported compile stage: {}".format(stage))
@@ -200,6 +200,12 @@ def pack(root: Path, stage: str) -> None:
     # Siso may leave an orphan journal or dangling state symlink on shutdown.
     # Quarantine that invalid pair before archiving; never discard build outputs.
     quarantine_incomplete_siso_checkpoint_pair(output, root, stage)
+    if require_siso_state:
+        # Fail before creating/replacing an archive if Siso did not leave a
+        # complete state pair after a real compile window. Never silently label
+        # an output-only archive as a resumable compile checkpoint.
+        validate_siso_checkpoint_pair(output, require_pair=True)
+        print("SANDIUM_CHECKPOINT_REQUIRE_SISO_STATE=PASS")
     archive, manifest = root / "sandium-checkpoint.tar.zst", root / "sandium-checkpoint.meta"
     fd, temp_name = tempfile.mkstemp(prefix=".sandium-checkpoint-", suffix=".tar.zst.tmp", dir=root)
     os.close(fd)
@@ -212,7 +218,7 @@ def pack(root: Path, stage: str) -> None:
         except (OSError, subprocess.CalledProcessError) as exc:
             raise CheckpointError("tar/zstd checkpoint pack failed: {}".format(exc)) from exc
         list_members(temp_archive)
-        meta = metadata_for(output, state, stage)
+        meta = metadata_for(output, state, stage, require_siso_state=require_siso_state)
         meta["archive_bytes"] = temp_archive.stat().st_size
         meta["archive_sha256"] = sha256_file(temp_archive)
         temp_manifest.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -316,12 +322,13 @@ def main() -> int:
     parser.add_argument("action", choices=("pack", "restore"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[4])
     parser.add_argument("--stage", choices=ALLOWED_STAGES, default=None)
+    parser.add_argument("--require-siso-state", action="store_true", help="fail pack unless both nonempty Siso state and journal files are present")
     args = parser.parse_args()
     try:
         if args.action == "pack":
             if not args.stage:
                 parser.error("--stage is required for pack")
-            pack(args.root, args.stage)
+            pack(args.root, args.stage, require_siso_state=args.require_siso_state)
             return 0
         return restore(args.root)
     except (CheckpointError, OSError, ValueError) as exc:
