@@ -129,6 +129,23 @@ class ResumablePipelineContractTests(unittest.TestCase):
                     segment.index("Prepare source overlay and branding before GN"),
                 )
 
+    def test_continuation_stages_recheck_brave_gn_inputs_immediately_before_compile(self):
+        for current, following, stage_number in [
+            ("stage-3-compile-continuation", "stage-4-finish-and-package", 3),
+            ("stage-4-finish-and-package", "stage-5-verify-publish", 4),
+            ("stage-5-verify-publish", "smoke-1-contract-and-foundation", 5),
+        ]:
+            with self.subTest(stage=current):
+                segment = job_segment(current, following)
+                gate = segment.index("SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=")
+                compile_window = segment.index(f"run_compile_window.py --root")
+                self.assertLess(gate, compile_window)
+                self.assertIn("third_party/bip39wally-core-native/BUILD.gn", segment[gate:compile_window])
+                self.assertIn("vendor/bat-native-tweetnacl/BUILD.gn", segment[gate:compile_window])
+                self.assertIn('"$OUT/build.ninja"', segment[gate:compile_window])
+                self.assertIn('"$OUT/build.ninja.stamp"', segment[gate:compile_window])
+                self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=PASS", segment[gate:compile_window])
+
     def test_continuation_stages_validate_source_identity_after_checkout(self):
         for current, following in [
             ("stage-2-graph-and-compile-window", "stage-3-compile-continuation"),
