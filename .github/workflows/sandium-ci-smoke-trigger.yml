@@ -1,10 +1,10 @@
-name: Sandium Lightweight Five-Stage Smoke Test
-# MODE 1 only: smoke implementation validated; trigger the external-helper version. Never enable the real Chromium/APK build.
-# Requires repository secret CIRCLECI_TOKEN. No BuildBuddy credential is needed for this smoke test.
-
+name: Sandium Stage 1 Resume Build / Lightweight Smoke Test
+# The active Sandium branch gets one guarded Stage 1 compile plus offline regression tests.
+# The older branch retains its isolated smoke-only trigger.
 on:
   push:
     branches:
+      - build/sandium-resumable-v2
       - build/sandium-android-debug-apk-2026-10-17
     paths:
       - .github/workflows/sandium-ci-smoke-trigger.yml
@@ -13,29 +13,36 @@ permissions:
   contents: read
 
 concurrency:
-  group: sandium-ci-smoke-test
+  group: sandium-controlled-build-trigger-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  trigger-smoke-test:
-    name: Trigger isolated lightweight five-stage smoke test
+  trigger-circleci:
+    name: Trigger the branch-specific guarded CircleCI workflow
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Validate the approved branch and smoke-only intent
+      - name: Select the explicitly permitted workflow mode
         env:
           BRANCH: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$BRANCH" != "build/sandium-android-debug-apk-2026-10-17" ]]; then
-            echo "::error::Refusing to trigger smoke test from an unreviewed branch."
-            exit 1
-          fi
-          echo "MODE=1_LIGHTWEIGHT_SMOKE_ONLY"
-          echo "MODE=2_FULL_CHROMIUM_BUILD=DISABLED"
+          case "$BRANCH" in
+            "build/sandium-resumable-v2")
+              echo "SANDIUM_MODE=STAGE1_INCREMENTAL_RESUME"
+              echo "SANDIUM_MAX_SETTLED_REMAINING_TASKS=115000"
+              ;;
+            "build/sandium-android-debug-apk-2026-10-17")
+              echo "SANDIUM_MODE=LIGHTWEIGHT_SMOKE_ONLY"
+              ;;
+            *)
+              echo "::error::Refusing an unapproved branch."
+              exit 1
+              ;;
+          esac
 
-      - name: Trigger only the isolated smoke workflow
+      - name: Trigger exactly one guarded CircleCI workflow
         env:
           CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
           BRANCH: ${{ github.ref_name }}
@@ -44,25 +51,47 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${CIRCLECI_TOKEN:?Missing CIRCLECI_TOKEN; refusing to trigger an untrackable smoke test}"
-          request_body="$(python3 -c 'import json,os; b=os.environ["BRANCH"]; print(json.dumps({"definition_id":os.environ["PIPELINE_DEFINITION_ID"],"config":{"branch":b},"checkout":{"branch":b},"parameters":{"run_sandium_ci_smoke_test":True,"run_sandium_android_apk_build":False}}))')"
+          : "${CIRCLECI_TOKEN:?Missing CIRCLECI_TOKEN; refusing an untracked CircleCI request}"
+          python3 - <<'PY' > request.json
+          import json, os
+          branch = os.environ["BRANCH"]
+          if branch == "build/sandium-resumable-v2":
+              parameters = {
+                  "run_sandium_stage1_bootstrap": True,
+                  "run_sandium_checkpoint_unit_tests": True,
+                  "run_sandium_android_apk_build": False,
+                  "run_sandium_compile_windows": True,
+              }
+          elif branch == "build/sandium-android-debug-apk-2026-10-17":
+              parameters = {
+                  "run_sandium_ci_smoke_test": True,
+                  "run_sandium_android_apk_build": False,
+              }
+          else:
+              raise SystemExit("unapproved branch")
+          print(json.dumps({
+              "definition_id": os.environ["PIPELINE_DEFINITION_ID"],
+              "config": {"branch": branch},
+              "checkout": {"branch": branch},
+              "parameters": parameters,
+          }))
+          PY
           response_file="$(mktemp)"
-          trap 'rm -f "$response_file"' EXIT
+          trap 'rm -f "$response_file" request.json' EXIT
           status="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" \
             --request POST "https://circleci.com/api/v2/project/${CIRCLECI_PROJECT_SLUG}/pipeline/run" \
             --header "Circle-Token: ${CIRCLECI_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data "$request_body")"
+            --data @request.json)"
           if [[ "$status" != "200" && "$status" != "201" ]]; then
-            echo "::error::CircleCI API returned HTTP $status; smoke trigger was not confirmed."
+            echo "::error::CircleCI returned HTTP $status; pipeline was not confirmed."
             cat "$response_file"
             exit 1
           fi
           python3 - "$response_file" <<'PY'
-          import json,sys
+          import json, sys
           with open(sys.argv[1], encoding="utf-8") as stream:
-              payload=json.load(stream)
-          print(json.dumps({k:payload.get(k) for k in ("id","number","state","created_at","message") if k in payload}, indent=2))
-          print("CircleCI accepted the lightweight smoke-only request.")
-          print("The five job results determine whether Mode 1 passed; no APK build is performed.")
+              payload = json.load(stream)
+          print(json.dumps({k: payload.get(k) for k in ("id", "number", "state", "created_at", "message") if k in payload}, indent=2))
+          print("CIRCLECI_PIPELINE_ACCEPTED=true")
           PY
