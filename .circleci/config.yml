@@ -2581,7 +2581,7 @@ jobs:
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
             if [[ "$STATUS" == "RESTORED" ]]; then
               META="$ROOT/sandium-checkpoint.meta"
-              python3 - "$META" <<'PY'
+              python3 - "$META" \<<'PY'
             import json, sys
             from pathlib import Path
             meta=json.loads(Path(sys.argv[1]).read_text())
