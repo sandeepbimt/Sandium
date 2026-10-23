@@ -2576,7 +2576,7 @@ jobs:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
-            python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT"
+            python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
             STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
             if [[ "$STATUS" == "RESTORED" ]]; then
