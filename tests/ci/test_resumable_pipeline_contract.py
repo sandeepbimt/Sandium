@@ -140,8 +140,9 @@ class ResumablePipelineContractTests(unittest.TestCase):
                 gate = segment.index("SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=")
                 compile_window = segment.index("run_compile_window.py")
                 self.assertLess(gate, compile_window)
-                self.assertIn("third_party/bip39wally-core-native/BUILD.gn", segment[gate:compile_window])
-                self.assertIn("vendor/bat-native-tweetnacl/BUILD.gn", segment[gate:compile_window])
+                gate_text = segment[gate:compile_window]
+                self.assertIn("bip39wally-core-native/BUILD.gn", gate_text)
+                self.assertIn("bat-native-tweetnacl/BUILD.gn", gate_text)
                 self.assertIn('"$HOME/project/$OUT/build.ninja"', segment[gate:compile_window])
                 self.assertIn('"$HOME/project/$OUT/build.ninja.stamp"', segment[gate:compile_window])
                 self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=PASS", segment[gate:compile_window])
