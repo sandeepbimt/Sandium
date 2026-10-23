@@ -1,0 +1,153 @@
+name: Sandium Stage 1 Checkpoint Audit
+
+on:
+  push:
+    branches:
+      - diagnostic/stage1-checkpoint-audit
+    paths:
+      - .github/workflows/sandium-checkpoint-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect completed Stage 1 CircleCI checkpoint (read-only)
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
+          TARGET_BRANCH: build/sandium-resumable-v2
+          TARGET_REVISION: ea9e3850a7096721eec426da0df7b2aa88feaa16
+          CIRCLECI_PROJECT_SLUG: circleci/MxDP3UwnZ8Fv5ZWFv14xAJ/QEU7mKkmPf2u4opFnyaxo2
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, urllib.parse, urllib.request
+          from pathlib import Path
+
+          token = os.environ.get("CIRCLECI_TOKEN", "")
+          branch = os.environ["TARGET_BRANCH"]
+          revision = os.environ["TARGET_REVISION"]
+          slug = os.environ["CIRCLECI_PROJECT_SLUG"]
+          report = []
+          def note(s=""):
+              report.append(str(s))
+          def get_json(url):
+              req = urllib.request.Request(url, headers={"Circle-Token": token, "Accept": "application/json"})
+              with urllib.request.urlopen(req, timeout=25) as resp:
+                  return json.load(resp)
+          def get_bytes(url):
+              req = urllib.request.Request(url, headers={"Circle-Token": token})
+              with urllib.request.urlopen(req, timeout=45) as resp:
+                  return resp.read()
+          note("# Sandium Stage 1 checkpoint audit")
+          note(f"- Target branch: {branch}")
+          note(f"- Target revision: {revision}")
+          note("- Read-only audit; this workflow does not trigger CircleCI builds.")
+          if not token:
+              note("ERROR: repository secret CIRCLECI_TOKEN is unavailable.")
+          else:
+              base = "https://circleci.com/api/v2"
+              pipeline_url = base + "/project/" + slug + "/pipeline?" + urllib.parse.urlencode({"branch": branch})
+              try:
+                  pipelines = get_json(pipeline_url).get("items", [])
+                  exact = [p for p in pipelines if (p.get("vcs") or {}).get("revision") == revision]
+                  if not exact:
+                      note(f"ERROR: no pipeline for exact target revision found in first page ({len(pipelines)} entries).")
+                      note("Recent pipeline candidates:")
+                      for p in pipelines[:10]:
+                          vcs = p.get("vcs") or {}
+                          note(f"- number={p.get('number')} id={p.get('id')} state={p.get('state')} revision={vcs.get('revision')} created={p.get('created_at')}")
+                  else:
+                      pipeline = exact[0]
+                      note("## Pipeline")
+                      note(f"- Number: {pipeline.get('number')}")
+                      note(f"- ID: {pipeline.get('id')}")
+                      note(f"- State: {pipeline.get('state')}")
+                      note(f"- Created: {pipeline.get('created_at')}")
+                      workflows = get_json(base + "/pipeline/" + pipeline["id"] + "/workflow").get("items", [])
+                      found_jobs = []
+                      for wf in workflows:
+                          try:
+                              jobs = get_json(base + "/workflow/" + wf["id"] + "/job").get("items", [])
+                          except Exception as exc:
+                              note(f"Workflow jobs query failed for {wf.get('name')}: {exc}")
+                              continue
+                          for job in jobs:
+                              if job.get("name") == "stage-1-source-foundation":
+                                  found_jobs.append((wf, job))
+                      if not found_jobs:
+                          note("ERROR: stage-1-source-foundation job not found.")
+                          for wf in workflows:
+                              note(f"- workflow {wf.get('name')} status={wf.get('status')} id={wf.get('id')}")
+                      else:
+                          wf, job = found_jobs[0]
+                          job_number = job.get("job_number")
+                          note("## Stage 1 job")
+                          note(f"- Workflow: {wf.get('name')} / {wf.get('status')}")
+                          note(f"- Job number: {job_number}")
+                          note(f"- Job status: {job.get('status')}")
+                          note(f"- Started: {job.get('started_at')}")
+                          note(f"- Stopped: {job.get('stopped_at')}")
+                          artifacts = get_json(base + "/project/" + slug + "/" + str(job_number) + "/artifacts").get("items", [])
+                          note("## Artifact inventory")
+                          for item in artifacts:
+                              note(f"- {item.get('path')} ({item.get('size')} bytes)")
+                          wanted = []
+                          for item in artifacts:
+                              path = str(item.get("path", "")).lower()
+                              if path.endswith("sandium-checkpoint.meta") or path.endswith("sandium-action-frontier.txt") or path.endswith("build-state.json") or path.endswith("build-manifest.json") or path.endswith("compile-window-1.log") or ("compile-window-1" in path and (path.endswith(".txt") or path.endswith(".jsonl") or path.endswith(".log"))) or path.endswith("/args.gn") or path.endswith("/gn_logs.txt"):
+                                  wanted.append(item)
+                          for item in wanted:
+                              path = str(item.get("path", ""))
+                              try:
+                                  raw = get_bytes(item["url"])
+                                  text = raw.decode("utf-8", "replace")
+                                  note(f"## File: {path}")
+                                  if path.endswith("sandium-checkpoint.meta") or path.endswith("build-state.json") or path.endswith("build-manifest.json"):
+                                      try:
+                                          note(json.dumps(json.loads(text), indent=2, sort_keys=True)[:18000])
+                                      except Exception:
+                                          note(text[:12000])
+                                  elif "compile-window-1" in path and path.endswith(".log"):
+                                      keys = re.compile(r"(STAGE_START_|STAGE_END_|RESTORED_|NINJA_|TASK_COUNT_POLICY|ACTION_FRONTIER_|REMOTE_|SISO_STATE_|CHECKPOINT_|APK_|BUILD_OUTPUT_CACHE|COMPILE_WINDOW_|METRICS_JSON_BYTES|OUTPUT_DELTA|OBJECT_COUNT_DELTA)", re.I)
+                                      lines = text.splitlines()
+                                      selected = [f"{i+1}: {line}" for i, line in enumerate(lines) if keys.search(line)]
+                                      note("\n".join(selected[-260:])[:24000] if selected else text[-12000:])
+                                  elif path.endswith("sandium-action-frontier.txt"):
+                                      note(f"Line count: {len(text.splitlines())}; first 80 labels:")
+                                      note("\n".join(text.splitlines()[:80])[:10000])
+                                  else:
+                                      note(text[:12000])
+                              except Exception as exc:
+                                  note(f"ERROR downloading {path}: {exc}")
+                          if not wanted:
+                              note("WARNING: no matching checkpoint/compile diagnostics artifacts found.")
+              except Exception as exc:
+                  note(f"ERROR querying CircleCI API: {type(exc).__name__}: {exc}")
+          out = Path("diagnostics/stage1-checkpoint-audit.md")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text("\n".join(report) + "\n", encoding="utf-8")
+          print(out.read_text(encoding="utf-8"))
+          PY
+      - name: Commit audit report to diagnostic branch
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ ! -s diagnostics/stage1-checkpoint-audit.md ]]; then
+            mkdir -p diagnostics
+            echo "Audit did not produce a report; inspect workflow logs." > diagnostics/stage1-checkpoint-audit.md
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/stage1-checkpoint-audit.md
+          if git diff --cached --quiet; then
+            echo "AUDIT_REPORT_UNCHANGED=true"
+          else
+            git commit -m "diagnostic: record Stage 1 checkpoint audit"
+            git push origin "HEAD:diagnostic/stage1-checkpoint-audit"
+          fi
