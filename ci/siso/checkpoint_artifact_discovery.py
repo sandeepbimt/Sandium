@@ -210,7 +210,18 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
     return candidates
 
 
-def run(root: Path) -> int:
+def has_siso_state_pair(meta: Any) -> bool:
+    """Return whether manifest carries both valid Siso state-file digests."""
+    if not isinstance(meta, dict):
+        return False
+    return all(
+        isinstance(meta.get(field), str)
+        and re.fullmatch(r"[0-9a-f]{64}", meta[field]) is not None
+        for field in ("siso_state_sha256", "siso_journal_sha256")
+    )
+
+
+def run(root: Path, *, require_siso_state: bool = False) -> int:
     root = root.resolve()
     # Never let a stale marker from an earlier invocation authorize a cold start.
     (root / ".sandium-checkpoint-discovery-status").unlink(missing_ok=True)
@@ -323,6 +334,19 @@ def run(root: Path) -> int:
         if api_error:
             print(f"CROSS_WORKFLOW_CHECKPOINT=API_ERROR_FALLBACK reason={type(api_error).__name__}")
         usable.sort(key=lambda item: rank(item[0]), reverse=True)
+        if require_siso_state:
+            resumable = [item for item in usable if has_siso_state_pair(item[0])]
+            output_only_count = len(usable) - len(resumable)
+            print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_TOTAL={len(usable)}")
+            print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_RESUMABLE={len(resumable)}")
+            print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_OUTPUT_ONLY={output_only_count}")
+            usable = resumable
+            if not usable:
+                print("CROSS_WORKFLOW_CHECKPOINT=NO_RESUMABLE_SISO_CANDIDATE")
+                (root / ".sandium-checkpoint-discovery-status").write_text(
+                    "NO_RESUMABLE_SISO_CANDIDATE\\n", encoding="utf-8"
+                )
+                return 0
         if not usable:
             print("CROSS_WORKFLOW_CHECKPOINT=NO_COMPATIBLE_CANDIDATE")
             if api_error:
@@ -418,11 +442,15 @@ def main() -> int:
         default=Path(os.environ.get("CIRCLE_WORKING_DIRECTORY") or os.getcwd()),
         help="CircleCI project root (defaults to the current working directory)",
     )
+    parser.add_argument(
+        "--require-siso-state", action="store_true",
+        help="Only restore checkpoints whose metadata includes both Siso state digests.",
+    )
     args = parser.parse_args()
     # CircleCI environment variables may contain a literal ~/ prefix; expand it
     # before resolving so paths never become <cwd>/~/project.
     root = Path(os.path.expandvars(str(args.root))).expanduser().resolve()
-    return run(root)
+    return run(root, require_siso_state=args.require_siso_state)
 
 
 if __name__ == "__main__":
