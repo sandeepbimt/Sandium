@@ -1,6 +1,7 @@
 name: Sandium Stage 1 Resume Build / Lightweight Smoke Test
 # The active Sandium branch gets one guarded Stage 1 compile plus offline regression tests.
 # Ninja may refresh a restored graph; the 115k task, remote-execution, and incremental-progress gates still decide whether the compile can continue/pass.
+# Current-run Siso action logs can corroborate remote execution if metrics_json is empty; generic config/preflight messages never count.
 # The older branch retains its isolated smoke-only trigger.
 on:
   push:
