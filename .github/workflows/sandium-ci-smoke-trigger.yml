@@ -2,6 +2,7 @@ name: Sandium Stage 1 Resume Build / Lightweight Smoke Test
 # The active Sandium branch gets one guarded Stage 1 compile plus offline regression tests.
 # Report Ninja residual work as total minus completed; never treat the raw graph denominator as a success ceiling.
 # Reuse is judged from restored outputs and incremental deltas; current-run Siso action logs may corroborate remote execution.
+# Regression contracts now assert residual-work telemetry, not the removed raw task-count ceiling.
 # The older branch retains its isolated smoke-only trigger.
 on:
   push:
