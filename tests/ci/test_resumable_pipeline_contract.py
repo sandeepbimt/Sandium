@@ -142,8 +142,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
                 self.assertLess(gate, compile_window)
                 self.assertIn("third_party/bip39wally-core-native/BUILD.gn", segment[gate:compile_window])
                 self.assertIn("vendor/bat-native-tweetnacl/BUILD.gn", segment[gate:compile_window])
-                self.assertIn('"$OUT/build.ninja"', segment[gate:compile_window])
-                self.assertIn('"$OUT/build.ninja.stamp"', segment[gate:compile_window])
+                self.assertIn('"$HOME/project/$OUT/build.ninja"', segment[gate:compile_window])
+                self.assertIn('"$HOME/project/$OUT/build.ninja.stamp"', segment[gate:compile_window])
                 self.assertIn("SANDIUM_PRECOMPILE_INPUT_GATE=PASS", segment[gate:compile_window])
 
     def test_continuation_stages_validate_source_identity_after_checkout(self):
