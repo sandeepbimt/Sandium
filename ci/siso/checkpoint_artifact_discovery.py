@@ -341,6 +341,13 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
             print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_RESUMABLE={len(resumable)}")
             print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_OUTPUT_ONLY={output_only_count}")
             usable = resumable
+            if not usable and api_error:
+                print("CROSS_WORKFLOW_CHECKPOINT=DISCOVERY_INCOMPLETE; refusing to conclude no resumable checkpoint exists.", file=sys.stderr)
+                print("CROSS_WORKFLOW_CHECKPOINT=API_ERROR_FALLBACK reason=" + type(api_error).__name__, file=sys.stderr)
+                (root / ".sandium-checkpoint-discovery-status").write_text(
+                    "DISCOVERY_INCOMPLETE\n", encoding="utf-8"
+                )
+                return 78
             if not usable:
                 print("CROSS_WORKFLOW_CHECKPOINT=NO_RESUMABLE_SISO_CANDIDATE")
                 (root / ".sandium-checkpoint-discovery-status").write_text(
