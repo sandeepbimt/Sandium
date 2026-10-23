@@ -1836,6 +1836,18 @@ jobs:
             fi
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
+              # Recheck critical Brave GN inputs immediately before Siso starts.
+              for required in \
+                src/brave/third_party/bip39wally-core-native/BUILD.gn \
+                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
+                "$OUT/build.ninja" \
+                "$OUT/build.ninja.stamp"; do
+                if [[ ! -s "$required" ]]; then
+                  echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
+                  exit 43
+                fi
+              done
+              echo "SANDIUM_PRECOMPILE_INPUT_GATE=PASS brave_gn_deps_and_prepared_graph_present=true"
               BUILD_FORCE_GN_GEN=()
               if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
                 echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
@@ -2096,6 +2108,18 @@ jobs:
             fi
             echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
+              # Recheck critical Brave GN inputs immediately before Siso starts.
+              for required in \
+                src/brave/third_party/bip39wally-core-native/BUILD.gn \
+                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
+                "$OUT/build.ninja" \
+                "$OUT/build.ninja.stamp"; do
+                if [[ ! -s "$required" ]]; then
+                  echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
+                  exit 43
+                fi
+              done
+              echo "SANDIUM_PRECOMPILE_INPUT_GATE=PASS brave_gn_deps_and_prepared_graph_present=true"
               BUILD_FORCE_GN_GEN=()
               if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
                 echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
@@ -2375,7 +2399,19 @@ jobs:
                 echo "STAGE_ELAPSED_BEFORE_COMPILE_SECONDS=$elapsed_seconds"
                 echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
                 set +e
-                BUILD_FORCE_GN_GEN=()
+                # Recheck critical Brave GN inputs immediately before Siso starts.
+              for required in \
+                src/brave/third_party/bip39wally-core-native/BUILD.gn \
+                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
+                "$OUT/build.ninja" \
+                "$OUT/build.ninja.stamp"; do
+                if [[ ! -s "$required" ]]; then
+                  echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
+                  exit 43
+                fi
+              done
+              echo "SANDIUM_PRECOMPILE_INPUT_GATE=PASS brave_gn_deps_and_prepared_graph_present=true"
+              BUILD_FORCE_GN_GEN=()
                 if [[ "${SANDIUM_BUILD_OUTPUT_CACHE_HIT:-false}" != "true" ]]; then
                   echo "GN_GRAPH_MODE=FRESHLY_PREPARED_BEFORE_COMPILE"
                 else
