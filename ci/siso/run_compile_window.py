@@ -29,7 +29,7 @@ REMOTE_SIGNATURES = (
 )
 REGENERATE_NINJA = re.compile(r"regenerating ninja files", re.IGNORECASE)
 PROGRESS_LINE = re.compile(r"^\[[0-9]+/[0-9]+\]\s+\S+\s+F\s+(.*)$")
-TASK_PROGRESS = re.compile(r"^\\[(\\d+)/(\\d+)\\]")
+TASK_PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
 
 
 def emit(log: Any, message: str) -> None:
