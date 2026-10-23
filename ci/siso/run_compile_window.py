@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import codecs
 import json
+import hashlib
 import os
 import re
 import selectors
@@ -38,6 +39,39 @@ def emit(log: Any, message: str) -> None:
 
 def has_remote_signature(text: str) -> bool:
     return any(pattern.search(text) for pattern in REMOTE_SIGNATURES)
+
+
+def state_file_snapshot(path: Path) -> dict[str, Any]:
+    """Hash a Siso state file for before/after persistence diagnostics."""
+    result: dict[str, Any] = {"present": False, "bytes": 0, "sha256": None, "regular_file": False}
+    try:
+        if path.is_symlink() or not path.is_file():
+            return result
+        size = path.stat().st_size
+        result["bytes"] = size
+        result["present"] = size > 0
+        result["regular_file"] = True
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        result["sha256"] = digest.hexdigest()
+    except OSError as exc:
+        result["error"] = type(exc).__name__
+    return result
+
+
+def emit_state_snapshot(log: Any, out_dir: Path, phase: str) -> list[dict[str, Any]]:
+    snapshots = []
+    for name in (".siso_fs_state", ".siso_fs_state.journal"):
+        snap = state_file_snapshot(out_dir / name)
+        label = name.upper().replace(".", "_")
+        for field, value in snap.items():
+            emit(log, f"{phase}_{label}_{field.upper()}={value if value is not None else 'null'}")
+        snapshots.append(snap)
+    pair_valid = all(s.get("present") and s.get("sha256") for s in snapshots)
+    emit(log, f"{phase}_SISO_STATE_PAIR_VALID={str(pair_valid).lower()}")
+    return snapshots
 
 
 def count_outputs(out_dir: Path) -> tuple[int, int]:
@@ -282,13 +316,8 @@ def main() -> int:
     objects_before, outputs_before = count_outputs(out_dir)
     state_start: dict[str, tuple[bool, int]] = {}
     for state_name in (".siso_fs_state", ".siso_fs_state.journal"):
-        state_path = out_dir / state_name
-        try:
-            present = state_path.is_file() and not state_path.is_symlink()
-            size = state_path.stat().st_size if present else 0
-        except OSError:
-            present, size = False, 0
-        state_start[state_name] = (present, size)
+        snap = state_file_snapshot(out_dir / state_name)
+        state_start[state_name] = (bool(snap.get("present")), int(snap.get("bytes", 0)))
     current_frontier: set[str] = set()
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
@@ -352,10 +381,7 @@ def main() -> int:
         emit(log, f"RESTORED_BUILD_OUTPUT_COUNT={outputs_before}")
         emit(log, f"ACTION_FRONTIER_PRIOR_FILE_PRESENT={str(prior_frontier_file_present).lower()}")
         emit(log, f"ACTION_FRONTIER_PRIOR_FILE_BYTES={prior_frontier_file_bytes}")
-        for state_name, (present, size) in state_start.items():
-            state_label = state_name.upper().replace(".", "_")
-            emit(log, f"STAGE_START_{state_label}_PRESENT={str(present).lower()}")
-            emit(log, f"STAGE_START_{state_label}_BYTES={size}")
+        start_state_snapshots = emit_state_snapshot(log, out_dir, "STAGE_START")
         state_pair_valid = all(present and size > 0 for present, size in state_start.values())
         emit(log, f"STAGE_START_SISO_FS_STATE_PAIR_VALID={str(state_pair_valid).lower()}")
         checkpoint_archive = root / "sandium-checkpoint.tar.zst"
@@ -625,18 +651,22 @@ def main() -> int:
             encoding="utf-8",
         )
         emit(log, "SISO_STATE_PAIR_MEASUREMENT_PHASE=AFTER_SHUTDOWN")
-        for state_name in (".siso_fs_state", ".siso_fs_state.journal"):
-            state_path = out_dir / state_name
-            state_label = state_name.upper().replace(".", "_")
-            if state_path.is_file() and not state_path.is_symlink():
-                size = state_path.stat().st_size
-                emit(log, f"{state_label}_BYTES={size}")
-                emit(log, f"STAGE_END_{state_label}_PRESENT=true")
-                emit(log, f"STAGE_END_{state_label}_BYTES={size}")
-            else:
-                emit(log, f"{state_label}_PRESENT=false")
-                emit(log, f"STAGE_END_{state_label}_PRESENT=false")
-                emit(log, f"STAGE_END_{state_label}_BYTES=0")
+        end_state_snapshots = emit_state_snapshot(log, out_dir, "STAGE_END")
+        for index, before in enumerate(start_state_snapshots):
+            after = end_state_snapshots[index]
+            emit(log, f"SISO_STATE_TRANSITION_{index}_BEFORE_SHA256={before.get('sha256') or 'null'}")
+            emit(log, f"SISO_STATE_TRANSITION_{index}_AFTER_SHA256={after.get('sha256') or 'null'}")
+            emit(log, f"SISO_STATE_TRANSITION_{index}_CHANGED={str(before.get('sha256') != after.get('sha256')).lower()}")
+        emit(log, f"SISO_SHUTDOWN_FORCED_KILL={str(siso_forced_kill).lower()}")
+        emit(log, f"SISO_SHUTDOWN_STATUS={'FORCED_KILL' if siso_forced_kill else 'CLEAN'}")
+        if not all(s.get("present") and s.get("sha256") for s in end_state_snapshots):
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_MISSING_OR_INVALID_AFTER_SHUTDOWN")
+        elif not all(s.get("sha256") for s in start_state_snapshots):
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_AVAILABLE_AFTER_SHUTDOWN_START_STATE_ABSENT_OR_INVALID")
+        elif all(start_state_snapshots[i].get("sha256") == end_state_snapshots[i].get("sha256") for i in range(2)):
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_UNCHANGED")
+        else:
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_CHANGED_OR_REWRITTEN")
         emit(log, f"COMPILE_CHILD_EXIT_CODE={build_return_code}")
         emit(log, f"METRICS_JSON_BYTES={metrics_path.stat().st_size if metrics_path.is_file() else 0}")
 
