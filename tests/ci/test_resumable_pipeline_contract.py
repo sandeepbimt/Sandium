@@ -219,8 +219,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
     def test_compile_window_reports_siso_state_persistence_before_and_after_shutdown(self):
         wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
         self.assertIn("def state_file_snapshot(", wrapper)
-        self.assertIn("STAGE_START_SISO_STATE_PAIR_VALID", wrapper)
-        self.assertIn("STAGE_END_SISO_STATE_PAIR_VALID", wrapper)
+        self.assertIn('emit(log, f"STAGE_START_SISO_STATE_PAIR_VALID={str(state_pair_valid).lower()}")', wrapper)
+        self.assertIn('emit(log, f"{phase}_SISO_STATE_PAIR_VALID={str(pair_valid).lower()}")', wrapper)
         self.assertIn("SISO_STATE_TRANSITION_", wrapper)
         self.assertIn("SISO_SHUTDOWN_FORCED_KILL=", wrapper)
         self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_MISSING_OR_INVALID_AFTER_SHUTDOWN", wrapper)
