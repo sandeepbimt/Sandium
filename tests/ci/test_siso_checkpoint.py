@@ -114,8 +114,11 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
         self.assertFalse((self.output / ".siso_fs_state.journal").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
         self.assertTrue(object_file.is_file())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
 
     def test_pack_quarantines_siso_state_without_journal_and_preserves_outputs(self):
         (self.output / ".siso_fs_state.journal").unlink()
@@ -124,8 +127,10 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
         self.assertFalse((self.output / ".siso_fs_state").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
         self.assertTrue(object_file.is_file())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
 
     def test_pack_quarantines_dangling_siso_state_symlink(self):
         (self.output / ".siso_fs_state").unlink()
@@ -137,6 +142,8 @@ class CheckpointTests(unittest.TestCase):
         self.assertTrue(preserved.is_symlink())
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
         self.assertFalse((self.output / ".siso_fs_state.journal").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
 
     def test_pack_quarantines_empty_siso_state_or_journal(self):
         (self.output / ".siso_fs_state").write_bytes(b"")
