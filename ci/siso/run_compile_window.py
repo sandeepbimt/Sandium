@@ -627,17 +627,17 @@ def main() -> int:
         apk_ready = apk.is_file() and apk.stat().st_size >= 1_000_000
         if remote_metric_records > 0:
             emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=siso_metrics_json remote_executed_action_records={remote_metric_records}")
-        elif remote_log_records > 0:
-            # Some Siso versions buffer metrics_json until shutdown or omit the
-            # file after interruption. Accept only explicit per-action remote
-            # execution signatures from this run's reset INFO/output logs.
-            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=current_run_siso_action_logs remote_action_signatures={remote_log_records} metrics_records=0")
         elif apk_ready:
+            # A verified APK is a completed artifact, so it may be reused even
+            # when the current window's metrics are unavailable. This does not
+            # prove remote execution for an incomplete compile window.
             emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=verified_apk remote_execution_metrics_unavailable=true")
         else:
+            # INFO/stdout signatures are diagnostic only. Stage 1 had many
+            # signature matches but zero parsed remote-executed metric records.
             gate_failed = True
-            stop_reason = stop_reason or "no actual remote-executed Siso actions were evidenced by metrics or current-run per-action logs"
-            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0 remote_action_signatures=0 preflight_is_not_execution_proof=true")
+            stop_reason = stop_reason or "Siso metrics contain no verified remote-executed action records; log signatures are diagnostic only"
+            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records={remote_metric_records} remote_action_signatures={remote_log_records} log_signatures_are_not_execution_proof=true preflight_is_not_execution_proof=true")
         for key, value in metrics.items():
             emit(log, f"SISO_{key.upper()}={value}")
         emit(log, f"REMOTE_EXEC_LOG_SIGNATURE_COUNT={len(remote_signatures)}")
