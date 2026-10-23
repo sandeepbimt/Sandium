@@ -502,7 +502,12 @@ def main() -> int:
                     if label and label.lower() != "regenerating ninja files":
                         current_frontier.add(label)
                 if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
+                    # Siso's per-action INFO/output stream is a second, current-run
+                    # evidence source when metrics_json is absent or buffered. These
+                    # signatures are deliberately action-specific; backend/config
+                    # messages and the separate preflight do not satisfy this gate.
                     remote_signatures.add(line.strip())
+                    remote_seen = True
 
         try:
             while True:
@@ -589,6 +594,7 @@ def main() -> int:
                         for line in info_delta.splitlines():
                             if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
                                 remote_signatures.add(line.strip())
+                                remote_seen = True
                 if remote_seen and not gate_failed and not remote_gate_pass_logged:
                     emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS seconds={int(time.monotonic()-started)}")
                     remote_gate_pass_logged = True
@@ -648,12 +654,22 @@ def main() -> int:
             emit(log, f"SISO_METRICS_PARSE=FAIL error={exc}")
             gate_failed = True
             metrics = {}
-        if metrics.get("remote_executed_action_records", 0) == 0 and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
-            gate_failed = True
-            stop_reason = stop_reason or "no actual remote-executed Siso actions were recorded in this compile window"
-            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0 preflight_is_not_execution_proof=true")
+        remote_metric_records = metrics.get("remote_executed_action_records", 0)
+        remote_log_records = len(remote_signatures)
+        apk_ready = apk.is_file() and apk.stat().st_size >= 1_000_000
+        if remote_metric_records > 0:
+            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=siso_metrics_json remote_executed_action_records={remote_metric_records}")
+        elif remote_log_records > 0:
+            # Some Siso versions buffer metrics_json until shutdown or omit the
+            # file after interruption. Accept only explicit per-action remote
+            # execution signatures from this run's reset INFO/output logs.
+            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=current_run_siso_action_logs remote_action_signatures={remote_log_records} metrics_records=0")
+        elif apk_ready:
+            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=verified_apk remote_execution_metrics_unavailable=true")
         else:
-            emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS remote_executed_action_records={metrics.get('remote_executed_action_records', 0)}")
+            gate_failed = True
+            stop_reason = stop_reason or "no actual remote-executed Siso actions were evidenced by metrics or current-run per-action logs"
+            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_executed_action_records=0 remote_action_signatures=0 preflight_is_not_execution_proof=true")
         for key, value in metrics.items():
             emit(log, f"SISO_{key.upper()}={value}")
         emit(log, f"REMOTE_EXEC_LOG_SIGNATURE_COUNT={len(remote_signatures)}")
