@@ -2881,10 +2881,11 @@ workflows:
   # Controlled bootstrap workflow: run only Stage 1 so its checkpoint can
   # be inspected before any continuation stage is scheduled.
   sandium-stage1-bootstrap:
+    # Stage 1 can run in safe preflight-only mode with compile windows disabled.
+    # Compilation is independently gated inside the job by run_sandium_compile_windows.
     when:
       and:
         - << pipeline.parameters.run_sandium_stage1_bootstrap >>
-        - << pipeline.parameters.run_sandium_compile_windows >>
         - not: << pipeline.parameters.run_sandium_android_apk_build >>
     jobs:
       - stage-1-source-foundation
