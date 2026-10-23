@@ -120,8 +120,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn('SISO_STATE="$OUT/.siso_fs_state"', segment)
         self.assertIn('SISO_JOURNAL="$OUT/.siso_fs_state.journal"', segment)
-        self.assertIn('[[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE"', segment)
-        self.assertIn('[[ -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL"', segment)
+        # YAML block scalars preserve a newline between the two halves of this
+        # shell condition; normalize whitespace so this contract checks semantics,
+        # not the exact line wrapping in CircleCI's config.
+        normalized = " ".join(segment.split())
+        self.assertIn('[[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE" && -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]', normalized)
         self.assertIn("BUILD_OUTPUT_CACHE=OUTPUT_ONLY_SISO_STATE_MISSING", segment)
         self.assertIn('if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]]', segment)
 
