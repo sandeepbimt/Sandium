@@ -81,11 +81,12 @@ def quarantine_incomplete_siso_checkpoint_pair(output: Path, root: Path, stage: 
 
 
 def validate_siso_checkpoint_pair(output: Path, *, require_pair: bool = False) -> None:
-    """Validate Siso state; optionally require it for a resumable checkpoint.
+    """Validate an optional Siso state pair in a compiled-output checkpoint.
 
-    Restore remains backward-compatible with older output-only checkpoints, but
-    newly packed checkpoints must carry both nonempty Siso state files. Otherwise
-    they can restore compiled outputs while silently losing filesystem-state reuse.
+    A complete pair preserves Siso filesystem-state reuse. When Siso omits the
+    pair at shutdown, the checkpoint can still preserve compatible compiled
+    outputs so Ninja/Siso can schedule only stale or missing outputs. Never
+    fabricate state or accept a one-sided/invalid pair.
     """
     state_path = output / ".siso_fs_state"
     journal_path = output / ".siso_fs_state.journal"
@@ -145,7 +146,9 @@ def list_members(archive: Path) -> list[str]:
 
 
 def metadata_for(output: Path, state: dict[str, Any], stage: str) -> dict[str, Any]:
-    validate_siso_checkpoint_pair(output, require_pair=True)
+    # Compiled outputs remain reusable even when Siso drops its state file at shutdown.
+    # The checkpoint manifest records missing state hashes as null; never fabricate Siso state.
+    validate_siso_checkpoint_pair(output, require_pair=False)
     paths = {
         "state_sha256": output / STATE_NAME,
         "args_gn_sha256": output / "args.gn",
@@ -222,6 +225,7 @@ def pack(root: Path, stage: str) -> None:
     print("SANDIUM_CHECKPOINT_STAGE={}".format(stage))
     print("SANDIUM_CHECKPOINT_BYTES={}".format(archive.stat().st_size))
     print("SANDIUM_CHECKPOINT_SHA256={}".format(meta["archive_sha256"]))
+    print("SANDIUM_CHECKPOINT_RESUMABILITY={}".format("RESUMABLE_SISO_STATE" if meta.get("siso_state_sha256") and meta.get("siso_journal_sha256") else "OUTPUTS_ONLY_INCREMENTAL"))
 
 
 def restore(root: Path) -> int:
