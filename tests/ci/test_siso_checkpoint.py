@@ -84,6 +84,19 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("SANDIUM_CHECKPOINT_RESTORE=REJECTED", result.stdout)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "existing output")
 
+    def test_pack_rejects_checkpoint_when_both_siso_state_files_are_absent(self):
+        (self.output / ".siso_fs_state").unlink()
+        (self.output / ".siso_fs_state.journal").unlink()
+        object_file = self.output / "obj/sample/sample.o"
+
+        result = self.invoke("pack", "--stage", "stage-1")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("without Siso filesystem state and journal", result.stderr)
+        self.assertTrue(object_file.is_file(), "compiled output must be preserved")
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
+        self.assertFalse((self.root / "sandium-checkpoint.meta").exists())
+
     def test_pack_rejects_bad_chromium_version(self):
         path = self.output / ".sandium-build-state.json"
         state = json.loads(path.read_text(encoding="utf-8"))
