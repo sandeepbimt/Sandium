@@ -1838,10 +1838,10 @@ jobs:
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
               # Recheck critical Brave GN inputs immediately before Siso starts.
               for required in \
-                src/brave/third_party/bip39wally-core-native/BUILD.gn \
-                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
-                "$OUT/build.ninja" \
-                "$OUT/build.ninja.stamp"; do
+                "$HOME/project/src/brave/third_party/bip39wally-core-native/BUILD.gn" \
+                "$HOME/project/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" \
+                "$HOME/project/$OUT/build.ninja" \
+                "$HOME/project/$OUT/build.ninja.stamp"; do
                 if [[ ! -s "$required" ]]; then
                   echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
                   exit 43
@@ -2110,10 +2110,10 @@ jobs:
             echo "COMPILE_WINDOW_SECONDS=$remaining_compile_seconds"
               # Recheck critical Brave GN inputs immediately before Siso starts.
               for required in \
-                src/brave/third_party/bip39wally-core-native/BUILD.gn \
-                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
-                "$OUT/build.ninja" \
-                "$OUT/build.ninja.stamp"; do
+                "$HOME/project/src/brave/third_party/bip39wally-core-native/BUILD.gn" \
+                "$HOME/project/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" \
+                "$HOME/project/$OUT/build.ninja" \
+                "$HOME/project/$OUT/build.ninja.stamp"; do
                 if [[ ! -s "$required" ]]; then
                   echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
                   exit 43
@@ -2401,10 +2401,10 @@ jobs:
                 set +e
                 # Recheck critical Brave GN inputs immediately before Siso starts.
               for required in \
-                src/brave/third_party/bip39wally-core-native/BUILD.gn \
-                src/brave/vendor/bat-native-tweetnacl/BUILD.gn \
-                "$OUT/build.ninja" \
-                "$OUT/build.ninja.stamp"; do
+                "$HOME/project/src/brave/third_party/bip39wally-core-native/BUILD.gn" \
+                "$HOME/project/src/brave/vendor/bat-native-tweetnacl/BUILD.gn" \
+                "$HOME/project/$OUT/build.ninja" \
+                "$HOME/project/$OUT/build.ninja.stamp"; do
                 if [[ ! -s "$required" ]]; then
                   echo "SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=$required"
                   exit 43
