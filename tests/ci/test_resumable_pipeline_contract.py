@@ -41,10 +41,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
         end = CONFIG.index("  sandium-android-preflight:\n", start)
         workflow = CONFIG[start:end]
         self.assertIn("<< pipeline.parameters.run_sandium_stage1_bootstrap >>", workflow)
-        self.assertIn("<< pipeline.parameters.run_sandium_compile_windows >>", workflow)
+        self.assertNotIn("<< pipeline.parameters.run_sandium_compile_windows >>", workflow)
         self.assertIn("not: << pipeline.parameters.run_sandium_android_apk_build >>", workflow)
         self.assertIn("      - stage-1-source-foundation", workflow)
         self.assertNotIn("stage-2-graph-and-compile-window", workflow)
+        # The workflow must be selectable for preflight-only runs where compile windows are false.
+        self.assertIn(
+            'if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then',
+            job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window"),
+        )
 
     def test_all_five_production_stages_are_serialized(self):
         names = [
