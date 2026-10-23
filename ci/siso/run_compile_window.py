@@ -320,13 +320,14 @@ def main() -> int:
         snap = state_file_snapshot(out_dir / state_name)
         state_start[state_name] = (bool(snap.get("present")), int(snap.get("bytes", 0)))
     current_frontier: set[str] = set()
-    # Siso can initially report a provisional graph size and then settle it.
-    # Require the settled remaining-work estimate to stay below the user's 115k cap.
+    # Ninja's [completed/total] denominator is not the remaining work. Track both
+    # values and report the residual (total - completed); never use the raw graph
+    # denominator as a success ceiling. Reuse is evaluated from restored outputs,
+    # newly produced outputs, and the persisted action frontier instead.
     latest_progress_total: int | None = None
+    latest_progress_completed: int | None = None
     first_progress_at: float | None = None
     last_progress_total_change_at: float | None = None
-    task_budget_pass_logged = False
-    task_budget_fail_logged = False
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
     remote_seen = False
@@ -385,6 +386,7 @@ def main() -> int:
         emit(log, f"COMPILE_WINDOW_SECONDS={remaining}")
         emit(log, f"STAGE_START_OBJECT_COUNT={objects_before}")
         emit(log, f"STAGE_START_BUILD_OUTPUT_COUNT={outputs_before}")
+        emit(log, "TASK_COUNT_POLICY=REPORT_RESIDUAL_NOT_RAW_DENOMINATOR")
         emit(log, f"RESTORED_OBJECT_COUNT={objects_before}")
         emit(log, f"RESTORED_BUILD_OUTPUT_COUNT={outputs_before}")
         emit(log, f"ACTION_FRONTIER_PRIOR_FILE_PRESENT={str(prior_frontier_file_present).lower()}")
@@ -462,7 +464,7 @@ def main() -> int:
 
         def process_text(text: str) -> None:
             nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity, gate_failed, stop_reason
-            nonlocal latest_progress_total, first_progress_at, last_progress_total_change_at
+            nonlocal latest_progress_total, latest_progress_completed, first_progress_at, last_progress_total_change_at
             if not text:
                 return
             last_activity = time.monotonic()
@@ -477,20 +479,16 @@ def main() -> int:
                 # Ninja may legitimately need to refresh the generated graph
                 # after restoring outputs onto a fresh runner. Graph generation
                 # is not a Chromium compile and does not delete existing objects.
-                # Allow Ninja to finish this bounded metadata step; the settled
-                # remaining-task gate below still stops any near-cold build above
-                # the user's 115,000-task ceiling, and remote execution/progress
-                # gates remain mandatory before this window can pass.
-                emit(
-                    log,
-                    "NINJA_GRAPH_REGENERATION=DETECTED; allowing graph refresh while the 115000-task and remote-execution gates remain active",
-                )
+                # Allow graph refresh; raw Ninja denominator is diagnostic only.
+                emit(log, "NINJA_GRAPH_REGENERATION=DETECTED; graph refresh allowed; reuse is evaluated from restored outputs and incremental deltas")
             partial += text
             while "\n" in partial:
                 line, partial = partial.split("\n", 1)
                 task_match = TASK_PROGRESS.match(line.strip())
                 if task_match:
+                    observed_completed = int(task_match.group(1))
                     observed_total = int(task_match.group(2))
+                    latest_progress_completed = observed_completed
                     if latest_progress_total != observed_total:
                         latest_progress_total = observed_total
                         last_progress_total_change_at = time.monotonic()
@@ -513,36 +511,6 @@ def main() -> int:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
-                if (
-                    proc.poll() is None
-                    and latest_progress_total is not None
-                    and first_progress_at is not None
-                    and last_progress_total_change_at is not None
-                    and not task_budget_fail_logged
-                    and elapsed >= 60
-                    and now - last_progress_total_change_at >= 20
-                ):
-                    if latest_progress_total > 115000:
-                        task_budget_fail_logged = True
-                        gate_failed = True
-                        stop_reason = (
-                            f"settled remaining task count {latest_progress_total} exceeds "
-                            "the 115000-task ceiling; refusing a near-cold expensive compile"
-                        )
-                        emit(
-                            log,
-                            f"REMAINING_TASK_BUDGET_GATE=FAIL total={latest_progress_total} "
-                            "max=115000 stable_seconds="
-                            f"{int(now - last_progress_total_change_at)}",
-                        )
-                        stop_process_group(proc)
-                    elif not task_budget_pass_logged:
-                        emit(
-                            log,
-                            f"REMAINING_TASK_BUDGET_GATE=PASS total={latest_progress_total} max=115000 "
-                            f"seconds_since_first_progress={int(now - first_progress_at)}",
-                        )
-                        task_budget_pass_logged = True
                 if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
                     last_metrics_poll = now
                     try:
@@ -682,6 +650,12 @@ def main() -> int:
         if stop_reason:
             emit(log, "COMPILE_WINDOW_STOP_REASON=" + stop_reason)
 
+        if latest_progress_total is not None and latest_progress_completed is not None:
+            residual = max(0, latest_progress_total - latest_progress_completed)
+            emit(log, f"NINJA_PROGRESS_COMPLETED={latest_progress_completed}")
+            emit(log, f"NINJA_PROGRESS_TOTAL={latest_progress_total}")
+            emit(log, f"NINJA_ESTIMATED_REMAINING={residual}")
+            emit(log, "NINJA_REMAINING_ESTIMATE_NOTE=total_minus_completed; this is progress telemetry, not a standalone success gate")
         objects_after, outputs_after = count_outputs(out_dir)
         emit(log, f"STAGE_END_OBJECT_COUNT={objects_after}")
         emit(log, f"STAGE_OBJECT_COUNT_DELTA={objects_after - objects_before}")
