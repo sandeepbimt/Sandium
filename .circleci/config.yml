@@ -334,7 +334,7 @@ commands:
                 name: Discover and restore best compatible checkpoint from prior workflows
                 command: |
                   set -euo pipefail
-                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
+                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project" --require-siso-state
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
