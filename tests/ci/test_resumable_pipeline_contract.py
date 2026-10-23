@@ -95,6 +95,20 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
         self.assertIn("CROSS_WORKFLOW_CHECKPOINT=RESTORED", (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8"))
 
+    def test_preflight_only_stages_never_pack_or_publish_resumable_checkpoints(self):
+        for stage in range(1, 6):
+            with self.subTest(stage=stage):
+                pack_start = CONFIG.index(f"name: Pack stage-{stage} cumulative Siso checkpoint")
+                pack_end = CONFIG.index(f"name: Publish stage-{stage} checkpoint files", pack_start)
+                pack = CONFIG[pack_start:pack_end]
+                self.assertIn('run_sandium_compile_windows >>" != "true"', pack)
+                self.assertIn("SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT", pack)
+                publish_start = pack_end
+                publish_end = CONFIG.find("\n      - ", publish_start + 1)
+                publish = CONFIG[publish_start:publish_end if publish_end >= 0 else len(CONFIG)]
+                self.assertIn('run_sandium_compile_windows >>" != "true"', publish)
+                self.assertIn("CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED", publish)
+
     def test_stage_one_resumes_prior_work_and_only_cold_starts_after_complete_discovery(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn("SANDIUM_CHECKPOINT_RESUME=RESTORED_PRIOR_COMPILED_WORK", segment)
