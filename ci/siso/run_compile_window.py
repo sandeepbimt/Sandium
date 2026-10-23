@@ -589,7 +589,7 @@ def main() -> int:
                         for line in info_delta.splitlines():
                             if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
                                 remote_signatures.add(line.strip())
-                if remote_seen and not gate_failed and not regeneration_seen and not remote_gate_pass_logged:
+                if remote_seen and not gate_failed and not remote_gate_pass_logged:
                     emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS seconds={int(time.monotonic()-started)}")
                     remote_gate_pass_logged = True
                 if proc.poll() is not None and child_exit_seen_at is None:
