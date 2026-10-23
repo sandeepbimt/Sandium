@@ -326,6 +326,7 @@ def main() -> int:
     first_progress_at: float | None = None
     last_progress_total_change_at: float | None = None
     task_budget_pass_logged = False
+    task_budget_fail_logged = False
     metrics: dict[str, int] = {}
     remote_signatures: set[str] = set()
     remote_seen = False
@@ -512,10 +513,12 @@ def main() -> int:
                     and latest_progress_total is not None
                     and first_progress_at is not None
                     and last_progress_total_change_at is not None
+                    and not task_budget_fail_logged
                     and elapsed >= 60
                     and now - last_progress_total_change_at >= 20
                 ):
                     if latest_progress_total > 115000:
+                        task_budget_fail_logged = True
                         gate_failed = True
                         stop_reason = (
                             f"settled remaining task count {latest_progress_total} exceeds "
