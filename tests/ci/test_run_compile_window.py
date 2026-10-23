@@ -45,15 +45,17 @@ class ResetSisoInfoTests(unittest.TestCase):
             "compile-window script references undeclared argparse attributes",
         )
 
-    def test_ninja_graph_regeneration_fails_closed_instead_of_rebuilding(self):
+    def test_ninja_graph_regeneration_is_allowed_but_build_gates_remain_mandatory(self):
         source = MODULE_PATH.read_text(encoding="utf-8")
-        self.assertIn("NINJA_GRAPH_REGENERATION=FAIL; aborting this compile window", source)
-        self.assertIn("NINJA_GRAPH_REGENERATION=FAIL_CLOSED", source)
-        self.assertIn('stop_reason = "Ninja attempted to regenerate the prepared/restored graph"', source)
-        self.assertIn("stop_process_group(proc, grace_seconds=2)", source)
+        self.assertIn("NINJA_GRAPH_REGENERATION=DETECTED; allowing graph refresh", source)
+        self.assertIn("NINJA_GRAPH_REGENERATION=ALLOWED_FOR_GRAPH_REFRESH", source)
+        self.assertIn("115000-task", source)
+        self.assertIn("REMAINING_TASK_BUDGET_GATE=FAIL", source)
         self.assertIn("preflight_is_not_execution_proof=true", source)
         self.assertIn("INCREMENTAL_PROGRESS_GATE=FAIL", source)
         self.assertIn("ACTION_FRONTIER_CUMULATIVE_UNIQUE_LABEL_COUNT=", source)
+        self.assertNotIn("NINJA_GRAPH_REGENERATION=FAIL_CLOSED", source)
+        self.assertNotIn('stop_reason = "Ninja attempted to regenerate the prepared/restored graph"', source)
         self.assertNotIn("source=validated_current_workflow_preflight remote_executed_action_records=0", source)
 
     def test_replaces_symlink_without_truncating_its_target(self):
