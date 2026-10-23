@@ -90,6 +90,13 @@ class ResumablePipelineContractTests(unittest.TestCase):
         ]
         self.assertEqual(positions, sorted(positions))
 
+    def test_production_stage_one_requires_resumable_siso_state(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        self.assertIn(
+            'checkpoint_artifact_discovery.py --root "$HOME/project" --require-siso-state',
+            segment,
+        )
+
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
