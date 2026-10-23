@@ -138,7 +138,7 @@ class ResumablePipelineContractTests(unittest.TestCase):
             with self.subTest(stage=current):
                 segment = job_segment(current, following)
                 gate = segment.index("SANDIUM_PRECOMPILE_INPUT_GATE=FAIL missing=")
-                compile_window = segment.index(f"run_compile_window.py --root")
+                compile_window = segment.index("run_compile_window.py")
                 self.assertLess(gate, compile_window)
                 self.assertIn("third_party/bip39wally-core-native/BUILD.gn", segment[gate:compile_window])
                 self.assertIn("vendor/bat-native-tweetnacl/BUILD.gn", segment[gate:compile_window])
