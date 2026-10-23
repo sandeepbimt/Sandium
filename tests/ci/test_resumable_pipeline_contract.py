@@ -116,6 +116,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
                 self.assertIn('run_sandium_compile_windows >>" != "true"', publish)
                 self.assertIn("CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED", publish)
 
+    def test_output_only_cache_cannot_bypass_resumable_checkpoint_gate(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        self.assertIn('SISO_STATE="$OUT/.siso_fs_state"', segment)
+        self.assertIn('SISO_JOURNAL="$OUT/.siso_fs_state.journal"', segment)
+        self.assertIn('[[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE"', segment)
+        self.assertIn('[[ -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL"', segment)
+        self.assertIn("BUILD_OUTPUT_CACHE=OUTPUT_ONLY_SISO_STATE_MISSING", segment)
+        self.assertIn('if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]]', segment)
+
     def test_stage_one_resumes_prior_work_and_only_cold_starts_after_complete_discovery(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn("SANDIUM_CHECKPOINT_RESUME=RESTORED_PRIOR_COMPILED_WORK", segment)
