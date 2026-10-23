@@ -104,12 +104,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         ]
         self.assertEqual(positions, sorted(positions))
 
-    def test_production_stage_one_requires_resumable_siso_state(self):
+    def test_production_stage_one_accepts_compatible_output_only_checkpoints(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
-        self.assertIn(
-            'checkpoint_artifact_discovery.py --root "$HOME/project" --require-siso-state',
-            segment,
-        )
+        self.assertIn('checkpoint_artifact_discovery.py --root "$HOME/project"', segment)
+        self.assertNotIn("--require-siso-state", segment)
+        self.assertIn("SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS", segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
@@ -130,17 +129,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
                 self.assertIn('run_sandium_compile_windows >>" != "true"', publish)
                 self.assertIn("CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED", publish)
 
-    def test_output_only_cache_cannot_bypass_resumable_checkpoint_gate(self):
+    def test_output_only_cache_reuses_compatible_compiled_outputs(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
         self.assertIn('SISO_STATE="$OUT/.siso_fs_state"', segment)
         self.assertIn('SISO_JOURNAL="$OUT/.siso_fs_state.journal"', segment)
-        # YAML block scalars preserve a newline between the two halves of this
-        # shell condition; normalize whitespace so this contract checks semantics,
-        # not the exact line wrapping in CircleCI's config.
         normalized = " ".join(segment.split())
         self.assertIn('[[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE" && -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]', normalized)
-        self.assertIn("BUILD_OUTPUT_CACHE=OUTPUT_ONLY_SISO_STATE_MISSING", segment)
-        self.assertIn('if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]]', segment)
+        self.assertIn("BUILD_OUTPUT_CACHE=COMPATIBLE_OUTPUTS_ONLY", segment)
+        self.assertIn('if [[ -d "$OUT" ]] &&', segment)
+        self.assertNotIn('if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]]', segment)
 
     def test_stage_one_resumes_prior_work_and_only_cold_starts_after_complete_discovery(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
