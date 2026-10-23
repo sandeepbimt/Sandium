@@ -108,6 +108,14 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual((self.output / "obj/sample/sample.o").read_bytes(), expected)
         self.assertTrue((self.output / "build.ninja").is_file())
 
+    def test_compile_checkpoint_requires_siso_state_when_requested(self):
+        (self.output / ".siso_fs_state").unlink()
+        (self.output / ".siso_fs_state.journal").unlink()
+        result = self.invoke("pack", "--stage", "stage-1", "--require-siso-state")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("Cannot pack a resumable checkpoint without Siso filesystem state and journal", result.stderr)
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
+
     def test_pack_rejects_bad_chromium_version(self):
         path = self.output / ".sandium-build-state.json"
         state = json.loads(path.read_text(encoding="utf-8"))
