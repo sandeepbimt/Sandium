@@ -348,9 +348,19 @@ commands:
             OUT=src/out/android_Debug_arm64
             STATE=src/brave/ci/siso/build_state.py
             cache_hit=false
-            if [[ -d "$OUT" ]] && python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
+            # Output metadata alone is insufficient: resuming Siso requires a
+            # non-empty regular state file AND journal from the same checkpoint.
+            SISO_STATE="$OUT/.siso_fs_state"
+            SISO_JOURNAL="$OUT/.siso_fs_state.journal"
+            siso_pair_valid=false
+            if [[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE" &&
+                  -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]; then
+              siso_pair_valid=true
+            fi
+            if [[ -d "$OUT" && "$siso_pair_valid" == "true" ]] &&
+               python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
               cache_hit=true
-              echo "BUILD_OUTPUT_CACHE=COMPATIBLE"
+              echo "BUILD_OUTPUT_CACHE=COMPATIBLE_RESUMABLE_SISO"
               if python3 "$STATE" check --mode compiled --commit "$CIRCLE_SHA1"; then
                 echo 'export SANDIUM_COMPILED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               fi
@@ -358,8 +368,13 @@ commands:
                 echo 'export SANDIUM_VERIFIED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               fi
             else
-              echo "BUILD_OUTPUT_CACHE=MISS_OR_INCOMPATIBLE stage=$STAGE_INDEX"
-              # Keep output intact until Stage 1 has proven no compatible checkpoint exists.
+              if [[ -d "$OUT" && "$siso_pair_valid" != "true" ]]; then
+                echo "BUILD_OUTPUT_CACHE=OUTPUT_ONLY_SISO_STATE_MISSING stage=$STAGE_INDEX"
+                echo "SANDIUM_CHECKPOINT_RESUMABILITY=REJECTED_MISSING_STATE_PAIR"
+              else
+                echo "BUILD_OUTPUT_CACHE=MISS_OR_INCOMPATIBLE stage=$STAGE_INDEX"
+              fi
+              # Keep output intact until Stage 1 has proven no compatible resumable checkpoint exists.
             fi
             if [[ "$cache_hit" == "true" ]]; then
               echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
