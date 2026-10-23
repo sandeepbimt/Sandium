@@ -3,6 +3,11 @@ parameters:
   run_sandium_android_apk_build:
     type: boolean
     default: false
+  # Explicit Stage 1-only bootstrap: performs the guarded first compile window
+  # and publishes a resumable checkpoint without scheduling Stages 2–5.
+  run_sandium_stage1_bootstrap:
+    type: boolean
+    default: false
   run_sandium_ci_smoke_test:
     type: boolean
     default: false
@@ -2863,6 +2868,16 @@ workflows:
     when: << pipeline.parameters.run_sandium_fast_regression >>
     jobs:
       - sandium-fast-regression-gate
+  # Controlled bootstrap workflow: run only Stage 1 so its checkpoint can
+  # be inspected before any continuation stage is scheduled.
+  sandium-stage1-bootstrap:
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_stage1_bootstrap >>
+        - << pipeline.parameters.run_sandium_compile_windows >>
+        - not: << pipeline.parameters.run_sandium_android_apk_build >>
+    jobs:
+      - stage-1-source-foundation
   sandium-android-preflight:
     when:
       and:
