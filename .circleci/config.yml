@@ -1240,7 +1240,7 @@ jobs:
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
             fi
-            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-1
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-1 --require-siso-state
       - run:
           name: Publish stage-1 checkpoint files for cross-workflow recovery
           command: |
@@ -1678,7 +1678,7 @@ jobs:
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
             fi
-            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-2 --require-siso-state
       - run:
           name: Publish stage-2 checkpoint files for cross-workflow recovery
           command: |
@@ -1950,7 +1950,7 @@ jobs:
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
             fi
-            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-3 --require-siso-state
       - run:
           name: Publish stage-3 checkpoint files for cross-workflow recovery
           command: |
@@ -2231,7 +2231,7 @@ jobs:
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
             fi
-            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-4 --require-siso-state
       - run:
           name: Publish stage-4 checkpoint files for cross-workflow recovery
           command: |
@@ -2533,7 +2533,7 @@ jobs:
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
             fi
-            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5
+            python3 src/brave/ci/siso/checkpoint.py pack --root "$HOME/project" --stage stage-5 --require-siso-state
       - run:
           name: Publish stage-5 checkpoint files for cross-workflow recovery
           command: |
