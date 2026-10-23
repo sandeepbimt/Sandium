@@ -126,6 +126,7 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
         self.assertFalse((self.output / ".siso_fs_state").exists())
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
+        self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
         self.assertTrue(object_file.is_file())
         self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
 
