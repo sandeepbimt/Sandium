@@ -254,8 +254,6 @@ def main() -> int:
     parser.add_argument("--stage-start-epoch-file", type=Path, required=True)
     parser.add_argument("--max-stage-seconds", type=int, default=3300)
     parser.add_argument("--handover-reserve-seconds", type=int, default=600)
-    parser.add_argument("--remote-execution-grace-seconds", type=int, default=300,
-                        help="stop promptly if the real Chromium build records no remote-executed Siso action")
     parser.add_argument("--shutdown-grace-seconds", type=int, default=360,
                         help="allow Siso to flush state/journal after SIGINT before escalating")
     parser.add_argument("--metrics-poll-interval-seconds", type=int, default=15)
@@ -327,7 +325,6 @@ def main() -> int:
         print("SANDIUM_REMOTE_PREFLIGHT=FAIL", file=sys.stderr)
         print("SANDIUM_REMOTE_PREFLIGHT_REASON=" + str(exc), file=sys.stderr)
         return 126
-    remote_preflight_passed = True
 
     prior_frontier_path = root / "sandium-action-frontier.txt"
     prior_frontier_file_present = prior_frontier_path.is_file()
@@ -556,7 +553,12 @@ def main() -> int:
                     # action records from this run's Siso metrics can open the gate.
                     remote_signatures.add(line.strip())
 
-        emit(log, f"REMOTE_EXECUTION_STARTUP_DEADLINE_SECONDS={args.remote_execution_grace_seconds}")
+        # A workflow-bound uncached C++ probe already proved this REAPI backend,
+        # and the build uses --strict_remote. A second wall-clock deadline can
+        # falsely abort before Siso flushes its metrics JSONL; judge the actual
+        # compile from final structured metrics after Siso exits.
+        emit(log, "REMOTE_EXECUTION_STARTUP_DEADLINE_ACTIVE=false")
+        emit(log, "REMOTE_EXECUTION_POLICY=WORKFLOW_PREFLIGHT_PLUS_STRICT_REMOTE_AND_FINAL_METRICS")
         emit(log, f"SISO_SHUTDOWN_GRACE_SECONDS={args.shutdown_grace_seconds}")
         try:
             while True:
@@ -574,15 +576,6 @@ def main() -> int:
                         metrics_now = {"remote_executed_action_records": 0}
                     if metrics_prove_remote_execution(metrics_now):
                         remote_seen = True
-                if (proc.poll() is None and not remote_seen and shutdown_requested_at is None
-                        and elapsed >= args.remote_execution_grace_seconds):
-                    gate_failed = True
-                    emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_action_deadline_expired=true")
-                    request_graceful_shutdown(
-                        "no uncached remote-executed Siso action within "
-                        f"{args.remote_execution_grace_seconds} seconds; refusing a long local-only compile"
-                    )
-
                 if proc.poll() is None and shutdown_requested_at is None and elapsed >= remaining:
                     timeout_seen = True
                     emit(log, f"COMPILE_WINDOW_TIMEOUT=PASS timeout_seconds={remaining}")
