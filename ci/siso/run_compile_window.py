@@ -28,6 +28,11 @@ REMOTE_SIGNATURES = (
     re.compile(r"exec remote execute", re.IGNORECASE),
 )
 REGENERATE_NINJA = re.compile(r"regenerating ninja files", re.IGNORECASE)
+REMOTE_WORKDIR_INPUT_TREE_ERROR = re.compile(
+    r"(?:working directory.{0,100}(?:not an input directory|not found in input tree)|"
+    r"(?:not an input directory|not found in input tree).{0,100}working directory)",
+    re.IGNORECASE,
+)
 PROGRESS_LINE = re.compile(r"^\[[0-9]+/[0-9]+\]\s+\S+\s+F\s+(.*)$")
 TASK_PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
 
@@ -552,6 +557,14 @@ def main() -> int:
                     # authoritative execution evidence; only parsed uncached remote
                     # action records from this run's Siso metrics can open the gate.
                     remote_signatures.add(line.strip())
+                if REMOTE_WORKDIR_INPUT_TREE_ERROR.search(line):
+                    gate_failed = True
+                    stop_reason = "REAPI rejected action because working directory is absent from the remote input tree"
+                    emit(log, "REAPI_WORKDIR_INPUT_TREE_GATE=FAIL")
+                    emit(log, "REAPI_WORKDIR_INPUT_TREE_DIAGNOSTIC=" + line.strip()[:1000])
+                    # Stop this compile window rather than spending the remaining
+                    # stage budget on an action-level REAPI precondition failure.
+                    request_graceful_shutdown(stop_reason)
 
         # A workflow-bound uncached C++ probe already proved this REAPI backend,
         # and the build uses --strict_remote. A second wall-clock deadline can
