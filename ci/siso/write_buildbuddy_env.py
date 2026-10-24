@@ -149,6 +149,12 @@ def apply_config(core_dir: Path, environ: Mapping[str, str]) -> Path:
     if use_googlechrome_value not in ("true", "false"):
         raise ValueError("SANDIUM_USE_GOOGLECHROME_SISO_CONFIG must be true or false")
     use_googlechrome_siso_config = use_googlechrome_value == "true"
+    if use_googlechrome_siso_config:
+        raise ValueError(
+            "SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=true is not supported with "
+            "the external BuildBuddy REAPI backend; Chromium reserves this "
+            "preset's expanded non-Clang remote actions for Google RBE"
+        )
     block = render_block(
         core_dir, address, instance, siso_cache_dir,
         use_googlechrome_siso_config=use_googlechrome_siso_config,
