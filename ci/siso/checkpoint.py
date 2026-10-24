@@ -48,20 +48,34 @@ def _path_entry_exists(path: Path) -> bool:
 
 
 def quarantine_incomplete_siso_checkpoint_pair(output: Path, root: Path, stage: str) -> None:
-    """Preserve, but exclude, an unusable partial Siso state/journal pair.
+    """Quarantine invalid Siso metadata without mistaking clean shutdown for failure.
 
-    A one-sided or malformed pair cannot safely resume Siso state. Move any
-    present entries outside the checkpointed output tree, keeping all compiled
-    outputs intact. Siso can rebuild its metadata from the retained outputs.
+    Siso persists its complete filesystem state to .siso_fs_state and normally
+    removes .siso_fs_state.journal on clean close because journal entries have
+    already been folded into the saved state. Therefore a valid base state with
+    no journal is a normal, resumable checkpoint. A journal without a valid
+    base state is not independently resumable and must be preserved separately.
     """
     state_path = output / ".siso_fs_state"
     journal_path = output / ".siso_fs_state.journal"
-    paths = (state_path, journal_path)
-    valid = all(
-        path.is_file() and not path.is_symlink() and path.stat().st_size > 0
-        for path in paths
+    state_valid = (
+        state_path.is_file() and not state_path.is_symlink()
+        and state_path.stat().st_size > 0
     )
-    if valid or not any(_path_entry_exists(path) for path in paths):
+    journal_entry = _path_entry_exists(journal_path)
+    journal_valid = (
+        journal_path.is_file() and not journal_path.is_symlink()
+        and journal_path.stat().st_size > 0
+    )
+
+    # Clean Siso shutdown: the state is sufficient and the journal is absent.
+    if state_valid and (not journal_entry or journal_valid):
+        return
+
+    # If the base state is sound, quarantine only a malformed journal. The
+    # cleanly saved base state can still be used for incremental resumption.
+    paths = (journal_path,) if state_valid else (state_path, journal_path)
+    if not any(_path_entry_exists(path) for path in paths):
         return
 
     diagnostics = root / "build-diagnostics" / "siso-checkpoint-orphans"
@@ -77,36 +91,42 @@ def quarantine_incomplete_siso_checkpoint_pair(output: Path, root: Path, stage: 
             suffix += 1
         shutil.move(str(path), str(destination))
         print(f"SANDIUM_SISO_CHECKPOINT_ORPHAN_PRESERVED={destination}")
-    print("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT; incomplete pair quarantined; build outputs preserved")
+    if state_valid:
+        print("SANDIUM_SISO_JOURNAL=INVALID; malformed journal quarantined; valid base state preserved")
+    else:
+        print("SANDIUM_SISO_BASE_STATE=ABSENT_OR_INVALID; unusable Siso metadata quarantined; build outputs preserved")
 
 
 def validate_siso_checkpoint_pair(output: Path, *, require_pair: bool = False) -> None:
-    """Validate an optional Siso state pair in a compiled-output checkpoint.
+    """Validate Siso metadata for a compiled-output checkpoint.
 
-    A complete pair preserves Siso filesystem-state reuse. When Siso omits the
-    pair at shutdown, the checkpoint can still preserve compatible compiled
-    outputs so Ninja/Siso can schedule only stale or missing outputs. Never
-    fabricate state or accept a one-sided/invalid pair.
+    A nonempty regular .siso_fs_state is the base state required for Siso-state
+    resumption. The journal is optional after clean shutdown; if it exists, it
+    must be a nonempty regular file and requires a valid base state.
     """
     state_path = output / ".siso_fs_state"
     journal_path = output / ".siso_fs_state.journal"
-    state_exists = _path_entry_exists(state_path)
-    journal_exists = _path_entry_exists(journal_path)
-    if require_pair and not state_exists and not journal_exists:
+    state_entry = _path_entry_exists(state_path)
+    journal_entry = _path_entry_exists(journal_path)
+    state_valid = (
+        state_path.is_file() and not state_path.is_symlink()
+        and state_path.stat().st_size > 0
+    )
+    journal_valid = (
+        journal_path.is_file() and not journal_path.is_symlink()
+        and journal_path.stat().st_size > 0
+    )
+
+    if require_pair and not state_valid:
         raise CheckpointError(
-            "Cannot pack a resumable checkpoint without Siso filesystem state and journal"
+            "Cannot pack a resumable checkpoint without a valid nonempty Siso filesystem state"
         )
-    if state_exists != journal_exists:
-        raise CheckpointError(
-            "Siso filesystem state and journal must be present together "
-            "(state={}, journal={})".format(state_exists, journal_exists)
-        )
-    if state_exists:
-        for path in (state_path, journal_path):
-            if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
-                raise CheckpointError(
-                    "Siso checkpoint file is not a nonempty regular file: {}".format(path.name)
-                )
+    if state_entry and not state_valid:
+        raise CheckpointError("Siso filesystem state is not a nonempty regular file")
+    if journal_entry and not journal_valid:
+        raise CheckpointError("Siso journal is not a nonempty regular file")
+    if journal_valid and not state_valid:
+        raise CheckpointError("Siso journal cannot be resumed without its base filesystem state")
 
 
 def validate_state(state: dict[str, Any]) -> None:
@@ -184,7 +204,7 @@ def metadata_for(output: Path, state: dict[str, Any], stage: str, *, require_sis
     for key, name in (("siso_state_sha256", ".siso_fs_state"),
                       ("siso_journal_sha256", ".siso_fs_state.journal")):
         path = output / name
-        meta[key] = sha256_file(path) if path.is_file() else None
+        meta[key] = sha256_file(path) if path.is_file() and not path.is_symlink() and path.stat().st_size > 0 else None
     return meta
 
 
@@ -231,7 +251,7 @@ def pack(root: Path, stage: str, *, require_siso_state: bool = False) -> None:
     print("SANDIUM_CHECKPOINT_STAGE={}".format(stage))
     print("SANDIUM_CHECKPOINT_BYTES={}".format(archive.stat().st_size))
     print("SANDIUM_CHECKPOINT_SHA256={}".format(meta["archive_sha256"]))
-    print("SANDIUM_CHECKPOINT_RESUMABILITY={}".format("RESUMABLE_SISO_STATE" if meta.get("siso_state_sha256") and meta.get("siso_journal_sha256") else "OUTPUTS_ONLY_INCREMENTAL"))
+    print("SANDIUM_CHECKPOINT_RESUMABILITY={}".format("RESUMABLE_SISO_STATE" if meta.get("siso_state_sha256") else "OUTPUTS_ONLY_INCREMENTAL"))
 
 
 def restore(root: Path) -> int:
@@ -322,7 +342,7 @@ def main() -> int:
     parser.add_argument("action", choices=("pack", "restore"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[4])
     parser.add_argument("--stage", choices=ALLOWED_STAGES, default=None)
-    parser.add_argument("--require-siso-state", action="store_true", help="fail pack unless both nonempty Siso state and journal files are present")
+    parser.add_argument("--require-siso-state", action="store_true", help="fail pack unless nonempty Siso filesystem state is present; the journal is optional after clean shutdown")
     args = parser.parse_args()
     try:
         if args.action == "pack":
