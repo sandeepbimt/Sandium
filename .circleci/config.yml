@@ -558,12 +558,10 @@ commands:
             export SANDIUM_REAPI_INSTANCE=default
             export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
-            # The previous real compile recorded zero remotely executed actions
-            # with the Chromium external-REAPI default policy. Enable Chromium's
-            # Siso remote-action policy for this protected BuildBuddy trial; the
-            # compile runner aborts within five minutes if remote actions still
-            # do not occur.
-            export SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=true
+            # Chromium documents googlechrome as a Google-RBE-only preset for non-Clang
+            # actions. This external BuildBuddy REAPI backend must retain the
+            # baseline policy; C/C++ remote execution is independently enabled.
+            export SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=false
             cd src/brave
             python3 ci/siso/write_buildbuddy_env.py
             if grep -Fq "$BUILDBUDDY_API_KEY" .env; then
@@ -789,7 +787,8 @@ jobs:
             export SANDIUM_REAPI_INSTANCE=default
             export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
-            export SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=true
+            # Never enable Chromium's Google-RBE-only non-Clang policy on BuildBuddy.
+            export SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=false
             python3 ci/siso/write_buildbuddy_env.py
             python3 ci/siso/chromium_pin.py --workspace "$HOME/project"
             set +e
