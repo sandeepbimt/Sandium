@@ -234,14 +234,16 @@ class ResumablePipelineContractTests(unittest.TestCase):
     def test_full_build_uses_adaptive_compile_budget_with_sub_hour_handover(self):
         # Source restore and GN preparation happen before Stage 1 compilation.
         # Avoid a separate fixed compile cap; allow compilation until the
-        # stage budget reaches its five-minute handover reserve.
+        # stage budget reaches its ten-minute handover reserve.
         self.assertEqual(CONFIG.count("--max-stage-seconds 3300"), 5)
-        self.assertEqual(CONFIG.count("--handover-reserve-seconds 300"), 5)
-        self.assertEqual(CONFIG.count("3300 - elapsed_seconds - 300"), 5)
+        self.assertEqual(CONFIG.count("--handover-reserve-seconds 600"), 5)
+        self.assertEqual(CONFIG.count("3300 - elapsed_seconds - 600"), 5)
         self.assertNotIn("--max-compile-seconds", CONFIG)
         self.assertNotIn("--max-stage-seconds 3000", CONFIG)
         self.assertNotIn("--max-stage-seconds 3900", CONFIG)
-        self.assertNotIn("--handover-reserve-seconds 600", CONFIG)
+        self.assertEqual(CONFIG.count("--remote-execution-grace-seconds 300"), 5)
+        self.assertEqual(CONFIG.count("--shutdown-grace-seconds 360"), 5)
+        self.assertNotIn("--handover-reserve-seconds 300", CONFIG)
         self.assertNotIn("--max-compile-seconds 2400", CONFIG)
         self.assertNotIn('remaining_compile_seconds=2400', CONFIG)
         self.assertNotIn('remaining_compile_seconds=1800', CONFIG)
