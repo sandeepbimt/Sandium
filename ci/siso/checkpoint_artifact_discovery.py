@@ -149,9 +149,20 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
     url = f"{API}/project/{slugq}/pipeline?page-size=100"
     candidates: list[tuple[str, str, str]] = []
     artifact_listing_errors: list[str] = []
+    # Keep a generous bounded history window. A sequence of validation-only
+    # pipelines can push the last compile-producing checkpoint beyond 40
+    # pipelines even though its artifacts still exist.
+    max_pipelines = int(os.environ.get("SANDIUM_CHECKPOINT_MAX_PIPELINES", "200"))
+    if max_pipelines < 40:
+        max_pipelines = 40
+    pipelines_scanned = 0
+    jobs_scanned = 0
+    artifact_pairs_found = 0
     for index, pipeline in enumerate(pages(url, token, "items")):
-        if index >= 40:
+        if index >= max_pipelines:
+            print(f"CHECKPOINT_PIPELINE_SCAN_LIMIT reached={max_pipelines}")
             break
+        pipelines_scanned += 1
         pipeline_id = pipeline.get("id")
         if not pipeline_id:
             continue
@@ -173,26 +184,48 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
                 for candidate_slug in (job_slug, slug):
                     if candidate_slug and candidate_slug not in artifact_slugs:
                         artifact_slugs.append(candidate_slug)
+                jobs_scanned += 1
                 artifacts = None
                 last_error = None
+                attempted: list[str] = []
                 for artifact_slug in artifact_slugs:
                     artifact_project = urllib.parse.quote(artifact_slug, safe="/")
                     artifacts_url = f"{API}/project/{artifact_project}/{job_number}/artifacts"
+                    attempted.append(artifact_slug)
                     try:
-                        artifacts = list(pages(artifacts_url, token, "items"))
-                        break
+                        listed = list(pages(artifacts_url, token, "items"))
+                        print(
+                            f"CHECKPOINT_ARTIFACT_LOOKUP job={job_number} "
+                            f"slug={artifact_slug} result=LISTED count={len(listed)}"
+                        )
+                        # An empty list for one slug is not conclusive: try the
+                        # alternate project slug before classifying this job.
+                        if listed:
+                            artifacts = listed
+                            break
+                        artifacts = []
                     except urllib.error.HTTPError as exc:
-                        if exc.code == 404:
-                            last_error = exc
-                            continue
                         last_error = exc
+                        print(
+                            f"CHECKPOINT_ARTIFACT_LOOKUP job={job_number} "
+                            f"slug={artifact_slug} result=HTTP_{exc.code}"
+                        )
+                        if exc.code == 404:
+                            continue
                         break
                     except Exception as exc:
                         last_error = exc
+                        print(
+                            f"CHECKPOINT_ARTIFACT_LOOKUP job={job_number} "
+                            f"slug={artifact_slug} result=ERROR type={type(exc).__name__}"
+                        )
                         break
                 if artifacts is None:
                     if isinstance(last_error, urllib.error.HTTPError) and last_error.code == 404:
-                        print(f"ARTIFACT_LIST_NO_ARTIFACTS job={job_number} status=404")
+                        print(
+                            f"ARTIFACT_LIST_NO_ARTIFACTS job={job_number} status=404 "
+                            f"slugs={','.join(attempted)}"
+                        )
                         continue
                     reason = f"job={job_number} reason={type(last_error).__name__ if last_error else 'unknown'}"
                     artifact_listing_errors.append(reason)
@@ -202,9 +235,21 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
                 archive_artifact = next((item for item in artifacts if ARCHIVE_RE.search(str(item.get("path", ""))) and item.get("url")), None)
                 if meta_artifact and archive_artifact:
                     candidates.append((str(meta_artifact["url"]), str(archive_artifact["url"]), str(job_number)))
+                    artifact_pairs_found += 1
+                elif artifacts:
+                    paths = ",".join(str(item.get("path", "")) for item in artifacts[:12])
+                    print(
+                        f"CHECKPOINT_ARTIFACT_PAIR_MISSING job={job_number} "
+                        f"artifact_count={len(artifacts)} sample_paths={paths}"
+                    )
     # Any failed listing makes the historical inventory incomplete. Even if
     # some candidates were found, do not proceed: they may not be the best or
     # only compatible checkpoint. The caller must fail closed.
+    print(
+        f"CROSS_WORKFLOW_CHECKPOINT_SCAN_SUMMARY pipelines={pipelines_scanned} "
+        f"stage_jobs={jobs_scanned} artifact_pairs={artifact_pairs_found} "
+        f"listing_errors={len(artifact_listing_errors)}"
+    )
     if artifact_listing_errors:
         raise RuntimeError(
             "artifact listing failed for " + str(len(artifact_listing_errors)) + " build-stage job(s)"
