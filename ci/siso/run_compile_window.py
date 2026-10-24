@@ -103,6 +103,11 @@ def count_outputs(out_dir: Path) -> tuple[int, int]:
     return object_count, output_count
 
 
+def metrics_prove_remote_execution(metrics: dict[str, int]) -> bool:
+    """Accept only final structured Siso evidence of uncached remote execution."""
+    return metrics.get("remote_executed_action_records", 0) > 0
+
+
 def parse_metrics(path: Path) -> dict[str, int]:
     values = {
         "records": 0,
@@ -567,7 +572,7 @@ def main() -> int:
                         emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
                         request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
                         metrics_now = {"remote_executed_action_records": 0}
-                    if metrics_now.get("remote_executed_action_records", 0) > 0:
+                    if metrics_prove_remote_execution(metrics_now):
                         remote_seen = True
                 if (proc.poll() is None and not remote_seen and shutdown_requested_at is None
                         and elapsed >= args.remote_execution_grace_seconds):
@@ -628,7 +633,7 @@ def main() -> int:
                         emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
                         request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
                         metrics_now = {"remote_executed_action_records": 0}
-                    if metrics_now.get("remote_executed_action_records", 0) > 0:
+                    if metrics_prove_remote_execution(metrics_now):
                         remote_seen = True
                     if info_delta:
                         for line in info_delta.splitlines():
@@ -691,7 +696,7 @@ def main() -> int:
         # The metrics writer may flush its final JSONL records only as Siso exits.
         # Final parsed metrics are authoritative even if the live poll never saw
         # them; do not emit a premature FAIL before this final parse.
-        if remote_metric_records > 0:
+        if metrics_prove_remote_execution(metrics):
             if not remote_seen:
                 emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS source=final_metrics_after_shutdown remote_executed_action_records={remote_metric_records}")
             remote_seen = True
