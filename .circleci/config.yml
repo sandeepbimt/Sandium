@@ -443,7 +443,7 @@ commands:
             import re
             effective_args = {}
             for line in listed_args.splitlines():
-                match = re.match(r"^\\s*(use_remoteexec|use_siso|use_reclient)\\s*=\\s*(true|false)\\s*(?:#.*)?$", line)
+                match = re.match(r"^\s*(use_remoteexec|use_siso|use_reclient)\s*=\s*(true|false)\s*(?:#.*)?$", line)
                 if match:
                     effective_args[match.group(1)] = match.group(2)
             expected_gn = {"use_remoteexec": "true", "use_siso": "true", "use_reclient": "false"}
