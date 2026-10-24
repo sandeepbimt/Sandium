@@ -45,11 +45,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("not: << pipeline.parameters.run_sandium_android_apk_build >>", workflow)
         self.assertIn("      - stage-1-source-foundation", workflow)
         self.assertNotIn("stage-2-graph-and-compile-window", workflow)
-        # The workflow must be selectable for preflight-only runs where compile windows are false.
+        # Stage-1 bootstrap with compile_windows=false must still compile and
+        # checkpoint; only ordinary preflight runs may skip the compile window.
+        stage_one = job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window")
         self.assertIn(
-            'if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then',
-            job_segment("stage-1-source-foundation", "stage-2-graph-and-compile-window"),
+            'if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" && "<< pipeline.parameters.run_sandium_stage1_bootstrap >>" != "true" ]]; then',
+            stage_one,
         )
+        self.assertIn("--stage stage-1 --require-siso-state", stage_one)
+        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY", CONFIG)
 
     def test_all_five_production_stages_are_serialized(self):
         names = [
