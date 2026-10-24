@@ -96,7 +96,11 @@ def parse_metrics(path: Path) -> dict[str, int]:
         "action_records": 0,
         "cached_action_records": 0,
         "local_action_records": 0,
+        "explicit_remote_action_records": 0,
+        "remote_cached_action_records": 0,
         "remote_executed_action_records": 0,
+        "fast_local_action_records": 0,
+        "local_fallback_action_records": 0,
         "no_exec_action_records": 0,
     }
     if not path.is_file():
@@ -116,13 +120,19 @@ def parse_metrics(path: Path) -> dict[str, int]:
             cached = record.get("cached") is True
             local = record.get("is_local") is True
             no_exec = record.get("no_exec") is True
+            fast_local = record.get("fast_local") is True
+            fallback = record.get("fallback") is True
             values["cached_action_records"] += int(cached)
             values["local_action_records"] += int(local)
+            values["fast_local_action_records"] += int(fast_local)
+            values["local_fallback_action_records"] += int(fallback)
             values["no_exec_action_records"] += int(no_exec)
-            # Siso emits positive boolean fields; is_local=false is commonly omitted.
-            # Prefer its explicit is_remote signal, keeping the explicit-false fallback
-            # for compatible metric emitters that provide both fields.
+            # Siso omits false booleans in JSON. Keep reported remote results
+            # distinct from true executions: cached remote results are useful
+            # cache evidence, but cannot satisfy the execution gate.
             remote = record.get("is_remote") is True or record.get("is_local") is False
+            values["explicit_remote_action_records"] += int(remote)
+            values["remote_cached_action_records"] += int(remote and cached)
             if remote and not cached and not no_exec:
                 values["remote_executed_action_records"] += 1
     return values
@@ -225,7 +235,11 @@ def main() -> int:
     parser.add_argument("--stage", choices=("stage-1", "stage-2", "stage-3", "stage-4", "stage-5"), required=True)
     parser.add_argument("--stage-start-epoch-file", type=Path, required=True)
     parser.add_argument("--max-stage-seconds", type=int, default=3300)
-    parser.add_argument("--handover-reserve-seconds", type=int, default=300)
+    parser.add_argument("--handover-reserve-seconds", type=int, default=600)
+    parser.add_argument("--remote-execution-grace-seconds", type=int, default=300,
+                        help="stop promptly if the real Chromium build records no remote-executed Siso action")
+    parser.add_argument("--shutdown-grace-seconds", type=int, default=360,
+                        help="allow Siso to flush state/journal after SIGINT before escalating")
     parser.add_argument("--metrics-poll-interval-seconds", type=int, default=15)
     args = parser.parse_args()
 
@@ -456,11 +470,29 @@ def main() -> int:
         rolling = ""
         stop_reason: str | None = None
         eof = False
+        shutdown_requested_at: float | None = None
+        shutdown_escalated_at: float | None = None
+        shutdown_kill_sent = False
         last_activity = time.monotonic()
         child_exit_seen_at: float | None = None
         last_info_poll = 0.0
         last_metrics_poll = 0.0
         remote_gate_pass_logged = False
+
+        def request_graceful_shutdown(reason: str) -> None:
+            nonlocal shutdown_requested_at, stop_reason
+            if shutdown_requested_at is not None:
+                return
+            shutdown_requested_at = time.monotonic()
+            stop_reason = stop_reason or reason
+            emit(log, "SISO_GRACEFUL_SHUTDOWN_REQUESTED=SIGINT reason=" + reason)
+            try:
+                # Signal the build process group, but keep draining stdout/stderr
+                # in the selector loop so shutdown diagnostics and output flushing
+                # cannot deadlock on a full pipe.
+                os.killpg(proc.pid, signal.SIGINT)
+            except ProcessLookupError:
+                emit(log, "SISO_GRACEFUL_SHUTDOWN_SIGNAL=PROCESS_GROUP_ALREADY_EXITED")
 
         def process_text(text: str) -> None:
             nonlocal remote_seen, regeneration_seen, partial, rolling, last_activity, gate_failed, stop_reason
@@ -505,28 +537,57 @@ def main() -> int:
                     # action records from this run's Siso metrics can open the gate.
                     remote_signatures.add(line.strip())
 
+        emit(log, f"REMOTE_EXECUTION_STARTUP_DEADLINE_SECONDS={args.remote_execution_grace_seconds}")
+        emit(log, f"SISO_SHUTDOWN_GRACE_SECONDS={args.shutdown_grace_seconds}")
         try:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
-                if proc.poll() is None and not remote_seen and now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
-                    last_metrics_poll = now
-                    try:
-                        metrics_now = parse_metrics(metrics_path)
-                    except ValueError as exc:
+                if proc.poll() is None and not remote_seen and shutdown_requested_at is None:
+                    if elapsed >= args.remote_execution_grace_seconds:
                         gate_failed = True
-                        stop_reason = f"invalid Siso metrics during remote gate: {exc}"
-                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
-                        stop_process_group(proc)
-                        metrics_now = {"remote_executed_action_records": 0}
-                    if metrics_now.get("remote_executed_action_records", 0) > 0:
-                        remote_seen = True
-                if proc.poll() is None and elapsed >= remaining:
-                    timeout_seen = True
-                    stop_reason = "stage compile time budget exhausted"
-                    emit(log, f"COMPILE_WINDOW_TIMEOUT=PASS timeout_seconds={remaining}")
-                    stop_process_group(proc)
+                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_action_deadline_expired=true")
+                        request_graceful_shutdown(
+                            "no uncached remote-executed Siso action within "
+                            f"{args.remote_execution_grace_seconds} seconds; refusing a long local-only compile"
+                        )
+                    elif now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
+                        last_metrics_poll = now
+                        try:
+                            metrics_now = parse_metrics(metrics_path)
+                        except ValueError as exc:
+                            gate_failed = True
+                            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
+                            request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
+                            metrics_now = {"remote_executed_action_records": 0}
+                        if metrics_now.get("remote_executed_action_records", 0) > 0:
+                            remote_seen = True
 
+                if proc.poll() is None and shutdown_requested_at is None and elapsed >= remaining:
+                    timeout_seen = True
+                    emit(log, f"COMPILE_WINDOW_TIMEOUT=PASS timeout_seconds={remaining}")
+                    request_graceful_shutdown("stage compile time budget exhausted")
+
+                # Keep the pipe drained while Siso shuts down. A 300s filesystem
+                # flush setting is configured in .sisorc; killing the whole process
+                # group after 30s can leave only the journal and lose the state file.
+                if shutdown_requested_at is not None:
+                    shutdown_elapsed = now - shutdown_requested_at
+                    if shutdown_elapsed >= args.shutdown_grace_seconds and shutdown_escalated_at is None:
+                        emit(log, f"SISO_SHUTDOWN_ESCALATION=SIGTERM after_seconds={int(shutdown_elapsed)}")
+                        try:
+                            os.killpg(proc.pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                        shutdown_escalated_at = now
+                    elif (shutdown_escalated_at is not None and not shutdown_kill_sent
+                          and now - shutdown_escalated_at >= 15):
+                        emit(log, "SISO_SHUTDOWN_ESCALATION=SIGKILL after_sigterm_seconds=15")
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        shutdown_kill_sent = True
 
                 events = selector.select(timeout=0.25)
                 if events:
@@ -539,40 +600,40 @@ def main() -> int:
                             process_text(tail)
                             continue
                         process_text(decoder.decode(chunk))
+
                 if now - last_info_poll >= max(1, args.metrics_poll_interval_seconds):
                     info_delta = read_new_siso_info()
                     last_info_poll = now
-                    # Log text and cache messages are not execution evidence. The
-                    # only authoritative early-gate signal is an uncached Siso
-                    # action whose metrics explicitly report is_remote=true (or the
-                    # explicit is_local=false compatibility field).
+                    # Log text and cache messages are diagnostic only. A real remote
+                    # action must be present in this run's structured Siso metrics.
                     try:
                         metrics_now = parse_metrics(metrics_path)
                     except ValueError as exc:
                         gate_failed = True
-                        stop_reason = f"invalid Siso metrics during remote gate: {exc}"
                         emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
-                        stop_process_group(proc)
+                        request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
                         metrics_now = {"remote_executed_action_records": 0}
                     if metrics_now.get("remote_executed_action_records", 0) > 0:
                         remote_seen = True
                     if info_delta:
                         for line in info_delta.splitlines():
                             if any(pattern.search(line) for pattern in REMOTE_SIGNATURES):
-                                # Diagnostic only; structured per-action metrics are
-                                # the sole evidence for an incomplete compile window.
                                 remote_signatures.add(line.strip())
+
                 if remote_seen and not gate_failed and not remote_gate_pass_logged:
                     emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS seconds={int(time.monotonic()-started)}")
                     remote_gate_pass_logged = True
                 if proc.poll() is not None and child_exit_seen_at is None:
                     child_exit_seen_at = time.monotonic()
-                if proc.poll() is not None and eof:
+                if proc.poll() is not None and eof and count_siso_processes() == 0:
                     break
-                if proc.poll() is not None and child_exit_seen_at is not None and time.monotonic() - child_exit_seen_at > 120:
-                    stop_reason = "build process exited but child output/Siso did not shut down cleanly"
-                    stop_process_group(proc, grace_seconds=5)
-                    break
+                if (proc.poll() is not None and child_exit_seen_at is not None
+                        and time.monotonic() - child_exit_seen_at > args.shutdown_grace_seconds
+                        and not eof):
+                    if shutdown_requested_at is None:
+                        request_graceful_shutdown("build wrapper exited but child/Siso output remained open")
+                    elif shutdown_escalated_at is not None and time.monotonic() - shutdown_escalated_at > 15:
+                        break
         finally:
             selector.close()
             if proc.poll() is None:
@@ -600,7 +661,7 @@ def main() -> int:
         # Wait for Siso to close its state/journal before writing a checkpoint.
         siso_forced_kill = False
         siso_wait_started = time.monotonic()
-        while count_siso_processes() and time.monotonic() - siso_wait_started < 120:
+        while count_siso_processes() and time.monotonic() - siso_wait_started < args.shutdown_grace_seconds:
             time.sleep(2)
         remaining_siso = count_siso_processes()
         if remaining_siso:
