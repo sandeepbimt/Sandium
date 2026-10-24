@@ -18,6 +18,17 @@ class CheckpointError(RuntimeError):
     pass
 
 
+def _git_head(path: Path) -> str:
+    """Return the checked-out commit for a Git working tree."""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True, stderr=subprocess.PIPE, timeout=15,
+        ).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CheckpointError("Cannot determine checked-out source commit at {}: {}".format(path, exc)) from exc
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -296,7 +307,7 @@ def restore(root: Path, *, output_only: bool = False, expected_commit: str | Non
         if output_only:
             if not expected_commit or not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
                 raise CheckpointError("Output-only recovery requires an explicit current source commit")
-            if _git_head(CORE_DIR) != expected_commit:
+            if _git_head(root / "src" / "brave") != expected_commit:
                 raise CheckpointError("Output-only recovery commit does not match the checked-out Brave source")
             # The only permitted source-input delta is the audited Siso execution config.
             import build_state
