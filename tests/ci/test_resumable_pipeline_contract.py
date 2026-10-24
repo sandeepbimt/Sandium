@@ -130,6 +130,17 @@ class ResumablePipelineContractTests(unittest.TestCase):
                         output_only.index("export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"))
         self.assertIn("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION", output_only)
 
+    def test_output_only_recovery_is_stage1_only_and_checks_effective_siso_configuration(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        self.assertIn('if [[ "$STAGE_INDEX" != "1" ]]; then', segment)
+        self.assertIn('CIRCLE_JOB:-}" == "stage-1-source-foundation"', segment)
+        self.assertIn('CIRCLE_JOB:-}" == "sandium-checkpoint-restore-validation"', segment)
+        self.assertIn('expected_gn = {"use_siso": "true", "use_reclient": "false"}', segment)
+        self.assertIn('"--use_remoteexec", "true"', segment)
+        self.assertIn('"--gn", "use_siso:true"', segment)
+        self.assertIn('"--gn", "use_reclient:false"', segment)
+        self.assertNotIn('expected_gn = {"use_remoteexec": "true"', segment)
+
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
