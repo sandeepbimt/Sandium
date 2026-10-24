@@ -32,6 +32,10 @@ parameters:
   run_sandium_checkpoint_restore_validation:
     type: boolean
     default: false
+  # Inspection-only recovery: salvage compiled outputs but never authorize compilation.
+  enable_sandium_output_only_checkpoint_recovery:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -709,6 +713,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_resumable_pipeline_contract.py
   stage-1-source-foundation:
     machine:
@@ -2693,10 +2698,14 @@ jobs:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
+            if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+              export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+              echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+            fi
             python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
             STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
-            if [[ "$STATUS" == "RESTORED" ]]; then
+            if [[ "$STATUS" == "RESTORED" || "$STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
               META="$ROOT/sandium-checkpoint.meta"
               python3 - "$META" \<<'PY'
             import json, sys
