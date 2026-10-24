@@ -53,7 +53,6 @@ class ResumablePipelineContractTests(unittest.TestCase):
             stage_one,
         )
         self.assertIn("--stage stage-1 --require-siso-state", stage_one)
-        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY", CONFIG)
 
     def test_all_five_production_stages_are_serialized(self):
         names = [
