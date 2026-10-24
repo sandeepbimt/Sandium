@@ -212,7 +212,7 @@ def pack(root: Path, stage: str, *, require_siso_state: bool = False) -> None:
     temp_archive, temp_manifest = Path(temp_name), root / ".sandium-checkpoint.meta.tmp"
     try:
         try:
-            subprocess.run(["tar", "-c", "-I", "zstd -T1 -3", "--format=posix",
+            subprocess.run(["tar", "-c", "-I", "zstd -T2 -3", "--format=posix",
                             "--pax-option=delete=atime,delete=ctime", "-f", str(temp_archive),
                             "-C", str(source), OUTPUT_REL.as_posix()], check=True)
         except (OSError, subprocess.CalledProcessError) as exc:
