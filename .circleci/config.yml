@@ -355,7 +355,7 @@ commands:
             DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
               echo "SANDIUM_CHECKPOINT_NORMAL_SISO_RESTORE=SKIPPED_OUTPUTS_ONLY"
-              echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED"
+              echo "SANDIUM_COMPILE_AUTHORIZATION=DEFERRED_UNTIL_OUTPUT_AND_GN_VALIDATION"
             else
               python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
             fi
@@ -455,10 +455,19 @@ commands:
             print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
             print("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
-            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
-            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION")
+            print("SANDIUM_CHECKPOINT_RESUME=INCREMENTAL_FROM_RESTORED_OUTPUTS")
+            print("SANDIUM_COMPILE_AUTHORIZATION=INCREMENTAL_OUTPUTS_ONLY")
             print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_COMPATIBILITY_PASS")
             PY
+              # The restored compiled outputs and GN graph have passed identity
+              # checks. Reuse them incrementally, but never restore the old Siso
+              # filesystem state across the audited Siso-config change. A successful
+              # compile window will write a fresh resumable checkpoint for later stages.
+              echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
+              echo 'export SANDIUM_SISO_STATE_RESTORED=false' >> "$BASH_ENV"
+              echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"
+              echo "SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS"
               exit 0
             fi
             cache_hit=false
