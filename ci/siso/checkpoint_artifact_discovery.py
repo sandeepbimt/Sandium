@@ -210,6 +210,57 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
     return candidates
 
 
+def expected_pre_download_identity(root: Path, expected_source: str) -> dict[str, str]:
+    """Derive build identity from checked-out sources before any large archive download.
+
+    GN args fingerprint is intentionally omitted here: it is stored in the output
+    directory and can only be verified after restore. All source-derived identity
+    fields are screened before the archive transfer.
+    """
+    brave = root / "src" / "brave"
+    chromium = root / "src"
+    if not (brave / ".git").exists() or not (chromium / ".git").exists():
+        raise RuntimeError("source checkouts are unavailable for metadata pre-screening")
+
+    def git(path: Path, *args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(path), *args],
+            text=True, stderr=subprocess.PIPE, timeout=15,
+        ).strip()
+
+    source_commit = git(brave, "rev-parse", "HEAD")
+    if source_commit != expected_source:
+        raise RuntimeError(
+            f"checked-out Brave source {source_commit} does not match expected {expected_source}"
+        )
+    chromium_commit = git(chromium, "rev-parse", "HEAD")
+    chromium_version = git(chromium, "describe", "--tags", "--exact-match", "HEAD")
+    if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", chromium_version):
+        raise RuntimeError(f"Chromium source tag is not a four-part numeric version: {chromium_version!r}")
+
+    # Reuse the canonical implementation so pre-screening and build-state
+    # validation calculate the same tracked-input fingerprint.
+    sys.path.insert(0, str(brave / "ci" / "siso"))
+    import build_state
+    return {
+        "source_commit": source_commit,
+        "chromium_commit": chromium_commit,
+        "chromium_version": chromium_version,
+        "target": "android-arm64-debug-apk",
+        "build_config": "Debug",
+        "build_input_fingerprint": build_state._build_input_fingerprint(),
+    }
+
+
+def pre_download_mismatch(meta: dict[str, Any], expected: dict[str, str]) -> list[str]:
+    """Return exact source-derived identity mismatches before downloading an archive."""
+    return [
+        f"{field}: candidate={meta.get(field)!r} expected={value!r}"
+        for field, value in expected.items()
+        if meta.get(field) != value
+    ]
+
+
 def has_siso_state_pair(meta: Any) -> bool:
     """Return whether manifest has valid Siso base state and optional journal.
 
@@ -326,6 +377,17 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                 api_error = exc
                 break
 
+        preflight_identity: dict[str, str] | None = None
+        if remote_urls:
+            try:
+                preflight_identity = expected_pre_download_identity(root, expected_source)
+                print("CHECKPOINT_PRE_DOWNLOAD_IDENTITY=READY")
+            except Exception as exc:
+                print(f"CHECKPOINT_PRE_DOWNLOAD_IDENTITY=FAILED reason={type(exc).__name__} detail={str(exc)[:300]}", file=sys.stderr)
+                print("CROSS_WORKFLOW_CHECKPOINT=DISCOVERY_INCOMPLETE; refusing archive downloads without source identity.", file=sys.stderr)
+                (root / ".sandium-checkpoint-discovery-status").write_text("DISCOVERY_INCOMPLETE\\n", encoding="utf-8")
+                return 78
+
         for index, (metadata_url, archive_url, job_number) in enumerate(remote_urls):
             metadata_path, archive_path = temp / f"remote-{index}.meta", temp / f"remote-{index}.tar.zst"
             try:
@@ -333,6 +395,16 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 if not valid_manifest(metadata):
                     print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=invalid_metadata")
+                    continue
+                if preflight_identity is not None:
+                    mismatches = pre_download_mismatch(metadata, preflight_identity)
+                    if mismatches:
+                        print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=pre_download_identity_mismatch")
+                        for mismatch in mismatches:
+                            print(f"CHECKPOINT_CANDIDATE_IDENTITY_MISMATCH job={job_number} {mismatch}")
+                        continue
+                if require_siso_state and not has_siso_state_pair(metadata):
+                    print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=missing_or_invalid_siso_state_metadata")
                     continue
                 usable.append((metadata, archive_path, metadata_path, job_number, archive_url))
             except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
