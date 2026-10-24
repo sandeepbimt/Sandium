@@ -271,6 +271,28 @@ def pre_download_mismatch(meta: dict[str, Any], expected: dict[str, str]) -> lis
             mismatches.append(
                 "build_input_fingerprint: candidate is incompatible with current tracked build inputs"
             )
+            saved_fingerprint = meta.get("build_input_fingerprint")
+            source_commit = meta.get("source_commit")
+            if isinstance(saved_fingerprint, str) and isinstance(source_commit, str):
+                audit = build_state._fingerprint_audit(source_commit, saved_fingerprint)
+                print(
+                    "CHECKPOINT_FINGERPRINT_AUDIT "
+                    + json.dumps({
+                        "source_commit": source_commit,
+                        "saved_fingerprint": saved_fingerprint,
+                        "historical_source_available": audit["historical_source_available"],
+                        "historical_fingerprint": audit["historical_fingerprint"],
+                        "current_fingerprint": audit["current_fingerprint"],
+                        "current_with_timestamp_hook_canonicalized": audit["current_with_timestamp_hook_canonicalized"],
+                        "timestamp_hook_migration_compatible": audit["timestamp_hook_migration_compatible"],
+                        "audit_error": audit["audit_error"],
+                    }, sort_keys=True)
+                )
+                for item in audit["changed_tracked_input_paths"]:
+                    print(
+                        "CHECKPOINT_FINGERPRINT_CHANGED_PATH "
+                        + json.dumps(item, sort_keys=True)
+                    )
     except Exception as exc:
         mismatches.append(
             f"build_input_fingerprint: compatibility check failed ({type(exc).__name__})"
