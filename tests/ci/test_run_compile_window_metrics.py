@@ -49,6 +49,12 @@ class ParseMetricsTests(unittest.TestCase):
         result = self.parse_records([self.action(is_local=False)])
         self.assertEqual(result["remote_executed_action_records"], 1)
 
+    def test_remote_cache_counts_as_reported_remote_but_not_execution(self) -> None:
+        result = self.parse_records([self.action(is_remote=True, cached=True)])
+        self.assertEqual(result["explicit_remote_action_records"], 1)
+        self.assertEqual(result["remote_cached_action_records"], 1)
+        self.assertEqual(result["remote_executed_action_records"], 0)
+
     def test_local_action_does_not_count_as_remote(self) -> None:
         result = self.parse_records([self.action(is_local=True)])
         self.assertEqual(result["remote_executed_action_records"], 0)
