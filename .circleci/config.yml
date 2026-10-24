@@ -368,8 +368,24 @@ commands:
             STATE=src/brave/ci/siso/build_state.py
             DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
-              if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ||
-                    "${CIRCLE_JOB:-}" != "sandium-checkpoint-restore-validation" ]]; then
+              # Output-only recovery is allowed only for Stage 1 after full
+              # output/GN identity validation, or in the dedicated validation job.
+              # Later stages must receive the fresh resumable checkpoint produced
+              # by Stage 1; they may not independently promote output-only data.
+              if [[ "$STAGE_INDEX" != "1" ]]; then
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_STAGE_MUST_BE_1" >&2
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
+                exit 42
+              fi
+              if [[ "${CIRCLE_JOB:-}" == "sandium-checkpoint-restore-validation" ]]; then
+                if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ]]; then
+                  echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=DEDICATED_VALIDATION_NOT_OPTED_IN" >&2
+                  exit 42
+                fi
+              elif [[ "${CIRCLE_JOB:-}" == "stage-1-source-foundation" &&
+                      "<< pipeline.parameters.run_sandium_compile_windows >>" == "true" ]]; then
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=STAGE1_INCREMENTAL_COMPILE_PATH"
+              else
                 echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_NOT_COMPILE_AUTHORIZED" >&2
                 echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
                 exit 42
@@ -446,11 +462,25 @@ commands:
                 match = re.match(r"^\s*(use_remoteexec|use_siso|use_reclient)\s*=\s*(true|false)\s*(?:#.*)?$", line)
                 if match:
                     effective_args[match.group(1)] = match.group(2)
-            expected_gn = {"use_remoteexec": "true", "use_siso": "true", "use_reclient": "false"}
+            # use_remoteexec is a Brave build-command/runtime flag, not a GN
+            # argument. Validate the two actual GN values from GN, then separately
+            # validate that the compile-window driver passes the runtime flag.
+            expected_gn = {"use_siso": "true", "use_reclient": "false"}
             if any(effective_args.get(name) != value for name, value in expected_gn.items()):
                 raise SystemExit(
                     "OUTPUT_ONLY_COMPATIBILITY=FAIL effective GN values do not preserve required Siso-only configuration: "
                     + repr({"expected": expected_gn, "observed": effective_args})
+                )
+            compile_driver = brave / "ci" / "siso" / "run_compile_window.py"
+            driver_text = compile_driver.read_text(encoding="utf-8") if compile_driver.is_file() else ""
+            required_runtime_flags = (
+                '"--use_remoteexec", "true"',
+                '"--gn", "use_siso:true"',
+                '"--gn", "use_reclient:false"',
+            )
+            if not all(flag in driver_text for flag in required_runtime_flags):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL compile driver does not enforce required Siso runtime flags"
                 )
             print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
             print("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS")
