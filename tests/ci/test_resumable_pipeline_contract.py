@@ -150,6 +150,10 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('source_root = root / "src"', segment)
         self.assertIn('if not (source_root / ".gn").is_file():', segment)
         self.assertIn('cwd=str(source_root)', segment)
+        self.assertIn('version_utils = brave / "script" / "brave_version_utils.py"', segment)
+        self.assertIn('if not version_utils.is_file():', segment)
+        self.assertIn('query_env["PYTHONPATH"] = str(version_utils.parent)', segment)
+        self.assertIn('env=query_env', segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
