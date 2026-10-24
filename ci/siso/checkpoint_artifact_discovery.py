@@ -490,7 +490,11 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                             for mismatch in mismatches:
                                 print(f"CHECKPOINT_CANDIDATE_IDENTITY_MISMATCH job={job_number} {mismatch}")
                             continue
-                if require_siso_state and not has_siso_state_pair(metadata):
+                has_siso_pair = has_siso_state_pair(metadata)
+                is_output_only_candidate = bool(metadata.get("_sandium_output_only_recovery"))
+                if require_siso_state and not has_siso_pair and not (
+                    output_only_opt_in and is_output_only_candidate
+                ):
                     print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=missing_or_invalid_siso_state_metadata")
                     continue
                 usable.append((metadata, archive_path, metadata_path, job_number, archive_url))
@@ -501,12 +505,20 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
             print(f"CROSS_WORKFLOW_CHECKPOINT=API_ERROR_FALLBACK reason={type(api_error).__name__}")
         usable.sort(key=lambda item: rank(item[0]), reverse=True)
         if require_siso_state:
+            output_only_candidates = [
+                item for item in usable
+                if output_only_opt_in and item[0].get("_sandium_output_only_recovery")
+            ]
             resumable = [item for item in usable if has_siso_state_pair(item[0])]
-            output_only_count = len(usable) - len(resumable)
+            output_only_count = len(output_only_candidates)
             print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_TOTAL={len(usable)}")
             print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_RESUMABLE={len(resumable)}")
             print(f"CROSS_WORKFLOW_CHECKPOINT_CANDIDATES_OUTPUT_ONLY={output_only_count}")
-            usable = resumable
+            usable = sorted(
+                resumable + output_only_candidates,
+                key=lambda item: rank(item[0]),
+                reverse=True,
+            )
             if not usable and api_error:
                 print("CROSS_WORKFLOW_CHECKPOINT=DISCOVERY_INCOMPLETE; refusing to conclude no resumable checkpoint exists.", file=sys.stderr)
                 print("CROSS_WORKFLOW_CHECKPOINT=API_ERROR_FALLBACK reason=" + type(api_error).__name__, file=sys.stderr)
