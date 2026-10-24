@@ -9,7 +9,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parents[2] / "ci" / "siso" / "checkpoint_artifact_discovery.py"
+SISO_DIR = Path(__file__).resolve().parents[2] / "ci" / "siso"
+sys.path.insert(0, str(SISO_DIR))
+SCRIPT = SISO_DIR / "checkpoint_artifact_discovery.py"
 SPEC = importlib.util.spec_from_file_location("checkpoint_artifact_discovery_under_test", SCRIPT)
 DISCOVERY = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
