@@ -57,21 +57,21 @@ def compatible(candidate: dict[str, Any], expected: dict[str, Any]) -> bool:
 
 
 def rank(candidate: dict[str, Any]) -> tuple[int, int, int, int, int, int, str]:
-    """Prefer checkpoints with a complete Siso pair, then rank by measured progress.
+    """Prefer a valid Siso base state, then rank by measured progress.
 
-    A manifest with both Siso hashes can resume filesystem-state reuse. Older
-    output-only checkpoints remain eligible as a fallback, but must not outrank
-    a resumable candidate merely because they contain more output files.
+    A clean Siso shutdown folds journal data into .siso_fs_state and deletes
+    the journal, so a valid state hash with a null journal hash is resumable.
+    If a journal is included, it must also have a valid SHA-256 digest.
     """
     progress = candidate["progress"]
     stage_match = STAGE_RE.fullmatch(candidate["stage"])
     stage = int(stage_match.group(1)) if stage_match else 0
     siso_state = candidate.get("siso_state_sha256")
     siso_journal = candidate.get("siso_journal_sha256")
-    resumable = int(
-        isinstance(siso_state, str) and len(siso_state) == 64
-        and isinstance(siso_journal, str) and len(siso_journal) == 64
-    )
+    valid_digest = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    state_valid = valid_digest(siso_state)
+    journal_valid_or_absent = siso_journal is None or valid_digest(siso_journal)
+    resumable = int(state_valid and journal_valid_or_absent)
     return (
         resumable,
         progress["object_file_count"],
