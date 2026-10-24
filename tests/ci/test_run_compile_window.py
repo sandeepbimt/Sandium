@@ -154,5 +154,38 @@ class ResetSisoInfoTests(unittest.TestCase):
             "UNAVAILABLE: remote execution worker connection reset",
             compile_window.REMOTE_WORKDIR_INPUT_TREE_ERROR,
         )
+class RemotePythonWrapperTests(unittest.TestCase):
+    def test_repairs_missing_execute_bits_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "python_remote_wrapper"
+            wrapper.write_text("#!/bin/sh\\nexit 0\\n", encoding="utf-8")
+            wrapper.chmod(0o644)
+
+            repaired = compile_window.ensure_remote_wrapper_executable(wrapper)
+            self.assertTrue(repaired)
+            self.assertEqual(wrapper.stat().st_mode & 0o111, 0o111)
+
+            repaired_again = compile_window.ensure_remote_wrapper_executable(wrapper)
+            self.assertFalse(repaired_again)
+            self.assertEqual(wrapper.stat().st_mode & 0o111, 0o111)
+
+    def test_missing_wrapper_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing-wrapper"
+            with self.assertRaisesRegex(ValueError, "missing or not a regular file"):
+                compile_window.ensure_remote_wrapper_executable(missing)
+
+    def test_symlink_wrapper_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.write_text("#!/bin/sh\\nexit 0\\n", encoding="utf-8")
+            target.chmod(0o755)
+            wrapper = root / "python_remote_wrapper"
+            wrapper.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "missing or not a regular file"):
+                compile_window.ensure_remote_wrapper_executable(wrapper)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

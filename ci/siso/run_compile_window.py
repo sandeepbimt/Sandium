@@ -11,6 +11,7 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -223,6 +224,30 @@ def stop_process_group(proc: subprocess.Popen[bytes], grace_seconds: int = 30) -
         pass
 
 
+def ensure_remote_wrapper_executable(wrapper_path: Path) -> bool:
+    """Ensure the generated Python wrapper is shipped as an executable REAPI input.
+
+    Returns True when execute bits had to be repaired. This is deliberately
+    fail-closed for missing, non-regular, or symlink paths; silently proceeding
+    would repeat the BuildBuddy 'exists but is not executable' action failure.
+    """
+    if wrapper_path.is_symlink() or not wrapper_path.is_file():
+        raise ValueError(
+            f"generated remote Python wrapper is missing or not a regular file: {wrapper_path}"
+        )
+    previous_mode = stat.S_IMODE(wrapper_path.stat().st_mode)
+    required_execute_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    repaired = (previous_mode & required_execute_bits) != required_execute_bits
+    if repaired:
+        wrapper_path.chmod(previous_mode | required_execute_bits)
+    final_mode = stat.S_IMODE(wrapper_path.stat().st_mode)
+    if (final_mode & required_execute_bits) != required_execute_bits:
+        raise ValueError(
+            f"generated remote Python wrapper is not executable after repair: {wrapper_path}"
+        )
+    return repaired
+
+
 def reset_siso_info(siso_info: Path, diagnostics: Path, stage: str) -> None:
     """Start a fresh regular Siso info log, preserving unexpected restored paths."""
     if siso_info.is_symlink():
@@ -312,6 +337,19 @@ def main() -> int:
     if remaining <= 0:
         print("STAGE_TIME_BUDGET_EXHAUSTED=true; preserving output and handover margin")
         return 5
+    # Brave's remote Python rules declare this generated wrapper as an
+    # executable input. Some runhooks/cache restores leave the mode non-executable,
+    # which BuildBuddy rejects during input-tree materialization. Repair the
+    # workspace mode before Siso computes the remote action input digest.
+    remote_python_wrapper = source / "buildtools/reclient_cfgs/python/python_remote_wrapper"
+    try:
+        wrapper_mode_repaired = ensure_remote_wrapper_executable(remote_python_wrapper)
+    except (OSError, ValueError) as exc:
+        print("SANDIUM_REMOTE_PYTHON_WRAPPER=FAIL " + str(exc), file=sys.stderr)
+        return 23
+    print("SANDIUM_REMOTE_PYTHON_WRAPPER_EXECUTABLE=PASS")
+    print("SANDIUM_REMOTE_PYTHON_WRAPPER_MODE_REPAIRED=" + str(wrapper_mode_repaired).lower())
+
     try:
         chromium_commit = subprocess.check_output(
             ["git", "-C", str(source), "rev-parse", "HEAD"], text=True

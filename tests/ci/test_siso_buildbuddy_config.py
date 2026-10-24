@@ -200,5 +200,15 @@ class BackendConfigTests(unittest.TestCase):
         self.assertNotIn('"label:action_large"', content)
 
 
+class RemoteWorkingDirectoryConfigTests(unittest.TestCase):
+    def test_external_reapi_actions_do_not_use_synthetic_out_x_workdir(self):
+        config = (ROOT / "build/config/siso/brave_siso_config.star").read_text(encoding="utf-8")
+        self.assertIn("def __disable_remote_workdir_canonicalization(step_config):", config)
+        self.assertIn('rule["canonicalize_dir"] = False', config)
+        self.assertIn("__disable_remote_workdir_canonicalization(step_config)", config)
+        self.assertIn("out/android_Debug_arm64 to out/x by default", config)
+        self.assertIn('if rule.get("remote") == False:', config)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

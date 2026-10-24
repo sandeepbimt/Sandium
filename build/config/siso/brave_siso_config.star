@@ -78,7 +78,22 @@ def __configure(ctx, step_config, filegroups, handlers):
     __remove_rules(ctx, step_config)
     __adjust_filegroups(step_config, filegroups)
     __adjust_handlers(ctx, step_config, handlers)
+    __disable_remote_workdir_canonicalization(step_config)
     __remove_labels_from_platforms(step_config)
+
+
+def __disable_remote_workdir_canonicalization(step_config):
+    """Keep the real output workdir in REAPI inputs for external BuildBuddy.
+
+    Siso canonicalizes out/android_Debug_arm64 to out/x by default. BuildBuddy
+    rejected actions because that synthetic working directory was absent from
+    the action input tree. Preserve the actual workdir for remotely executed
+    rules; leave explicitly local-only rules untouched.
+    """
+    for rule in step_config["rules"]:
+        if rule.get("remote") == False:
+            continue
+        rule["canonicalize_dir"] = False
 
 # Disable any handling for rules that deviate from upstream.
 def __remove_rules(ctx, step_config):

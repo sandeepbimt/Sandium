@@ -62,6 +62,31 @@ class CheckpointTests(unittest.TestCase):
         self.assertTrue((self.output / ".siso_fs_state.journal").is_file())
         self.assertTrue((self.output / "build.ninja").is_file())
 
+    def test_clean_shutdown_state_only_checkpoint_round_trip_is_resumable(self):
+        # Siso folds the journal into .siso_fs_state on clean shutdown and removes
+        # the journal. A state-only checkpoint must still be packable and restorable.
+        (self.output / ".siso_fs_state.journal").unlink()
+        packed = self.invoke("pack", "--stage", "stage-1", "--require-siso-state")
+        self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
+        self.assertIn("SANDIUM_CHECKPOINT_REQUIRE_SISO_STATE=PASS", packed.stdout)
+
+        manifest = json.loads((self.root / "sandium-checkpoint.meta").read_text(encoding="utf-8"))
+        self.assertRegex(manifest["siso_state_sha256"], r"^[0-9a-f]{64}$")
+        self.assertIsNone(manifest["siso_journal_sha256"])
+
+        shutil.rmtree(self.output)
+        restored = self.invoke("restore")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertIn("SANDIUM_CHECKPOINT_RESTORE=PASS", restored.stdout)
+        self.assertIn("SANDIUM_SISO_STATE_PRESENT=true", restored.stdout)
+        self.assertIn("SANDIUM_SISO_JOURNAL_PRESENT=false", restored.stdout)
+        self.assertTrue((self.output / ".siso_fs_state").is_file())
+        self.assertFalse((self.output / ".siso_fs_state.journal").exists())
+        self.assertEqual(
+            hashlib.sha256((self.output / ".siso_fs_state").read_bytes()).hexdigest(),
+            manifest["siso_state_sha256"],
+        )
+
     def test_missing_checkpoint_preserves_legacy_raw_output(self):
         sentinel = self.output / "legacy.txt"
         sentinel.write_text("keep", encoding="utf-8")
