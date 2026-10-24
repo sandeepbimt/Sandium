@@ -393,7 +393,7 @@ commands:
             # Prove the historical build inputs differ only by the audited Siso
             # config, and that the restored GN identity still matches the checked
             # out tree. This is validation only; it never authorizes compilation.
-            import importlib.util, subprocess
+            import importlib.util, os, subprocess
             root = Path.home() / "project"
             brave = root / "src" / "brave"
             out = root / "src" / "out" / "android_Debug_arm64"
