@@ -138,7 +138,7 @@ class RuntimeConfigTests(unittest.TestCase):
     def test_googlechrome_siso_config_is_rejected_for_external_buildbuddy(self):
         env = self.make_env()
         env["SANDIUM_USE_GOOGLECHROME_SISO_CONFIG"] = "true"
-        with self.assertRaisesRegex(ValueError, "reserved.*Google RBE"):
+        with self.assertRaisesRegex(ValueError, "reserves.*Google RBE"):
             writer.apply_config(self.core, env)
         self.assertFalse((self.core / ".env").exists())
 
