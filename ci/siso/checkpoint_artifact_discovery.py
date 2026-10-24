@@ -300,6 +300,45 @@ def pre_download_mismatch(meta: dict[str, Any], expected: dict[str, str]) -> lis
     return mismatches
 
 
+def output_only_fingerprint_compatible(meta: dict[str, Any], expected: dict[str, str]) -> bool:
+    """Permit output-only recovery only for the audited Siso config-only delta."""
+    if not isinstance(meta, dict):
+        return False
+    # Every pre-download identity except the tracked-input fingerprint must match.
+    if any(meta.get(key) != value for key, value in expected.items()
+           if key != "build_input_fingerprint"):
+        return False
+    if meta.get("build_input_fingerprint") == expected.get("build_input_fingerprint"):
+        return False
+    source_commit = meta.get("source_commit")
+    saved_fingerprint = meta.get("build_input_fingerprint")
+    if not isinstance(source_commit, str) or not isinstance(saved_fingerprint, str):
+        return False
+    try:
+        import build_state
+        audit = build_state._fingerprint_audit(source_commit, saved_fingerprint)
+    except Exception as exc:
+        print(f"CHECKPOINT_OUTPUT_ONLY_AUDIT_ERROR={type(exc).__name__}")
+        return False
+    changed_paths = sorted(item.get("path") for item in audit.get("changed_tracked_input_paths", []))
+    allowed = ["build/config/siso/brave_siso_config.star"]
+    compatible = (
+        audit.get("historical_source_available") is True
+        and audit.get("historical_fingerprint") == saved_fingerprint
+        and audit.get("current_fingerprint") == expected.get("build_input_fingerprint")
+        and audit.get("audit_error") is None
+        and changed_paths == allowed
+    )
+    print("CHECKPOINT_OUTPUT_ONLY_FINGERPRINT_AUDIT " + json.dumps({
+        "compatible": compatible,
+        "source_commit": source_commit,
+        "historical_fingerprint": audit.get("historical_fingerprint"),
+        "current_fingerprint": audit.get("current_fingerprint"),
+        "changed_paths": changed_paths,
+    }, sort_keys=True))
+    return compatible
+
+
 def has_siso_state_pair(meta: Any) -> bool:
     """Return whether manifest has valid Siso base state and optional journal.
 
@@ -383,6 +422,9 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
     out = root / "src" / "out" / "android_Debug_arm64"
     archive_destination = root / "sandium-checkpoint.tar.zst"
     manifest_destination = root / "sandium-checkpoint.meta"
+    output_only_opt_in = os.environ.get("SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY", "").strip().lower() == "true"
+    if output_only_opt_in:
+        print("CHECKPOINT_OUTPUT_ONLY_RECOVERY=OPTED_IN")
     with tempfile.TemporaryDirectory(prefix="sandium-checkpoint-candidates-", dir=root) as temp_dir:
         temp = Path(temp_dir)
         # Candidate tuples carry an optional remote archive URL. Metadata is
@@ -438,10 +480,16 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                 if preflight_identity is not None:
                     mismatches = pre_download_mismatch(metadata, preflight_identity)
                     if mismatches:
-                        print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=pre_download_identity_mismatch")
-                        for mismatch in mismatches:
-                            print(f"CHECKPOINT_CANDIDATE_IDENTITY_MISMATCH job={job_number} {mismatch}")
-                        continue
+                        if (output_only_opt_in
+                                and all(item.startswith("build_input_fingerprint:") for item in mismatches)
+                                and output_only_fingerprint_compatible(metadata, preflight_identity)):
+                            metadata["_sandium_output_only_recovery"] = True
+                            print(f"CHECKPOINT_CANDIDATE_ACCEPTED_OUTPUT_ONLY job={job_number} reason=audited_siso_config_only_delta")
+                        else:
+                            print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=pre_download_identity_mismatch")
+                            for mismatch in mismatches:
+                                print(f"CHECKPOINT_CANDIDATE_IDENTITY_MISMATCH job={job_number} {mismatch}")
+                            continue
                 if require_siso_state and not has_siso_state_pair(metadata):
                     print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=missing_or_invalid_siso_state_metadata")
                     continue
@@ -508,10 +556,16 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                         print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=archive_integrity")
                         archive_path.unlink(missing_ok=True)
                         continue
+                output_only_recovery = metadata.pop("_sandium_output_only_recovery", False)
                 shutil.copy2(archive_path, archive_destination)
                 shutil.copy2(metadata_path, manifest_destination)
+                restore_command = [sys.executable, str(checkpoint_script),
+                                   "restore-output-only" if output_only_recovery else "restore",
+                                   "--root", str(root)]
+                if output_only_recovery:
+                    restore_command.extend(["--commit", expected_source])
                 restored = subprocess.run(
-                    [sys.executable, str(checkpoint_script), "restore", "--root", str(root)],
+                    restore_command,
                     cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 )
                 if "SANDIUM_CHECKPOINT_RESTORE=PASS" not in restored.stdout:
@@ -528,8 +582,10 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                     cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 )
                 if check.returncode == 0:
-                    print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED job={job_number} stage={metadata.get('stage')}")
+                    print(f"CROSS_WORKFLOW_CHECKPOINT={'RESTORED_OUTPUTS_ONLY' if output_only_recovery else 'RESTORED'} job={job_number} stage={metadata.get('stage')}")
                     print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS=" + json.dumps(metadata["progress"], sort_keys=True))
+                    if output_only_recovery:
+                        print("CROSS_WORKFLOW_CHECKPOINT_SISO_STATE=DISCARDED; current Siso state will be regenerated")
                     (root / ".sandium-checkpoint-discovery-status").write_text("RESTORED\n", encoding="utf-8")
                     succeeded = True
                     return 0
