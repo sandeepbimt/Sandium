@@ -46,18 +46,24 @@ def manifest(archive: bytes, **overrides):
 
 
 class CheckpointArtifactDiscoveryTests(unittest.TestCase):
-    def test_resumable_candidate_requires_both_sha256_digests(self):
+    def test_resumable_candidate_accepts_state_without_clean_shutdown_journal(self):
         data = b"checkpoint"
         output_only = manifest(data)
-        resumable = manifest(
+        state_only = manifest(data, siso_state_sha256="e" * 64)
+        state_and_journal = manifest(
             data,
             siso_state_sha256="e" * 64,
             siso_journal_sha256="f" * 64,
         )
-        one_sided = manifest(data, siso_state_sha256="e" * 64)
+        malformed_journal = manifest(
+            data,
+            siso_state_sha256="e" * 64,
+            siso_journal_sha256="not-a-digest",
+        )
         self.assertFalse(module.has_siso_state_pair(output_only))
-        self.assertFalse(module.has_siso_state_pair(one_sided))
-        self.assertTrue(module.has_siso_state_pair(resumable))
+        self.assertTrue(module.has_siso_state_pair(state_only))
+        self.assertTrue(module.has_siso_state_pair(state_and_journal))
+        self.assertFalse(module.has_siso_state_pair(malformed_journal))
 
     def test_require_siso_state_filters_before_archive_download(self):
         source = SCRIPT.read_text(encoding="utf-8")
