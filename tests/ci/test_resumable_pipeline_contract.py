@@ -142,6 +142,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('"--gn", "use_siso:true"', segment)
         self.assertIn('"--gn", "use_reclient:false"', segment)
         self.assertNotIn('expected_gn = {"use_remoteexec": "true"', segment)
+        self.assertIn("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_BEGIN", segment)
+        self.assertIn("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_END", segment)
+        self.assertIn("gn_query.returncode", segment)
+        self.assertIn("not os.access(gn, os.X_OK)", segment)
+        self.assertIn("not os.access(args, os.R_OK)", segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
