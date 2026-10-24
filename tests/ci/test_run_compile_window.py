@@ -139,5 +139,20 @@ class ResetSisoInfoTests(unittest.TestCase):
             )
 
 
+    def test_remote_workdir_input_tree_error_is_recognized(self):
+        examples = (
+            "FAILED_PRECONDITION: working directory 'out/x' is not an input directory",
+            "working directory out/x not found in input tree",
+            "not an input directory: working directory out/x missing",
+        )
+        for line in examples:
+            with self.subTest(line=line):
+                self.assertRegex(line, compile_window.REMOTE_WORKDIR_INPUT_TREE_ERROR)
+
+    def test_unrelated_remote_error_is_not_misclassified_as_workdir_failure(self):
+        self.assertNotRegex(
+            "UNAVAILABLE: remote execution worker connection reset",
+            compile_window.REMOTE_WORKDIR_INPUT_TREE_ERROR,
+        )
 if __name__ == "__main__":
     unittest.main(verbosity=2)
