@@ -166,7 +166,8 @@ def list_members(archive: Path) -> list[str]:
 
 
 def metadata_for(output: Path, state: dict[str, Any], stage: str, *, require_siso_state: bool = False) -> dict[str, Any]:
-    # Strict compile-window handovers require the Siso state/journal pair. The
+    # Strict compile-window handovers require a valid Siso base state. On clean
+    # shutdown Siso folds journal entries into that state and removes the journal;
     # permissive mode remains available for explicitly output-only checkpoints.
     validate_siso_checkpoint_pair(output, require_pair=require_siso_state)
     paths = {
