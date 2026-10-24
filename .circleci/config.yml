@@ -2775,19 +2775,19 @@ jobs:
             if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
               test -d "$OUT"
               test -s "$META"
+              test -s "$OUT/.sandium-build-state.json"
               test ! -e "$OUT/.siso_fs_state"
               test ! -L "$OUT/.siso_fs_state"
               test ! -e "$OUT/.siso_fs_state.journal"
               test ! -L "$OUT/.siso_fs_state.journal"
               python3 - "$META" "$OUT/.sandium-build-state.json" <<'PY'
-            import json, sys
+            import hashlib, json, sys
             from pathlib import Path
             meta = json.loads(Path(sys.argv[1]).read_text())
             state_path = Path(sys.argv[2])
-            if state_path.exists():
-                state = json.loads(state_path.read_text())
-                if meta.get("state_sha256") != __import__("hashlib").sha256(state_path.read_bytes()).hexdigest():
-                    raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+            state = json.loads(state_path.read_text())
+            if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
+                raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
             print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
             print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
