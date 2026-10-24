@@ -353,19 +353,33 @@ commands:
             OUT=src/out/android_Debug_arm64
             STATE=src/brave/ci/siso/build_state.py
             cache_hit=false
-            # Output metadata alone is insufficient: resuming Siso requires a
-            # non-empty regular state file AND journal from the same checkpoint.
+            # After clean Siso shutdown, .siso_fs_state is the saved snapshot and
+            # .siso_fs_state.journal is normally deleted after being folded into
+            # that snapshot. Require a valid base state; validate the journal only
+            # when an entry exists, since a missing journal is the normal clean-close case.
             SISO_STATE="$OUT/.siso_fs_state"
             SISO_JOURNAL="$OUT/.siso_fs_state.journal"
-            siso_pair_valid=false
-            if [[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE" &&
-                  -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]; then
-              siso_pair_valid=true
+            siso_state_valid=false
+            journal_entry_exists=false
+            siso_journal_valid=false
+            if [[ -f "$SISO_STATE" && ! -L "$SISO_STATE" && -s "$SISO_STATE" ]]; then
+              siso_state_valid=true
+            fi
+            if [[ -e "$SISO_JOURNAL" || -L "$SISO_JOURNAL" ]]; then
+              journal_entry_exists=true
+              if [[ -f "$SISO_JOURNAL" && ! -L "$SISO_JOURNAL" && -s "$SISO_JOURNAL" ]]; then
+                siso_journal_valid=true
+              fi
+            fi
+            siso_checkpoint_state_safe=false
+            if [[ "$siso_state_valid" == "true" &&
+                  ( "$journal_entry_exists" == "false" || "$siso_journal_valid" == "true" ) ]]; then
+              siso_checkpoint_state_safe=true
             fi
             if [[ -d "$OUT" ]] &&
                python3 "$STATE" check --mode cache --commit "${CIRCLE_SHA1:?}"; then
               cache_hit=true
-              if [[ "$siso_pair_valid" == "true" ]]; then
+              if [[ "$siso_checkpoint_state_safe" == "true" ]]; then
                 echo "BUILD_OUTPUT_CACHE=COMPATIBLE_RESUMABLE_SISO"
                 echo "SANDIUM_RESUME_MODE=FULL_SISO_STATE_AND_OUTPUTS"
               else
@@ -382,9 +396,9 @@ commands:
                 echo 'export SANDIUM_VERIFIED_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
               fi
             else
-              if [[ -d "$OUT" && "$siso_pair_valid" != "true" ]]; then
+              if [[ -d "$OUT" && "$siso_checkpoint_state_safe" != "true" ]]; then
                 echo "BUILD_OUTPUT_CACHE=OUTPUT_ONLY_SISO_STATE_MISSING stage=$STAGE_INDEX"
-                echo "SANDIUM_CHECKPOINT_RESUMABILITY=REJECTED_MISSING_STATE_PAIR"
+                echo "SANDIUM_CHECKPOINT_RESUMABILITY=REJECTED_INVALID_SISO_STATE"
               else
                 echo "BUILD_OUTPUT_CACHE=MISS_OR_INCOMPATIBLE stage=$STAGE_INDEX"
               fi
@@ -577,7 +591,7 @@ commands:
             cd "$HOME/project"
             grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
             grep -Fxq 'projects_chrome_custom_vars_reapi_instance=default' src/brave/.env
-            grep -Fxq 'siso_use_googlechrome_config=true' src/brave/.env
+            grep -Fxq 'siso_use_googlechrome_config=false' src/brave/.env
             grep -Fxq 'use_remoteexec=true' src/brave/.env
             grep -Fxq "siso_cache_dir=$HOME/project/sandium-siso-cache" src/brave/.env
             HELPER="$HOME/project/src/brave/ci/siso/buildbuddy-credential-helper.py"
@@ -612,8 +626,11 @@ commands:
             grep -Fq -- '-local_cache_enable' "$SISORC"
             grep -Fq -- "-cache_dir \"$HOME/project/sandium-siso-cache\"" "$SISORC"
             grep -Fq -- '-re_cache_enable_write=true' "$SISORC"
-            grep -Fq -- '-config googlechrome' "$SISORC"
-            echo "SANDIUM_SISO_GOOGLECHROME_POLICY=enabled"
+            if grep -Fq -- '-config googlechrome' "$SISORC"; then
+              echo "SANDIUM_SISO_GOOGLECHROME_POLICY=FAIL external BuildBuddy must not use Google-RBE preset"
+              exit 26
+            fi
+            echo "SANDIUM_SISO_GOOGLECHROME_POLICY=disabled_for_external_buildbuddy"
             echo 'export SISO_LIMITS=local=8,remote=80' >> "$BASH_ENV"
             echo "SISO_CREDENTIAL_HELPER_CONFIGURED=$HELPER"
             echo "SISO_LOCAL_CACHE_CONFIGURED=true"
