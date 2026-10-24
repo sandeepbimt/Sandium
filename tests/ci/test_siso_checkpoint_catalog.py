@@ -53,11 +53,17 @@ class CheckpointCatalogTests(unittest.TestCase):
                              siso_journal_sha256="f" * 64)
         self.assertIs(catalog_module.choose([output_only, resumable], EXPECTED), resumable)
 
-    def test_one_siso_hash_without_the_other_is_not_resumable(self):
-        one_sided = manifest(objects=50000, siso_state_sha256="e" * 64)
-        no_pair = manifest(objects=100)
-        self.assertEqual(catalog_module.rank(one_sided)[0], 0)
-        self.assertEqual(catalog_module.rank(no_pair)[0], 0)
+    def test_state_hash_without_journal_is_resumable_after_clean_shutdown(self):
+        state_only = manifest(objects=12000, siso_state_sha256="e" * 64)
+        output_only = manifest(objects=50000)
+        self.assertEqual(catalog_module.rank(state_only)[0], 1)
+        self.assertIs(catalog_module.choose([output_only, state_only], EXPECTED), state_only)
+
+    def test_invalid_journal_hash_does_not_count_as_resumable(self):
+        malformed = manifest(objects=50000, siso_state_sha256="e" * 64, siso_journal_sha256="bad")
+        output_only = manifest(objects=100)
+        self.assertEqual(catalog_module.rank(malformed)[0], 0)
+        self.assertEqual(catalog_module.rank(output_only)[0], 0)
 
     def test_incompatible_or_malformed_candidates_are_ignored(self):
         wrong_source = manifest(objects=9999, source_commit="e" * 40)
