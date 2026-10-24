@@ -381,7 +381,7 @@ commands:
               test ! -L "$OUT/.siso_fs_state"
               test ! -e "$OUT/.siso_fs_state.journal"
               test ! -L "$OUT/.siso_fs_state.journal"
-              python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" <<'PY'
+              python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
             import hashlib, json, sys
             from pathlib import Path
             meta = json.loads(Path(sys.argv[1]).read_text())
