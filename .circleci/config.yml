@@ -389,10 +389,55 @@ commands:
             state = json.loads(state_path.read_text())
             if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
                 raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+
+            # Prove the historical build inputs differ only by the audited Siso
+            # config, and that the restored GN identity still matches the checked
+            # out tree. This is validation only; it never authorizes compilation.
+            import importlib.util, subprocess
+            root = Path.home() / "project"
+            brave = root / "src" / "brave"
+            out = root / "src" / "out" / "android_Debug_arm64"
+            spec = importlib.util.spec_from_file_location(
+                "sandium_build_state_audit", brave / "ci" / "siso" / "build_state.py"
+            )
+            if spec is None or spec.loader is None:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL cannot load build-state auditor")
+            auditor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(auditor)
+            audit = auditor._fingerprint_audit(
+                str(state.get("source_commit", "")),
+                str(state.get("build_input_fingerprint", "")),
+            )
+            changed = sorted(item.get("path") for item in audit.get("changed_tracked_input_paths", []))
+            expected_changed = ["build/config/siso/brave_siso_config.star"]
+            if not audit.get("historical_source_available") or audit.get("historical_fingerprint") != state.get("build_input_fingerprint"):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL historical build-input fingerprint is not verified")
+            if audit.get("audit_error") is not None or changed != expected_changed:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL changed source inputs are not limited to the audited Siso config: " + repr(changed))
+            current_commit = subprocess.check_output(
+                ["git", "-C", str(brave), "rev-parse", "HEAD"], text=True
+            ).strip()
+            expected_commit = os.environ.get("CIRCLE_SHA1", "")
+            if expected_commit and current_commit != expected_commit:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL checked-out Brave commit differs from CircleCI commit")
+            current_gn_fingerprint = auditor._gn_fingerprint()
+            if current_gn_fingerprint != state.get("gn_args_sha256"):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL restored GN arguments do not match current build identity")
+            args = out / "args.gn"
+            generated = out / "args_generated.gni"
+            ninja = out / "build.ninja"
+            for required in (args, ninja):
+                if not required.is_file() or required.stat().st_size == 0:
+                    raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL required generated output missing: " + str(required))
+            effective = generated if 'args_generated.gni' in args.read_text(encoding="utf-8") else args
+            if not effective.is_file() or "use_siso = true" not in effective.read_text(encoding="utf-8") or "use_reclient = false" not in effective.read_text(encoding="utf-8"):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL effective GN args do not preserve Siso-only configuration")
+            print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
+            print("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
             print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
             print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
-            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_PASS")
+            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_COMPATIBILITY_PASS")
             PY
               exit 0
             fi
