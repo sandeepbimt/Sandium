@@ -343,6 +343,10 @@ commands:
                 name: Discover and restore best compatible checkpoint from prior workflows
                 command: |
                   set -euo pipefail
+                  if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+                    export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+                    echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+                  fi
                   python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
