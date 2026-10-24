@@ -144,7 +144,9 @@ def fetch(url: str, path: Path) -> None:
 def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, str, str]]:
     """List all discoverable metadata/archive URL pairs from recent build-stage jobs."""
     slugq = urllib.parse.quote(slug, safe="/")
-    url = f"{API}/project/{slugq}/pipeline?branch={urllib.parse.quote(branch)}&page-size=100"
+# Checkpoint-producing builds may live on another branch. Search recent project
+    # pipelines across branches; source fingerprints remain the compatibility gate.
+    url = f"{API}/project/{slugq}/pipeline?page-size=100"
     candidates: list[tuple[str, str, str]] = []
     artifact_listing_errors: list[str] = []
     for index, pipeline in enumerate(pages(url, token, "items")):
@@ -445,11 +447,17 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
         for candidate_slug in slug_candidates:
             try:
                 remote_urls = discover_remote_urls(candidate_slug, branch, token)
-                print("CROSS_WORKFLOW_CHECKPOINT_PROJECT_SLUG=resolved_candidate")
-                print(f"CROSS_WORKFLOW_CHECKPOINT_BRANCH={branch}")
-                print(f"CROSS_WORKFLOW_CHECKPOINT_REMOTE_ARTIFACT_PAIRS={len(remote_urls)}")
+                if remote_urls:
+                    print("CROSS_WORKFLOW_CHECKPOINT_PROJECT_SLUG=resolved_candidate")
+                    print(f"CROSS_WORKFLOW_CHECKPOINT_BRANCH={branch}")
+                    print("CROSS_WORKFLOW_CHECKPOINT_PIPELINES_BRANCH_FILTER=NONE")
+                    print(f"CROSS_WORKFLOW_CHECKPOINT_REMOTE_ARTIFACT_PAIRS={len(remote_urls)}")
+                    api_error = None
+                    break
+                # An empty result for one slug is not proof that another
+                # supported project slug has no checkpoint history.
                 api_error = None
-                break
+                continue
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:
                     api_error = exc
