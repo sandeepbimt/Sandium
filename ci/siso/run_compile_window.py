@@ -186,6 +186,48 @@ def verify_source_timestamp_baseline(root: Path, out_dir: Path) -> None:
     print(f"SOURCE_TIMESTAMP_VERIFY=PASS source_epoch={epoch} build_ninja_stamp_epoch={stamp_time}")
 
 
+def siso_runtime_identity(path_env: str | None = None) -> dict[str, str]:
+    """Report the Siso executable actually resolvable by the compile process."""
+    executable = shutil.which("siso", path=path_env)
+    if not executable:
+        return {"path": "not-found", "version": "not-probed"}
+    version = "unavailable"
+    for args in ([executable, "version"], [executable, "--version"]):
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            version = f"probe-error:{type(exc).__name__}"
+            continue
+        output = (result.stdout + "\n" + result.stderr).strip()
+        if result.returncode == 0 and output:
+            version = output.splitlines()[0][:500]
+            break
+        if output:
+            version = f"exit-{result.returncode}:{output.splitlines()[0][:400]}"
+    return {"path": str(Path(executable).resolve()), "version": version}
+
+
+def preserve_failure_diagnostics(diagnostics: Path, out_dir: Path, stage: str, siso_info: Path, metrics_path: Path, failed: bool) -> list[str]:
+    """Preserve Siso logs and failed-command scripts when a window fails."""
+    if not failed:
+        return []
+    preserved: list[str] = []
+    candidates = [
+        (siso_info, diagnostics / f"siso.INFO.failure-{stage}"),
+        (metrics_path, diagnostics / f"siso-metrics.failure-{stage}.jsonl"),
+        (out_dir / "siso_failed_commands.sh", diagnostics / f"siso_failed_commands.failure-{stage}.sh"),
+        (out_dir / "siso_output", diagnostics / f"siso_output.failure-{stage}"),
+    ]
+    for source, destination in candidates:
+        try:
+            if source.is_file() and not source.is_symlink():
+                shutil.copy2(source, destination)
+                preserved.append(str(destination))
+        except OSError:
+            continue
+    return preserved
+
+
 def count_siso_processes() -> int:
     if not shutil.which("pgrep"):
         return 0
@@ -473,6 +515,11 @@ def main() -> int:
         emit(log, "SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1")
         emit(log, "SOURCE_TIMESTAMP_VERIFY=PASS")
         emit(log, "SANDIUM_REMOTE_PREFLIGHT=PASS source=current-workflow-uncached-cxx-action")
+        siso_identity = siso_runtime_identity(env.get("PATH"))
+        emit(log, "SISO_RUNTIME_PATH=" + siso_identity["path"])
+        emit(log, "SISO_RUNTIME_VERSION=" + siso_identity["version"])
+        emit(log, "SISO_PIN_EXPECTED=git_revision:bc45e8f67ae0f37d337190ad64aa8bb440c791eb")
+        emit(log, "SISO_PIN_VERIFIED=" + str("bc45e8f67ae0f37d337190ad64aa8bb440c791eb" in siso_identity["version"]).lower())
         emit(log, "SANDIUM_PREFLIGHT_REMOTE_EXECUTED_ACTION_RECORDS=" + str(remote_preflight["probe_remote_action_records"]))
         emit(log, "EARLY_REMOTE_EXECUTION_GATE=PREPROVEN_BY_CURRENT_WORKFLOW_PREFLIGHT")
         emit(log, "REMOTE_EXECUTION_MONITORING_POLICY=NO_SEPARATE_TIME_DEADLINE")
@@ -834,6 +881,13 @@ def main() -> int:
             emit(log, "SISO_STATE_PERSISTENCE_RESULT=STATE_AND_RECOVERY_JOURNAL_AVAILABLE")
         emit(log, f"COMPILE_CHILD_EXIT_CODE={build_return_code}")
         emit(log, f"METRICS_JSON_BYTES={metrics_path.stat().st_size if metrics_path.is_file() else 0}")
+        failed_window = bool(gate_failed or timeout_seen or (build_return_code not in (None, 0)))
+        preserved = preserve_failure_diagnostics(
+            diagnostics, out_dir, args.stage, siso_info, metrics_path, failed_window,
+        )
+        emit(log, "SISO_FAILURE_DIAGNOSTICS_PRESERVED_COUNT=" + str(len(preserved)))
+        for path in preserved:
+            emit(log, "SISO_FAILURE_DIAGNOSTIC_FILE=" + path)
 
         if apk.is_file() and apk.stat().st_size >= 1_000_000:
             emit(log, "APK_PRESENT_AFTER_BUILD=true")
