@@ -446,17 +446,48 @@ commands:
             for required in (args, ninja, gn):
                 if not required.is_file() or required.stat().st_size == 0:
                     raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL required GN output/tool missing: " + str(required))
+            if not os.access(gn, os.X_OK):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN tool is not executable: "
+                    + str(gn) + " mode=" + oct(gn.stat().st_mode & 0o777)
+                )
+            if not os.access(args, os.R_OK):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL restored args.gn is not readable: " + str(args))
 
             # Do not grep args.gn or args_generated.gni: those files can omit
             # defaults and are not a reliable representation of effective GN
             # values. Ask GN for the resolved values used by this output tree.
+            # Preserve GN's own diagnostic output so a failed query is actionable
+            # instead of collapsing to an opaque CalledProcessError.
             try:
-                listed_args = subprocess.check_output(
+                gn_query = subprocess.run(
                     [str(gn), "args", str(out), "--list"],
-                    text=True, stderr=subprocess.STDOUT, timeout=30
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=30, check=False
                 )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL unable to query effective GN args: " + str(exc))
+            except subprocess.TimeoutExpired as exc:
+                diagnostic = exc.stdout or exc.stderr or ""
+                if isinstance(diagnostic, bytes):
+                    diagnostic = diagnostic.decode("utf-8", errors="replace")
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_BEGIN")
+                print(diagnostic.rstrip())
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_END")
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN args query timed out after 30s "
+                    + "command=" + repr([str(gn), "args", str(out), "--list"])
+                )
+            listed_args = gn_query.stdout or ""
+            if gn_query.returncode != 0:
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_BEGIN")
+                print(listed_args.rstrip())
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_END")
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN args query returned "
+                    + str(gn_query.returncode)
+                    + " command=" + repr([str(gn), "args", str(out), "--list"])
+                    + " args_gn_bytes=" + str(args.stat().st_size)
+                    + " build_ninja_bytes=" + str(ninja.stat().st_size)
+                )
             import re
             effective_args = {}
             for line in listed_args.splitlines():
