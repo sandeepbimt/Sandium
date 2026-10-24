@@ -129,6 +129,8 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertLess(output_only.index("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS"),
                         output_only.index("export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"))
         self.assertIn("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION", output_only)
+        self.assertIn("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED_VALIDATION_ONLY", output_only)
+        self.assertIn('CIRCLE_JOB:-}" == "stage-1-source-foundation"', output_only)
 
     def test_output_only_recovery_is_stage1_only_and_checks_effective_siso_configuration(self):
         segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
