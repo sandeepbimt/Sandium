@@ -235,7 +235,7 @@ def expected_pre_download_identity(root: Path, expected_source: str) -> dict[str
         )
     chromium_commit = git(chromium, "rev-parse", "HEAD")
     chromium_version = git(chromium, "describe", "--tags", "--exact-match", "HEAD")
-    if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+\\.\\d+", chromium_version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", chromium_version):
         raise RuntimeError(f"Chromium source tag is not a four-part numeric version: {chromium_version!r}")
 
     # Reuse the canonical implementation so pre-screening and build-state
@@ -243,7 +243,8 @@ def expected_pre_download_identity(root: Path, expected_source: str) -> dict[str
     sys.path.insert(0, str(brave / "ci" / "siso"))
     import build_state
     return {
-        "source_commit": source_commit,
+        # Historical Brave commits may differ for CI-only changes; the canonical
+        # build-input fingerprint is the compatibility gate for those changes.
         "chromium_commit": chromium_commit,
         "chromium_version": chromium_version,
         "target": "android-arm64-debug-apk",
