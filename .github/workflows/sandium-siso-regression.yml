@@ -18,8 +18,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout SANDIUM source
+      - name: Sparse-checkout CI and test inputs only
         uses: actions/checkout@v4
+        with:
+          # Avoid downloading the multi-gigabyte browser source tree for Python-only tests.
+          filter: blob:none
+          sparse-checkout: |
+            .circleci
+            .github
+            build
+            ci
+            tests
+            .gclient
+            .gitmodules
+            DEPS
+            README.md
+            package.json
+          sparse-checkout-cone-mode: true
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
