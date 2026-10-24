@@ -211,14 +211,21 @@ def discover_remote_urls(slug: str, branch: str, token: str) -> list[tuple[str, 
 
 
 def has_siso_state_pair(meta: Any) -> bool:
-    """Return whether manifest carries both valid Siso state-file digests."""
+    """Return whether manifest has valid Siso base state and optional journal.
+
+    A clean Siso shutdown folds journal data into the base state and deletes
+    the journal. State-only manifests therefore remain resumable; when a journal
+    hash is present, it must be a valid digest too.
+    """
     if not isinstance(meta, dict):
         return False
-    return all(
-        isinstance(meta.get(field), str)
-        and re.fullmatch(r"[0-9a-f]{64}", meta[field]) is not None
-        for field in ("siso_state_sha256", "siso_journal_sha256")
+    state = meta.get("siso_state_sha256")
+    journal = meta.get("siso_journal_sha256")
+    state_valid = isinstance(state, str) and re.fullmatch(r"[0-9a-f]{64}", state) is not None
+    journal_valid_or_absent = journal is None or (
+        isinstance(journal, str) and re.fullmatch(r"[0-9a-f]{64}", journal) is not None
     )
+    return state_valid and journal_valid_or_absent
 
 
 def run(root: Path, *, require_siso_state: bool = False) -> int:
