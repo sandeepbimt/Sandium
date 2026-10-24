@@ -368,7 +368,8 @@ commands:
             STATE=src/brave/ci/siso/build_state.py
             DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
-              if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ]]; then
+              if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ||
+                    "${CIRCLE_JOB:-}" != "sandium-checkpoint-restore-validation" ]]; then
                 echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_NOT_COMPILE_AUTHORIZED" >&2
                 echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
                 exit 42
