@@ -44,8 +44,14 @@ def has_remote_signature(text: str) -> bool:
 
 def state_file_snapshot(path: Path) -> dict[str, Any]:
     """Hash a Siso state file for before/after persistence diagnostics."""
-    result: dict[str, Any] = {"present": False, "bytes": 0, "sha256": None, "regular_file": False}
+    result: dict[str, Any] = {
+        "entry_exists": False, "present": False, "bytes": 0,
+        "sha256": None, "regular_file": False,
+    }
     try:
+        # A missing journal after clean shutdown is normal. Distinguish absence
+        # from an empty file, symlink, directory, or other invalid journal entry.
+        result["entry_exists"] = path.exists() or path.is_symlink()
         if path.is_symlink() or not path.is_file():
             return result
         size = path.stat().st_size
@@ -70,8 +76,15 @@ def emit_state_snapshot(log: Any, out_dir: Path, phase: str) -> list[dict[str, A
         for field, value in snap.items():
             emit(log, f"{phase}_{label}_{field.upper()}={value if value is not None else 'null'}")
         snapshots.append(snap)
-    pair_valid = all(s.get("present") and s.get("sha256") for s in snapshots)
-    emit(log, f"{phase}_SISO_STATE_PAIR_VALID={str(pair_valid).lower()}")
+    state, journal = snapshots
+    state_valid = bool(state.get("present") and state.get("sha256") and state.get("regular_file"))
+    journal_entry = bool(journal.get("entry_exists"))
+    journal_valid = bool(journal.get("present") and journal.get("sha256") and journal.get("regular_file"))
+    state_safe = state_valid and (not journal_entry or journal_valid)
+    emit(log, f"{phase}_SISO_BASE_STATE_VALID={str(state_valid).lower()}")
+    emit(log, f"{phase}_SISO_JOURNAL_ENTRY_EXISTS={str(journal_entry).lower()}")
+    emit(log, f"{phase}_SISO_JOURNAL_VALID={str(journal_valid).lower()}")
+    emit(log, f"{phase}_SISO_CHECKPOINT_STATE_SAFE={str(state_safe).lower()}")
     return snapshots
 
 
@@ -329,10 +342,10 @@ def main() -> int:
     prior_frontier_path.touch(exist_ok=True)
 
     objects_before, outputs_before = count_outputs(out_dir)
-    state_start: dict[str, tuple[bool, int]] = {}
-    for state_name in (".siso_fs_state", ".siso_fs_state.journal"):
-        snap = state_file_snapshot(out_dir / state_name)
-        state_start[state_name] = (bool(snap.get("present")), int(snap.get("bytes", 0)))
+    state_start_snapshots = [
+        state_file_snapshot(out_dir / ".siso_fs_state"),
+        state_file_snapshot(out_dir / ".siso_fs_state.journal"),
+    ]
     current_frontier: set[str] = set()
     # Ninja's [completed/total] denominator is not the remaining work. Track both
     # values and report the residual (total - completed); never use the raw graph
@@ -406,8 +419,9 @@ def main() -> int:
         emit(log, f"ACTION_FRONTIER_PRIOR_FILE_PRESENT={str(prior_frontier_file_present).lower()}")
         emit(log, f"ACTION_FRONTIER_PRIOR_FILE_BYTES={prior_frontier_file_bytes}")
         start_state_snapshots = emit_state_snapshot(log, out_dir, "STAGE_START")
-        state_pair_valid = all(present and size > 0 for present, size in state_start.values())
-        emit(log, f"STAGE_START_SISO_FS_STATE_PAIR_VALID={str(state_pair_valid).lower()}")
+        # The state file is the clean-shutdown snapshot. The journal is expected
+        # to disappear after Siso folds it into the state file on close.
+        emit(log, "STAGE_START_STATE_SNAPSHOT_RECHECKED=" + str(bool(state_start_snapshots[0].get("sha256"))).lower())
         checkpoint_archive = root / "sandium-checkpoint.tar.zst"
         checkpoint_bytes = checkpoint_archive.stat().st_size if checkpoint_archive.is_file() else 0
         emit(log, f"RESTORED_CHECKPOINT_ARCHIVE_BYTES={checkpoint_bytes}")
@@ -647,18 +661,6 @@ def main() -> int:
                 current_frontier.add(match.group(1).strip())
         if regeneration_seen:
             emit(log, "NINJA_GRAPH_REGENERATION=ALLOWED_FOR_GRAPH_REFRESH; compile still requires task-budget, remote-execution, and incremental-progress gates")
-        if not remote_seen and not (apk.is_file() and apk.stat().st_size >= 1_000_000):
-            gate_failed = True
-            stop_reason = stop_reason or (
-                "compile window recorded no actual remote-executed Siso actions; "
-                "preflight proof alone is not compile-window execution evidence"
-            )
-            emit(
-                log,
-                "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL source=compile_window "
-                "remote_executed_action_records=0 preflight_is_not_execution_proof=true",
-            )
-
         # Wait for Siso to close its state/journal before writing a checkpoint.
         siso_forced_kill = False
         siso_wait_started = time.monotonic()
@@ -686,7 +688,13 @@ def main() -> int:
         remote_metric_records = metrics.get("remote_executed_action_records", 0)
         remote_log_records = len(remote_signatures)
         apk_ready = apk.is_file() and apk.stat().st_size >= 1_000_000
+        # The metrics writer may flush its final JSONL records only as Siso exits.
+        # Final parsed metrics are authoritative even if the live poll never saw
+        # them; do not emit a premature FAIL before this final parse.
         if remote_metric_records > 0:
+            if not remote_seen:
+                emit(log, f"EARLY_REMOTE_EXECUTION_GATE=PASS source=final_metrics_after_shutdown remote_executed_action_records={remote_metric_records}")
+            remote_seen = True
             emit(log, f"ACTUAL_REMOTE_EXECUTION_METRICS_GATE=PASS source=siso_metrics_json remote_executed_action_records={remote_metric_records}")
         elif apk_ready:
             # A previously verified APK is a completed artifact; this exception
@@ -754,14 +762,27 @@ def main() -> int:
             emit(log, f"SISO_STATE_TRANSITION_{index}_CHANGED={str(before.get('sha256') != after.get('sha256')).lower()}")
         emit(log, f"SISO_SHUTDOWN_FORCED_KILL={str(siso_forced_kill).lower()}")
         emit(log, f"SISO_SHUTDOWN_STATUS={'FORCED_KILL' if siso_forced_kill else 'CLEAN'}")
-        if not all(s.get("present") and s.get("sha256") for s in end_state_snapshots):
-            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_MISSING_OR_INVALID_AFTER_SHUTDOWN")
-        elif not all(s.get("sha256") for s in start_state_snapshots):
-            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_AVAILABLE_AFTER_SHUTDOWN_START_STATE_ABSENT_OR_INVALID")
-        elif all(start_state_snapshots[i].get("sha256") == end_state_snapshots[i].get("sha256") for i in range(2)):
-            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_UNCHANGED")
+        final_state, final_journal = end_state_snapshots
+        initial_state, initial_journal = start_state_snapshots
+        final_state_valid = bool(final_state.get("present") and final_state.get("sha256") and final_state.get("regular_file"))
+        final_journal_entry = bool(final_journal.get("entry_exists"))
+        final_journal_valid = bool(final_journal.get("present") and final_journal.get("sha256") and final_journal.get("regular_file"))
+        if not final_state_valid:
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=BASE_STATE_MISSING_OR_INVALID_AFTER_SHUTDOWN")
+        elif final_journal_entry and not final_journal_valid:
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=BASE_STATE_SAVED_BUT_JOURNAL_INVALID")
+        elif siso_forced_kill:
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=STATE_PRESENT_AFTER_FORCED_SHUTDOWN_JOURNAL_PRESENT=" + str(final_journal_valid).lower())
+        elif not final_journal_entry:
+            if not initial_state.get("sha256"):
+                result = "STATE_SAVED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED"
+            elif initial_state.get("sha256") == final_state.get("sha256"):
+                result = "STATE_UNCHANGED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED"
+            else:
+                result = "STATE_UPDATED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED"
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=" + result)
         else:
-            emit(log, "SISO_STATE_PERSISTENCE_RESULT=PAIR_CHANGED_OR_REWRITTEN")
+            emit(log, "SISO_STATE_PERSISTENCE_RESULT=STATE_AND_RECOVERY_JOURNAL_AVAILABLE")
         emit(log, f"COMPILE_CHILD_EXIT_CODE={build_return_code}")
         emit(log, f"METRICS_JSON_BYTES={metrics_path.stat().st_size if metrics_path.is_file() else 0}")
 
