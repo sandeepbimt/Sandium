@@ -592,10 +592,8 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                     cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 )
                 if check.returncode == 0:
-                    print(f"CROSS_WORKFLOW_CHECKPOINT={'RESTORED_OUTPUTS_ONLY' if output_only_recovery else 'RESTORED'} job={job_number} stage={metadata.get('stage')}")
+                    print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED job={job_number} stage={metadata.get('stage')}")
                     print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS=" + json.dumps(metadata["progress"], sort_keys=True))
-                    if output_only_recovery:
-                        print("CROSS_WORKFLOW_CHECKPOINT_SISO_STATE=DISCARDED; current Siso state will be regenerated")
                     (root / ".sandium-checkpoint-discovery-status").write_text("RESTORED\n", encoding="utf-8")
                     succeeded = True
                     return 0
