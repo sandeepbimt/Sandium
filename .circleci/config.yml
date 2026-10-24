@@ -408,7 +408,8 @@ commands:
 
             # Prove the historical build inputs differ only by the audited Siso
             # config, and that the restored GN identity still matches the checked
-            # out tree. This is validation only; it never authorizes compilation.
+            # out tree. The surrounding shell grants incremental reuse only in the
+            # production Stage 1 compile job; the dedicated validation job remains read-only.
             import importlib.util, os, subprocess
             root = Path.home() / "project"
             brave = root / "src" / "brave"
@@ -487,17 +488,22 @@ commands:
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
             print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION")
             print("SANDIUM_CHECKPOINT_RESUME=INCREMENTAL_FROM_RESTORED_OUTPUTS")
-            print("SANDIUM_COMPILE_AUTHORIZATION=INCREMENTAL_OUTPUTS_ONLY")
             print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_COMPATIBILITY_PASS")
             PY
               # The restored compiled outputs and GN graph have passed identity
-              # checks. Reuse them incrementally, but never restore the old Siso
-              # filesystem state across the audited Siso-config change. A successful
-              # compile window will write a fresh resumable checkpoint for later stages.
-              echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
-              echo 'export SANDIUM_SISO_STATE_RESTORED=false' >> "$BASH_ENV"
-              echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"
-              echo "SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS"
+              # checks. Reuse them incrementally only in the production Stage 1
+              # compile job. The validation-only job never receives compile authorization.
+              if [[ "${CIRCLE_JOB:-}" == "stage-1-source-foundation" &&
+                    "<< pipeline.parameters.run_sandium_compile_windows >>" == "true" ]]; then
+                echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
+                echo 'export SANDIUM_SISO_STATE_RESTORED=false' >> "$BASH_ENV"
+                echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"
+                echo "SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS"
+                echo "SANDIUM_COMPILE_AUTHORIZATION=INCREMENTAL_OUTPUTS_ONLY"
+              else
+                echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=false"
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED_VALIDATION_ONLY"
+              fi
               exit 0
             fi
             cache_hit=false
