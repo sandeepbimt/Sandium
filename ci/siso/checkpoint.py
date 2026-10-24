@@ -341,7 +341,7 @@ def restore(root: Path, *, output_only: bool = False, expected_commit: str | Non
             state["build_input_fingerprint"] = current_fingerprint
             state["remote_backend_proven"] = False
             state["remote_metrics"] = {}
-            state_file.write_text(json.dumps(state, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+            state_file.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
             print("SANDIUM_SISO_STATE_DISCARDED=true")
             print("SANDIUM_BUILD_STATE_REBASED_TO_CURRENT_INPUTS=true")
