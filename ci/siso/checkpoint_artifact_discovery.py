@@ -577,6 +577,16 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                     print(f"CHECKPOINT_CANDIDATE_REJECTED job={job_number} reason=restore_integrity detail={detail}")
                     shutil.rmtree(out, ignore_errors=True)
                     continue
+                if output_only_recovery:
+                    print(f"CROSS_WORKFLOW_CHECKPOINT=RESTORED_OUTPUTS_ONLY job={job_number} stage={metadata.get('stage')}")
+                    print("CROSS_WORKFLOW_CHECKPOINT_PROGRESS=" + json.dumps(metadata["progress"], sort_keys=True))
+                    print("CROSS_WORKFLOW_CHECKPOINT_SISO_STATE=DISCARDED")
+                    print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+                    (root / ".sandium-checkpoint-discovery-status").write_text(
+                        "RESTORED_OUTPUTS_ONLY\\n", encoding="utf-8"
+                    )
+                    succeeded = True
+                    return 0
                 check = subprocess.run(
                     [sys.executable, str(state_script), "check", "--mode", "cache", "--commit", expected_source],
                     cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
