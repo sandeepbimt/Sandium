@@ -78,6 +78,8 @@ def render_block(
     address: str,
     instance: str,
     siso_cache_dir: str,
+    *,
+    use_googlechrome_siso_config: bool = False,
 ) -> str:
     if address != EXPECTED_ADDRESS:
         raise ValueError(
@@ -107,7 +109,7 @@ def render_block(
         f"projects_chrome_custom_vars_siso_version={SISO_VERSION_PIN}",
         f"sandium_chromium_tag={chromium_tag}",
         f"siso_cache_dir={siso_cache_dir}",
-        "siso_use_googlechrome_config=false",
+        "siso_use_googlechrome_config=" + str(use_googlechrome_siso_config).lower(),
         "use_remoteexec=true",
         END_MARKER,
     ]
@@ -143,7 +145,14 @@ def apply_config(core_dir: Path, environ: Mapping[str, str]) -> Path:
     siso_cache_dir = environ.get("SANDIUM_SISO_CACHE_DIR") or str(
         core_dir.parents[1] / "sandium-siso-cache"
     )
-    block = render_block(core_dir, address, instance, siso_cache_dir)
+    use_googlechrome_value = environ.get("SANDIUM_USE_GOOGLECHROME_SISO_CONFIG", "false").strip().lower()
+    if use_googlechrome_value not in ("true", "false"):
+        raise ValueError("SANDIUM_USE_GOOGLECHROME_SISO_CONFIG must be true or false")
+    use_googlechrome_siso_config = use_googlechrome_value == "true"
+    block = render_block(
+        core_dir, address, instance, siso_cache_dir,
+        use_googlechrome_siso_config=use_googlechrome_siso_config,
+    )
 
     env_file = core_dir / ".env"
     existing = env_file.read_text(encoding="utf-8") if env_file.exists() else (
@@ -173,6 +182,7 @@ def main() -> int:
     print(f"SANDIUM_SISO_CACHE_DIR={os.environ.get('SANDIUM_SISO_CACHE_DIR') or (core_dir.parents[1] / 'sandium-siso-cache')}")
     print(f"SANDIUM_SISO_VERSION_PIN={SISO_VERSION_PIN}")
     print(f"SANDIUM_SISO_VERSION_EXPECTED={SISO_VERSION_LABEL}")
+    print(f"SANDIUM_GOOGLECHROME_SISO_CONFIG={os.environ.get('SANDIUM_USE_GOOGLECHROME_SISO_CONFIG', 'false').strip().lower()}")
     print("SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=yes")
     print("SANDIUM_REMOTE_EXECUTION_ENABLED=yes")
     return 0
