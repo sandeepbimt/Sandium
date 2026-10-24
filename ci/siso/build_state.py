@@ -285,6 +285,62 @@ def _build_input_fingerprint(
     return digest.hexdigest()
 
 
+def _fingerprint_audit(source_commit: str, saved_fingerprint: str) -> dict[str, Any]:
+    """Explain a checkpoint fingerprint mismatch without restoring its archive."""
+    excluded_exact = {"docs/SANDIUM_PERSISTENT_CACHE_IMPLEMENTATION.md"}
+    excluded_prefixes = (".circleci/", ".github/", "ci/siso/", "tests/ci/")
+
+    def included(ref: str) -> dict[str, bytes]:
+        return {
+            path: metadata
+            for path, metadata in _tree_records(ref).items()
+            if path not in excluded_exact and not path.startswith(excluded_prefixes)
+        }
+
+    result: dict[str, Any] = {
+        "source_commit": source_commit,
+        "saved_fingerprint": saved_fingerprint,
+        "historical_source_available": False,
+        "historical_fingerprint": None,
+        "current_fingerprint": None,
+        "current_with_timestamp_hook_canonicalized": None,
+        "timestamp_hook_migration_compatible": False,
+        "changed_tracked_input_paths": [],
+        "audit_error": None,
+    }
+    try:
+        historical_records = included(source_commit)
+        current_records = included("HEAD")
+        result["historical_source_available"] = True
+        result["historical_fingerprint"] = _build_input_fingerprint(source_commit)
+        result["current_fingerprint"] = _build_input_fingerprint("HEAD")
+        try:
+            migrated = _build_input_fingerprint(
+                "HEAD", canonical_build_ts_from=source_commit
+            )
+            result["current_with_timestamp_hook_canonicalized"] = migrated
+            result["timestamp_hook_migration_compatible"] = (
+                result["historical_fingerprint"] == saved_fingerprint
+                and migrated == saved_fingerprint
+            )
+        except StateError as exc:
+            result["audit_error"] = f"timestamp-hook migration: {exc}"
+
+        paths = sorted(set(historical_records) | set(current_records))
+        changed = []
+        for path in paths:
+            if historical_records.get(path) != current_records.get(path):
+                changed.append({
+                    "path": path,
+                    "historical_blob": historical_records.get(path, b"").decode("ascii", errors="replace"),
+                    "current_blob": current_records.get(path, b"").decode("ascii", errors="replace"),
+                })
+        result["changed_tracked_input_paths"] = changed
+    except StateError as exc:
+        result["audit_error"] = str(exc)
+    return result
+
+
 def _cache_input_compatible(state: dict[str, Any], context: dict[str, Any]) -> bool:
     """Accept a previous checkpoint only when build inputs truly still match."""
     if state.get("build_input_fingerprint") == context.get("build_input_fingerprint"):
@@ -627,6 +683,14 @@ def command_record(args: argparse.Namespace) -> int:
         return 2
 
 
+def command_audit_fingerprint(args: argparse.Namespace) -> int:
+    report = _fingerprint_audit(args.source_commit, args.saved_fingerprint)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if not report["historical_source_available"] or report["audit_error"]:
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -639,6 +703,14 @@ def main() -> int:
     fingerprint = subparsers.add_parser("fingerprint", help="print validated build-input and GN fingerprints")
     fingerprint.add_argument("--commit", default=None, help="expected Brave Core commit SHA")
     fingerprint.set_defaults(func=command_fingerprint)
+
+    audit = subparsers.add_parser(
+        "audit-fingerprint",
+        help="explain checkpoint fingerprint compatibility without restoring an archive",
+    )
+    audit.add_argument("--source-commit", required=True)
+    audit.add_argument("--saved-fingerprint", required=True)
+    audit.set_defaults(func=command_audit_fingerprint)
 
     record = subparsers.add_parser("record", help="record a completed or timed-out build window")
     record.add_argument("--commit", required=True)
