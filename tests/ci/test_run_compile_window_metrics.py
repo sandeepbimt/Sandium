@@ -70,6 +70,20 @@ class ParseMetricsTests(unittest.TestCase):
         self.assertEqual(result["action_records"], 0)
         self.assertEqual(result["remote_executed_action_records"], 0)
 
+    def test_final_metrics_can_prove_remote_execution_after_live_poll_missed_it(self) -> None:
+        # The metrics writer can flush its final structured records only as the
+        # Siso process exits. The final parse must open the same execution gate.
+        final_metrics = {
+            "records": 158,
+            "action_records": 158,
+            "remote_executed_action_records": 158,
+        }
+        self.assertTrue(compile_window.metrics_prove_remote_execution(final_metrics))
+        self.assertFalse(compile_window.metrics_prove_remote_execution({
+            "remote_executed_action_records": 0,
+            "remote_cached_action_records": 158,
+        }))
+
     def test_invalid_jsonl_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "metrics.jsonl"
