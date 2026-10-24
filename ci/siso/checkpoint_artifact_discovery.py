@@ -254,12 +254,28 @@ def expected_pre_download_identity(root: Path, expected_source: str) -> dict[str
 
 
 def pre_download_mismatch(meta: dict[str, Any], expected: dict[str, str]) -> list[str]:
-    """Return exact source-derived identity mismatches before downloading an archive."""
-    return [
+    """Return source-derived identity mismatches before downloading an archive."""
+    mismatches = [
         f"{field}: candidate={meta.get(field)!r} expected={value!r}"
         for field, value in expected.items()
-        if meta.get(field) != value
+        if field != "build_input_fingerprint" and meta.get(field) != value
     ]
+    # Preserve build_state's narrowly-scoped timestamp-hook migration policy;
+    # an exact fingerprint comparison here would reject checkpoints that the
+    # canonical cache validator deliberately accepts.
+    try:
+        import build_state
+        if not build_state._cache_input_compatible(
+            meta, {"build_input_fingerprint": expected["build_input_fingerprint"]}
+        ):
+            mismatches.append(
+                "build_input_fingerprint: candidate is incompatible with current tracked build inputs"
+            )
+    except Exception as exc:
+        mismatches.append(
+            f"build_input_fingerprint: compatibility check failed ({type(exc).__name__})"
+        )
+    return mismatches
 
 
 def has_siso_state_pair(meta: Any) -> bool:
