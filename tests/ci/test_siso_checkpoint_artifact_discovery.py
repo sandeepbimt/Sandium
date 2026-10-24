@@ -46,6 +46,35 @@ def manifest(archive: bytes, **overrides):
 
 
 class CheckpointArtifactDiscoveryTests(unittest.TestCase):
+    def test_pre_download_identity_screen_reports_exact_mismatched_fields(self):
+        candidate = manifest(b"archive")
+        expected = {
+            "chromium_commit": "f" * 40,
+            "chromium_version": "151.0.7922.38",
+            "target": "android-arm64-debug-apk",
+            "build_config": "Debug",
+            "build_input_fingerprint": "c" * 64,
+        }
+        with patch.object(module, "pre_download_mismatch", wraps=module.pre_download_mismatch):
+            # The real build_state module is unavailable in this isolated test
+            # checkout, so make the canonical compatibility predicate explicit.
+            fake_build_state = type("BuildState", (), {
+                "_cache_input_compatible": staticmethod(lambda state, context: True)
+            })
+            with patch.dict(sys.modules, {"build_state": fake_build_state}):
+                mismatches = module.pre_download_mismatch(candidate, expected)
+        self.assertEqual(len(mismatches), 1)
+        self.assertIn("chromium_commit", mismatches[0])
+        self.assertIn("candidate=", mismatches[0])
+        self.assertIn("expected=", mismatches[0])
+
+    def test_source_identity_screen_is_before_archive_download(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        screen_at = source.index("pre_download_mismatch(metadata, preflight_identity)")
+        download_at = source.index("CHECKPOINT_CANDIDATE_ARCHIVE_DOWNLOAD_START")
+        self.assertLess(screen_at, download_at)
+        self.assertIn("CHECKPOINT_CANDIDATE_IDENTITY_MISMATCH", source)
+
     def test_resumable_candidate_accepts_state_without_clean_shutdown_journal(self):
         data = b"checkpoint"
         output_only = manifest(data)
