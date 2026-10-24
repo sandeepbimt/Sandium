@@ -118,6 +118,18 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertNotIn("--require-siso-state", segment)
         self.assertIn("SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS", segment)
 
+    def test_audited_output_only_checkpoint_authorizes_incremental_output_reuse(self):
+        segment = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        output_only = segment[segment.index('if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then', segment.index("Validate restored Android build output")):]
+        self.assertIn("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS", output_only)
+        self.assertIn("SANDIUM_CHECKPOINT_RESUME=INCREMENTAL_FROM_RESTORED_OUTPUTS", output_only)
+        self.assertIn("SANDIUM_COMPILE_AUTHORIZATION=INCREMENTAL_OUTPUTS_ONLY", output_only)
+        self.assertIn("export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true", output_only)
+        self.assertIn("export SANDIUM_SISO_STATE_RESTORED=false", output_only)
+        self.assertLess(output_only.index("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS"),
+                        output_only.index("export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"))
+        self.assertIn("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION", output_only)
+
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
         self.assertIn("checkpoint_artifact_discovery.py --root", CONFIG)
