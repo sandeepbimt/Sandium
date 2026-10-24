@@ -1155,7 +1155,7 @@ jobs:
             },indent=2)+"\n")
             PY
             cd src/brave
-            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" && "<< pipeline.parameters.run_sandium_stage1_bootstrap >>" != "true" ]]; then
               echo "SANDIUM_PREFLIGHT_ONLY=true"
               echo "COMPILE_WINDOW_1_SKIPPED_BY_EXPLICIT_SAFETY_GATE=true"
               echo "125" > "$HOME/project/build-diagnostics/compile-window-1-exit.txt"
@@ -1258,7 +1258,7 @@ jobs:
           name: Pack stage-1 cumulative Siso checkpoint
           command: |
             set -euo pipefail
-            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" && "<< pipeline.parameters.run_sandium_stage1_bootstrap >>" != "true" ]]; then
               echo "SANDIUM_CHECKPOINT_HANDOVER=NO_COMPILE_NO_CHECKPOINT stage=stage-1"
               echo "SANDIUM_CHECKPOINT_PACK_SKIPPED=true reason=preflight_only"
               exit 0
@@ -1268,7 +1268,7 @@ jobs:
           name: Publish stage-1 checkpoint files for cross-workflow recovery
           command: |
             set -euo pipefail
-            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" ]]; then
+            if [[ "<< pipeline.parameters.run_sandium_compile_windows >>" != "true" && "<< pipeline.parameters.run_sandium_stage1_bootstrap >>" != "true" ]]; then
               echo "CHECKPOINT_ARTIFACT_PUBLISH_SKIPPED=stage-1 reason=preflight_only"
               exit 0
             fi
@@ -2904,8 +2904,8 @@ workflows:
   # Controlled bootstrap workflow: run only Stage 1 so its checkpoint can
   # be inspected before any continuation stage is scheduled.
   sandium-stage1-bootstrap:
-    # Stage 1 can run in safe preflight-only mode with compile windows disabled.
-    # Compilation is independently gated inside the job by run_sandium_compile_windows.
+    # Stage 1 bootstrap always runs its bounded compile window and strict checkpoint handover,
+    # even when the multi-stage compile-windows switch is false. APK build remains disabled.
     when:
       and:
         - << pipeline.parameters.run_sandium_stage1_bootstrap >>
