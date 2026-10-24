@@ -446,6 +446,8 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
             try:
                 remote_urls = discover_remote_urls(candidate_slug, branch, token)
                 print("CROSS_WORKFLOW_CHECKPOINT_PROJECT_SLUG=resolved_candidate")
+                print(f"CROSS_WORKFLOW_CHECKPOINT_BRANCH={branch}")
+                print(f"CROSS_WORKFLOW_CHECKPOINT_REMOTE_ARTIFACT_PAIRS={len(remote_urls)}")
                 api_error = None
                 break
             except urllib.error.HTTPError as exc:
@@ -459,6 +461,9 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                 break
 
         preflight_identity: dict[str, str] | None = None
+        if not remote_urls:
+            print("CROSS_WORKFLOW_CHECKPOINT_REMOTE_ARTIFACT_PAIRS=0")
+            print("CHECKPOINT_PRE_DOWNLOAD_IDENTITY=NOT_RUN_NO_REMOTE_ARTIFACTS")
         if remote_urls:
             try:
                 preflight_identity = expected_pre_download_identity(root, expected_source)
