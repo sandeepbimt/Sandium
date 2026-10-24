@@ -26,8 +26,10 @@ class TimeoutPolicyTests(unittest.TestCase):
         self.assertIn("args.max_stage_seconds - elapsed_before_compile - args.handover_reserve_seconds", CONTROLLER)
         self.assertIn("elapsed >= remaining", CONTROLLER)
         # Each CircleCI stage uses the full sub-hour budget while reserving
-        # five minutes for Siso shutdown, checkpoint packaging and upload.
-        self.assertIn("--handover-reserve-seconds 300", CONFIG)
+        # ten minutes for Siso shutdown, checkpoint packaging and upload.
+        self.assertIn("--handover-reserve-seconds 600", CONFIG)
+        self.assertNotIn("--remote-execution-grace-seconds", CONFIG)
+        self.assertIn("REMOTE_EXECUTION_STARTUP_DEADLINE_ACTIVE=false", CONTROLLER)
         self.assertIn("--max-stage-seconds 3300", CONFIG)
 
     def test_circleci_quiet_step_watchdog_does_not_preempt_one_hour_stage_limit(self):
