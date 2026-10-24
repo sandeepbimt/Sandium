@@ -1,0 +1,43 @@
+name: SANDIUM Siso regression suite
+
+on:
+  push:
+    branches:
+      - build/sandium-resumable-v2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandium-siso-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-regression:
+    name: Python-only Siso and checkpoint tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout SANDIUM source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install checkpoint archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - name: Compile changed Python helpers
+        run: |
+          python3 -m py_compile \
+            ci/siso/checkpoint.py \
+            ci/siso/checkpoint_catalog.py \
+            ci/siso/checkpoint_artifact_discovery.py \
+            ci/siso/run_compile_window.py \
+            ci/siso/remote_preflight.py \
+            ci/siso/write_buildbuddy_env.py
+      - name: Run CI-only regression tests (no Chromium restore or build)
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/ci -p 'test_*.py' -v
