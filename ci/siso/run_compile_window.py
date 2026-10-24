@@ -543,25 +543,26 @@ def main() -> int:
             while True:
                 now = time.monotonic()
                 elapsed = now - started
-                if proc.poll() is None and not remote_seen and shutdown_requested_at is None:
-                    if elapsed >= args.remote_execution_grace_seconds:
+                if (proc.poll() is None and not remote_seen and shutdown_requested_at is None
+                        and now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds)):
+                    last_metrics_poll = now
+                    try:
+                        metrics_now = parse_metrics(metrics_path)
+                    except ValueError as exc:
                         gate_failed = True
-                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_action_deadline_expired=true")
-                        request_graceful_shutdown(
-                            "no uncached remote-executed Siso action within "
-                            f"{args.remote_execution_grace_seconds} seconds; refusing a long local-only compile"
-                        )
-                    elif now - last_metrics_poll >= max(1, args.metrics_poll_interval_seconds):
-                        last_metrics_poll = now
-                        try:
-                            metrics_now = parse_metrics(metrics_path)
-                        except ValueError as exc:
-                            gate_failed = True
-                            emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
-                            request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
-                            metrics_now = {"remote_executed_action_records": 0}
-                        if metrics_now.get("remote_executed_action_records", 0) > 0:
-                            remote_seen = True
+                        emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL invalid_metrics=true")
+                        request_graceful_shutdown(f"invalid Siso metrics during remote gate: {exc}")
+                        metrics_now = {"remote_executed_action_records": 0}
+                    if metrics_now.get("remote_executed_action_records", 0) > 0:
+                        remote_seen = True
+                if (proc.poll() is None and not remote_seen and shutdown_requested_at is None
+                        and elapsed >= args.remote_execution_grace_seconds):
+                    gate_failed = True
+                    emit(log, "ACTUAL_REMOTE_EXECUTION_METRICS_GATE=FAIL remote_action_deadline_expired=true")
+                    request_graceful_shutdown(
+                        "no uncached remote-executed Siso action within "
+                        f"{args.remote_execution_grace_seconds} seconds; refusing a long local-only compile"
+                    )
 
                 if proc.poll() is None and shutdown_requested_at is None and elapsed >= remaining:
                     timeout_seen = True
