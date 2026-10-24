@@ -131,7 +131,7 @@ class CheckpointTests(unittest.TestCase):
         object_file = self.output / "obj/sample/sample.o"
         result = self.invoke("pack", "--stage", "stage-1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertIn("SANDIUM_SISO_BASE_STATE=ABSENT_OR_INVALID", result.stdout)
         self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUTS_ONLY_INCREMENTAL", result.stdout)
         self.assertFalse((self.output / ".siso_fs_state.journal").exists())
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state.journal").is_file())
@@ -166,7 +166,7 @@ class CheckpointTests(unittest.TestCase):
         (self.output / ".siso_fs_state").symlink_to(self.root / "missing-state-target")
         result = self.invoke("pack", "--stage", "stage-1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertIn("SANDIUM_SISO_BASE_STATE=ABSENT_OR_INVALID", result.stdout)
         self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUTS_ONLY_INCREMENTAL", result.stdout)
         preserved = self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state"
         self.assertTrue(preserved.is_symlink())
@@ -178,7 +178,7 @@ class CheckpointTests(unittest.TestCase):
         (self.output / ".siso_fs_state").write_bytes(b"")
         result = self.invoke("pack", "--stage", "stage-1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
+        self.assertIn("SANDIUM_SISO_BASE_STATE=ABSENT_OR_INVALID", result.stdout)
         self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUTS_ONLY_INCREMENTAL", result.stdout)
         self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
         self.assertTrue((self.root / "sandium-checkpoint.tar.zst").is_file())
