@@ -304,8 +304,10 @@ class ResumablePipelineContractTests(unittest.TestCase):
 
     def test_compile_window_has_early_remote_gate_and_graceful_shutdown(self):
         wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
-        self.assertIn("REMOTE_EXECUTION_STARTUP_DEADLINE_SECONDS=", wrapper)
-        self.assertIn("remote_action_deadline_expired=true", wrapper)
+        self.assertIn("REMOTE_EXECUTION_STARTUP_DEADLINE_ACTIVE=false", wrapper)
+        self.assertIn("REMOTE_EXECUTION_POLICY=WORKFLOW_PREFLIGHT_PLUS_STRICT_REMOTE_AND_FINAL_METRICS", wrapper)
+        self.assertNotIn("remote_action_deadline_expired=true", wrapper)
+        self.assertNotIn("--remote-execution-grace-seconds", CONFIG)
         self.assertIn("SISO_GRACEFUL_SHUTDOWN_REQUESTED=SIGINT", wrapper)
         self.assertIn("SISO_SHUTDOWN_ESCALATION=SIGTERM", wrapper)
         self.assertIn("remote_cached_action_records", wrapper)
