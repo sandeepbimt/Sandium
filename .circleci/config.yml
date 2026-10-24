@@ -470,9 +470,24 @@ commands:
                         "OUTPUT_ONLY_COMPATIBILITY=FAIL Chromium source-root marker missing: "
                         + str(source_root / ".gn")
                     )
+                # Brave patches Chromium's version-code helper to import
+                # brave_version_utils from Brave Core's script/ directory.
+                # This validation runs GN directly (outside Brave's build driver),
+                # so explicitly provide the same module search path.
+                version_utils = brave / "script" / "brave_version_utils.py"
+                if not version_utils.is_file():
+                    raise SystemExit(
+                        "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave version helper missing: "
+                        + str(version_utils)
+                    )
+                query_env = os.environ.copy()
+                existing_pythonpath = query_env.get("PYTHONPATH", "")
+                query_env["PYTHONPATH"] = str(version_utils.parent) + (
+                    os.pathsep + existing_pythonpath if existing_pythonpath else ""
+                )
                 gn_query = subprocess.run(
                     [str(gn), "args", str(out), "--list"],
-                    cwd=str(source_root),
+                    cwd=str(source_root), env=query_env,
                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=30, check=False
                 )
