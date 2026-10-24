@@ -15,6 +15,40 @@ compile_window = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(compile_window)
 
 
+class SisoRuntimeDiagnosticsTests(unittest.TestCase):
+    def test_missing_siso_is_reported_without_assuming_the_pin(self):
+        identity = compile_window.siso_runtime_identity("")
+        self.assertEqual(identity, {"path": "not-found", "version": "not-probed"})
+
+    def test_failure_diagnostics_are_copied_only_for_failed_windows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            diagnostics = root / "diagnostics"
+            out_dir = root / "out"
+            diagnostics.mkdir()
+            out_dir.mkdir()
+            info = out_dir / "siso.INFO"
+            info.write_text("REAPI failure", encoding="utf-8")
+            metrics = out_dir / "metrics.jsonl"
+            metrics.write_text('{"step_id":"x","outputs":[]}\\n', encoding="utf-8")
+
+            self.assertEqual(
+                compile_window.preserve_failure_diagnostics(
+                    diagnostics, out_dir, "stage-2", info, metrics, False,
+                ),
+                [],
+            )
+            copied = compile_window.preserve_failure_diagnostics(
+                diagnostics, out_dir, "stage-2", info, metrics, True,
+            )
+            self.assertEqual(len(copied), 2)
+            self.assertEqual(
+                (diagnostics / "siso.INFO.failure-stage-2").read_text(encoding="utf-8"),
+                "REAPI failure",
+            )
+            self.assertTrue((diagnostics / "siso-metrics.failure-stage-2.jsonl").is_file())
+
+
 class ResetSisoInfoTests(unittest.TestCase):
     def test_every_args_attribute_is_declared_by_argument_parser(self):
         # Catch runtime-only Namespace typos such as using
