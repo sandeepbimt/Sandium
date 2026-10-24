@@ -147,6 +147,9 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("gn_query.returncode", segment)
         self.assertIn("not os.access(gn, os.X_OK)", segment)
         self.assertIn("not os.access(args, os.R_OK)", segment)
+        self.assertIn('source_root = root / "src"', segment)
+        self.assertIn('if not (source_root / ".gn").is_file():', segment)
+        self.assertIn('cwd=str(source_root)', segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
