@@ -135,13 +135,12 @@ class RuntimeConfigTests(unittest.TestCase):
         mode = (self.core / "ci/siso/buildbuddy-credential-helper.py").stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
 
-    def test_googlechrome_siso_config_is_explicitly_opt_in(self):
+    def test_googlechrome_siso_config_is_rejected_for_external_buildbuddy(self):
         env = self.make_env()
         env["SANDIUM_USE_GOOGLECHROME_SISO_CONFIG"] = "true"
-        env_file = writer.apply_config(self.core, env)
-        content = env_file.read_text(encoding="utf-8")
-        self.assertIn("siso_use_googlechrome_config=true", content)
-        self.assertNotIn("MUST-NEVER-BE-WRITTEN", content)
+        with self.assertRaisesRegex(ValueError, "reserved.*Google RBE"):
+            writer.apply_config(self.core, env)
+        self.assertFalse((self.core / ".env").exists())
 
     def test_invalid_googlechrome_siso_config_value_is_rejected(self):
         env = self.make_env()
