@@ -302,12 +302,28 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("STATE_UNCHANGED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED", wrapper)
         self.assertIn("STATE_UPDATED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED", wrapper)
 
+    def test_state_only_clean_shutdown_checkpoint_is_resumable_across_all_layers(self):
+        checkpoint = (ROOT / "ci/siso/checkpoint.py").read_text(encoding="utf-8")
+        runner = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
+        catalog = (ROOT / "ci/siso/checkpoint_catalog.py").read_text(encoding="utf-8")
+        discovery = (ROOT / "ci/siso/checkpoint_artifact_discovery.py").read_text(encoding="utf-8")
+        self.assertIn("the journal is optional after clean shutdown", checkpoint)
+        self.assertIn("STATE_SAVED_CLEAN_SHUTDOWN_JOURNAL_NOT_REQUIRED", runner)
+        self.assertIn("journal_valid_or_absent", catalog)
+        self.assertIn("journal_valid_or_absent", discovery)
+        restore = job_segment("restore-sandium-build-output", "restore-sandium-siso-cache")
+        self.assertIn('"$journal_entry_exists" == "false" || "$siso_journal_valid" == "true"', " ".join(restore.split()))
+        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=RESUMABLE_SISO_STATE", CONFIG)
+        self.assertNotIn('all(siso_present)', CONFIG)
+
     def test_compile_window_has_early_remote_gate_and_graceful_shutdown(self):
         wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
         self.assertIn("REMOTE_EXECUTION_STARTUP_DEADLINE_ACTIVE=false", wrapper)
         self.assertIn("REMOTE_EXECUTION_POLICY=WORKFLOW_PREFLIGHT_PLUS_STRICT_REMOTE_AND_FINAL_METRICS", wrapper)
         self.assertNotIn("remote_action_deadline_expired=true", wrapper)
         self.assertNotIn("--remote-execution-grace-seconds", CONFIG)
+        build = (ROOT / "build/commands/lib/build.ts").read_text(encoding="utf-8")
+        self.assertIn("config.extraNinjaOpts.push('-strict_remote', '-metrics_json', metricsPath, `-j${jobs}`)", build)
         self.assertIn("SISO_GRACEFUL_SHUTDOWN_REQUESTED=SIGINT", wrapper)
         self.assertIn("SISO_SHUTDOWN_ESCALATION=SIGTERM", wrapper)
         self.assertIn("remote_cached_action_records", wrapper)
