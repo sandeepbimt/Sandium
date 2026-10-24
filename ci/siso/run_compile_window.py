@@ -515,7 +515,7 @@ def main() -> int:
         emit(log, "SOURCE_TIMESTAMP_POLICY=epoch_946684800_full_tree_v1")
         emit(log, "SOURCE_TIMESTAMP_VERIFY=PASS")
         emit(log, "SANDIUM_REMOTE_PREFLIGHT=PASS source=current-workflow-uncached-cxx-action")
-        siso_identity = siso_runtime_identity(env.get("PATH"))
+        siso_identity = siso_runtime_identity(os.environ.get("PATH"))
         emit(log, "SISO_RUNTIME_PATH=" + siso_identity["path"])
         emit(log, "SISO_RUNTIME_VERSION=" + siso_identity["version"])
         emit(log, "SISO_PIN_EXPECTED=git_revision:bc45e8f67ae0f37d337190ad64aa8bb440c791eb")
