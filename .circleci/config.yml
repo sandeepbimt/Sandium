@@ -572,6 +572,11 @@ commands:
             fi
             git check-ignore -q .env
             cd "$HOME/project"
+            # Re-render .sisorc from the just-written runtime .env, otherwise a
+            # cached/stale .sisorc can silently keep the old remote-action policy.
+            cd src/brave
+            node --input-type=module -e 'import { writeSisoRc } from "./build/commands/lib/sisoUtils.ts"; writeSisoRc(); console.log("SANDIUM_SISORC_REGENERATED_FROM_RUNTIME_ENV=true")'
+            cd "$HOME/project"
             grep -Fxq 'rbe_service=remote.buildbuddy.io:443' src/brave/.env
             grep -Fxq 'projects_chrome_custom_vars_reapi_instance=default' src/brave/.env
             grep -Fxq 'siso_use_googlechrome_config=true' src/brave/.env
@@ -776,6 +781,7 @@ jobs:
             export SANDIUM_REAPI_INSTANCE=default
             export SANDIUM_SISO_CACHE_DIR="$HOME/project/sandium-siso-cache"
             export SANDIUM_ENABLE_TRUSTED_RE_CACHE_WRITE=true
+            export SANDIUM_USE_GOOGLECHROME_SISO_CONFIG=true
             python3 ci/siso/write_buildbuddy_env.py
             python3 ci/siso/chromium_pin.py --workspace "$HOME/project"
             set +e
