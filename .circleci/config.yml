@@ -424,14 +424,34 @@ commands:
             if current_gn_fingerprint != state.get("gn_args_sha256"):
                 raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL restored GN arguments do not match current build identity")
             args = out / "args.gn"
-            generated = out / "args_generated.gni"
             ninja = out / "build.ninja"
-            for required in (args, ninja):
+            gn = root / "src" / "buildtools" / "linux64" / "gn"
+            for required in (args, ninja, gn):
                 if not required.is_file() or required.stat().st_size == 0:
-                    raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL required generated output missing: " + str(required))
-            effective = generated if 'args_generated.gni' in args.read_text(encoding="utf-8") else args
-            if not effective.is_file() or "use_siso = true" not in effective.read_text(encoding="utf-8") or "use_reclient = false" not in effective.read_text(encoding="utf-8"):
-                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL effective GN args do not preserve Siso-only configuration")
+                    raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL required GN output/tool missing: " + str(required))
+
+            # Do not grep args.gn or args_generated.gni: those files can omit
+            # defaults and are not a reliable representation of effective GN
+            # values. Ask GN for the resolved values used by this output tree.
+            try:
+                listed_args = subprocess.check_output(
+                    [str(gn), "args", str(out), "--list"],
+                    text=True, stderr=subprocess.STDOUT, timeout=30
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL unable to query effective GN args: " + str(exc))
+            import re
+            effective_args = {}
+            for line in listed_args.splitlines():
+                match = re.match(r"^\\s*(use_remoteexec|use_siso|use_reclient)\\s*=\\s*(true|false)\\s*(?:#.*)?$", line)
+                if match:
+                    effective_args[match.group(1)] = match.group(2)
+            expected_gn = {"use_remoteexec": "true", "use_siso": "true", "use_reclient": "false"}
+            if any(effective_args.get(name) != value for name, value in expected_gn.items()):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL effective GN values do not preserve required Siso-only configuration: "
+                    + repr({"expected": expected_gn, "observed": effective_args})
+                )
             print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
             print("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
