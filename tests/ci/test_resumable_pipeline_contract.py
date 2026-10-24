@@ -291,6 +291,15 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_UNCHANGED", wrapper)
         self.assertIn("SISO_STATE_PERSISTENCE_RESULT=PAIR_CHANGED_OR_REWRITTEN", wrapper)
 
+    def test_compile_window_has_early_remote_gate_and_graceful_shutdown(self):
+        wrapper = (ROOT / "ci/siso/run_compile_window.py").read_text(encoding="utf-8")
+        self.assertIn("REMOTE_EXECUTION_STARTUP_DEADLINE_SECONDS=", wrapper)
+        self.assertIn("remote_action_deadline_expired=true", wrapper)
+        self.assertIn("SISO_GRACEFUL_SHUTDOWN_REQUESTED=SIGINT", wrapper)
+        self.assertIn("SISO_SHUTDOWN_ESCALATION=SIGTERM", wrapper)
+        self.assertIn("remote_cached_action_records", wrapper)
+        self.assertIn("fast_local_action_records", wrapper)
+
     def test_siso_action_cache_is_shared_across_branches(self):
         self.assertIn("sandium-siso-v4-android-debug-arm64-", CONFIG)
         for stage in range(1, 6):
