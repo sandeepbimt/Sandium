@@ -2819,6 +2819,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_siso_build_state.py
             python3 tests/ci/test_resumable_pipeline_contract.py
             echo "SANDIUM_CHECKPOINT_UNIT_TESTS=PASS"
