@@ -583,7 +583,7 @@ def run(root: Path, *, require_siso_state: bool = False) -> int:
                     print("CROSS_WORKFLOW_CHECKPOINT_SISO_STATE=DISCARDED")
                     print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
                     (root / ".sandium-checkpoint-discovery-status").write_text(
-                        "RESTORED_OUTPUTS_ONLY\\n", encoding="utf-8"
+                        "RESTORED_OUTPUTS_ONLY\n", encoding="utf-8"
                     )
                     succeeded = True
                     return 0
