@@ -335,18 +335,14 @@ def restore(root: Path, *, output_only: bool = False, expected_commit: str | Non
             elif not path.is_file() or sha256_file(path) != expected:
                 raise CheckpointError("Checkpoint file failed integrity validation: {}".format(path.name))
         if output_only:
-            # Verify the original Siso state against the manifest above, then discard it.
-            # The source/config audit is the sole authority for rebasing this build-state record.
+            # Preserve the historical build-state record as evidence; never relabel old
+            # outputs as compiled against current inputs. This result is not compile-authorized
+            # until a separate current-Siso validation is implemented.
             for name in (".siso_fs_state", ".siso_fs_state.journal"):
                 (restored / name).unlink(missing_ok=True)
-            state["source_commit"] = expected_commit
-            state["build_input_fingerprint"] = current_fingerprint
-            state["remote_backend_proven"] = False
-            state["remote_metrics"] = {}
-            state_file.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
             print("SANDIUM_SISO_STATE_DISCARDED=true")
-            print("SANDIUM_BUILD_STATE_REBASED_TO_CURRENT_INPUTS=true")
+            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
 
         destination = root / "src" / OUTPUT_REL
         destination.parent.mkdir(parents=True, exist_ok=True)
