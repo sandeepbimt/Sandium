@@ -32,6 +32,10 @@ parameters:
   run_sandium_checkpoint_restore_validation:
     type: boolean
     default: false
+  # Inspection-only recovery: salvage compiled outputs but never authorize compilation.
+  enable_sandium_output_only_checkpoint_recovery:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -339,12 +343,22 @@ commands:
                 name: Discover and restore best compatible checkpoint from prior workflows
                 command: |
                   set -euo pipefail
+                  if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+                    export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+                    echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+                  fi
                   python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
             set -euo pipefail
-            python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
+            DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              echo "SANDIUM_CHECKPOINT_NORMAL_SISO_RESTORE=SKIPPED_OUTPUTS_ONLY"
+              echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED"
+            else
+              python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
+            fi
       - run:
           name: Validate restored Android build output and enforce stage handover
           command: |
@@ -352,6 +366,36 @@ commands:
             STAGE_INDEX=<< parameters.stage_index >>
             OUT=src/out/android_Debug_arm64
             STATE=src/brave/ci/siso/build_state.py
+            DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ||
+                    "${CIRCLE_JOB:-}" != "sandium-checkpoint-restore-validation" ]]; then
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_NOT_COMPILE_AUTHORIZED" >&2
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
+                exit 42
+              fi
+              test -d "$OUT"
+              test -s "$HOME/project/sandium-checkpoint.meta"
+              test -s "$OUT/.sandium-build-state.json"
+              test ! -e "$OUT/.siso_fs_state"
+              test ! -L "$OUT/.siso_fs_state"
+              test ! -e "$OUT/.siso_fs_state.journal"
+              test ! -L "$OUT/.siso_fs_state.journal"
+              python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
+            import hashlib, json, sys
+            from pathlib import Path
+            meta = json.loads(Path(sys.argv[1]).read_text())
+            state_path = Path(sys.argv[2])
+            state = json.loads(state_path.read_text())
+            if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
+                raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+            print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
+            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
+            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_PASS")
+            PY
+              exit 0
+            fi
             cache_hit=false
             # After clean Siso shutdown, .siso_fs_state is the saved snapshot and
             # .siso_fs_state.journal is normally deleted after being folded into
@@ -709,6 +753,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_resumable_pipeline_contract.py
   stage-1-source-foundation:
     machine:
@@ -2693,10 +2738,14 @@ jobs:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
+            if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+              export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+              echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+            fi
             python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
             STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
-            if [[ "$STATUS" == "RESTORED" ]]; then
+            if [[ "$STATUS" == "RESTORED" || "$STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
               META="$ROOT/sandium-checkpoint.meta"
               python3 - "$META" \<<'PY'
             import json, sys
@@ -2762,6 +2811,30 @@ jobs:
             OUT="$ROOT/src/out/android_Debug_arm64"
             STATE="$ROOT/src/brave/ci/siso/build_state.py"
             META="$ROOT/sandium-checkpoint.meta"
+            DISCOVERY_STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              test -d "$OUT"
+              test -s "$META"
+              test -s "$OUT/.sandium-build-state.json"
+              test ! -e "$OUT/.siso_fs_state"
+              test ! -L "$OUT/.siso_fs_state"
+              test ! -e "$OUT/.siso_fs_state.journal"
+              test ! -L "$OUT/.siso_fs_state.journal"
+              python3 - "$META" "$OUT/.sandium-build-state.json" \<<'PY'
+            import hashlib, json, sys
+            from pathlib import Path
+            meta = json.loads(Path(sys.argv[1]).read_text())
+            state_path = Path(sys.argv[2])
+            state = json.loads(state_path.read_text())
+            if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
+                raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+            print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
+            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
+            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_PASS")
+            PY
+              exit 0
+            fi
             test -s "$OUT/.sandium-build-state.json"
             test -s "$META"
             EXPECTED_COMMIT="$(git -C "$ROOT/src/brave" rev-parse HEAD)"
@@ -2810,6 +2883,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_siso_build_state.py
             python3 tests/ci/test_resumable_pipeline_contract.py
             echo "SANDIUM_CHECKPOINT_UNIT_TESTS=PASS"

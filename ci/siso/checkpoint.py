@@ -18,6 +18,17 @@ class CheckpointError(RuntimeError):
     pass
 
 
+def _git_head(path: Path) -> str:
+    """Return the checked-out commit for a Git working tree."""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True, stderr=subprocess.PIPE, timeout=15,
+        ).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CheckpointError("Cannot determine checked-out source commit at {}: {}".format(path, exc)) from exc
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -255,7 +266,7 @@ def pack(root: Path, stage: str, *, require_siso_state: bool = False) -> None:
     print("SANDIUM_CHECKPOINT_RESUMABILITY={}".format("RESUMABLE_SISO_STATE" if meta.get("siso_state_sha256") else "OUTPUTS_ONLY_INCREMENTAL"))
 
 
-def restore(root: Path) -> int:
+def restore(root: Path, *, output_only: bool = False, expected_commit: str | None = None) -> int:
     root = root.resolve()
     archive, manifest = root / "sandium-checkpoint.tar.zst", root / "sandium-checkpoint.meta"
     if not archive.is_file() or not manifest.is_file():
@@ -284,10 +295,43 @@ def restore(root: Path) -> int:
         state = read_json(state_file)
         validate_state(state)
         validate_siso_checkpoint_pair(restored)
-        for field in ("source_commit", "chromium_commit", "chromium_version", "target",
-                      "build_config", "build_input_fingerprint", "gn_args_sha256"):
+        identity_fields = ["source_commit", "chromium_commit", "chromium_version",
+                           "target", "build_config", "build_input_fingerprint", "gn_args_sha256"]
+        for field in identity_fields:
+            if output_only and field == "build_input_fingerprint":
+                continue
             if state.get(field) != meta.get(field):
                 raise CheckpointError("Checkpoint metadata mismatch for {}".format(field))
+
+        current_fingerprint = None
+        if output_only:
+            if not expected_commit or not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
+                raise CheckpointError("Output-only recovery requires an explicit current source commit")
+            if _git_head(root / "src" / "brave") != expected_commit:
+                raise CheckpointError("Output-only recovery commit does not match the checked-out Brave source")
+            # The only permitted source-input delta is the audited Siso execution config.
+            import build_state
+            audit = build_state._fingerprint_audit(
+                str(state.get("source_commit", "")),
+                str(state.get("build_input_fingerprint", "")),
+            )
+            current_fingerprint = build_state._build_input_fingerprint("HEAD")
+            changed_paths = sorted(
+                item.get("path") for item in audit.get("changed_tracked_input_paths", [])
+            )
+            if not (
+                audit.get("historical_source_available") is True
+                and audit.get("historical_fingerprint") == state.get("build_input_fingerprint")
+                and audit.get("current_fingerprint") == current_fingerprint
+                and audit.get("audit_error") is None
+                and changed_paths == ["build/config/siso/brave_siso_config.star"]
+            ):
+                raise CheckpointError(
+                    "Output-only recovery rejected: build-input audit did not prove an exact Siso-config-only delta"
+                )
+            if state.get("chromium_commit") != meta.get("chromium_commit"):
+                raise CheckpointError("Output-only recovery Chromium commit mismatch")
+            print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
         check_files = {
             "state_sha256": state_file, "args_gn_sha256": args_file,
             "build_ninja_sha256": ninja_file,
@@ -301,6 +345,16 @@ def restore(root: Path) -> int:
                     raise CheckpointError("Unexpected Siso checkpoint file: {}".format(path.name))
             elif not path.is_file() or sha256_file(path) != expected:
                 raise CheckpointError("Checkpoint file failed integrity validation: {}".format(path.name))
+        if output_only:
+            # Preserve the historical build-state record as evidence; never relabel old
+            # outputs as compiled against current inputs. This result is not compile-authorized
+            # until a separate current-Siso validation is implemented.
+            for name in (".siso_fs_state", ".siso_fs_state.journal"):
+                (restored / name).unlink(missing_ok=True)
+            print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
+            print("SANDIUM_SISO_STATE_DISCARDED=true")
+            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+
         destination = root / "src" / OUTPUT_REL
         destination.parent.mkdir(parents=True, exist_ok=True)
         backup = temp_root / "previous-output"
@@ -340,9 +394,10 @@ def restore(root: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("pack", "restore"))
+    parser.add_argument("action", choices=("pack", "restore", "restore-output-only"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[4])
     parser.add_argument("--stage", choices=ALLOWED_STAGES, default=None)
+    parser.add_argument("--commit", default=None, help="current source commit; required for restore-output-only")
     parser.add_argument("--require-siso-state", action="store_true", help="fail pack unless nonempty Siso filesystem state is present; the journal is optional after clean shutdown")
     args = parser.parse_args()
     try:
@@ -351,6 +406,8 @@ def main() -> int:
                 parser.error("--stage is required for pack")
             pack(args.root, args.stage, require_siso_state=args.require_siso_state)
             return 0
+        if args.action == "restore-output-only":
+            return restore(args.root, output_only=True, expected_commit=args.commit)
         return restore(args.root)
     except (CheckpointError, OSError, ValueError) as exc:
         print("SANDIUM_CHECKPOINT_PACK=FAIL ({})".format(exc), file=sys.stderr)
