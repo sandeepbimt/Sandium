@@ -92,6 +92,49 @@ class BuildStateTests(unittest.TestCase):
             )
         )
 
+    def test_fingerprint_audit_accepts_only_timestamp_hook_migration(self):
+        build_ts = self.root / "build" / "commands" / "lib" / "build.ts"
+        build_ts.parent.mkdir(parents=True, exist_ok=True)
+        build_ts.write_text("const before = true;\\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "build/commands/lib/build.ts"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-qm", "baseline timestamp hook"], check=True)
+        historical_commit = subprocess.check_output(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        saved = state_module._build_input_fingerprint(historical_commit)
+        build_ts.write_text("const after = true;\\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "build/commands/lib/build.ts"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-qm", "timestamp hook change"], check=True)
+        report = state_module._fingerprint_audit(historical_commit, saved)
+        self.assertTrue(report["historical_source_available"])
+        self.assertEqual(report["historical_fingerprint"], saved)
+        self.assertTrue(report["timestamp_hook_migration_compatible"])
+        self.assertEqual(
+            [item["path"] for item in report["changed_tracked_input_paths"]],
+            ["build/commands/lib/build.ts"],
+        )
+
+    def test_fingerprint_audit_rejects_real_tracked_input_change(self):
+        baseline_file = self.root / "tracked-build-input.txt"
+        baseline_file.write_text("old input\\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "tracked-build-input.txt"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-qm", "baseline build input"], check=True)
+        historical_commit = subprocess.check_output(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        saved = state_module._build_input_fingerprint(historical_commit)
+        baseline_file.write_text("new input\\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "tracked-build-input.txt"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-qm", "changed build input"], check=True)
+        report = state_module._fingerprint_audit(historical_commit, saved)
+        self.assertTrue(report["historical_source_available"])
+        self.assertEqual(report["historical_fingerprint"], saved)
+        self.assertFalse(report["timestamp_hook_migration_compatible"])
+        self.assertIn(
+            "tracked-build-input.txt",
+            [item["path"] for item in report["changed_tracked_input_paths"]],
+        )
+
     def test_chromium_identity_uses_synced_git_tag_not_declared_package_tag_or_VERSION(self):
         self.assertEqual(state_module._chromium_version(), "156.1.100.0")
 
