@@ -113,7 +113,7 @@ class CheckpointTests(unittest.TestCase):
         (self.output / ".siso_fs_state.journal").unlink()
         result = self.invoke("pack", "--stage", "stage-1", "--require-siso-state")
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn("Cannot pack a resumable checkpoint without Siso filesystem state and journal", result.stderr)
+        self.assertIn("Cannot pack a resumable checkpoint without a valid nonempty Siso filesystem state", result.stderr)
         self.assertFalse((self.root / "sandium-checkpoint.tar.zst").exists())
 
     def test_pack_rejects_bad_chromium_version(self):
@@ -138,17 +138,28 @@ class CheckpointTests(unittest.TestCase):
         self.assertTrue(object_file.is_file())
         self.assertTrue((self.root / "sandium-checkpoint.tar.zst").is_file())
 
-    def test_pack_quarantines_siso_state_without_journal_and_preserves_outputs(self):
+    def test_clean_shutdown_state_without_journal_is_resumable(self):
+        # Siso folds the journal into the state on clean close, then removes the
+        # journal. Do not quarantine or reject that valid state-only checkpoint.
         (self.output / ".siso_fs_state.journal").unlink()
         object_file = self.output / "obj/sample/sample.o"
-        result = self.invoke("pack", "--stage", "stage-1")
+        expected = object_file.read_bytes()
+        result = self.invoke("pack", "--stage", "stage-1", "--require-siso-state")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("SANDIUM_SISO_CHECKPOINT_PAIR=ABSENT", result.stdout)
-        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=OUTPUTS_ONLY_INCREMENTAL", result.stdout)
-        self.assertFalse((self.output / ".siso_fs_state").exists())
-        self.assertTrue((self.root / "build-diagnostics/siso-checkpoint-orphans/stage-1-.siso_fs_state").is_file())
+        self.assertIn("SANDIUM_CHECKPOINT_REQUIRE_SISO_STATE=PASS", result.stdout)
+        self.assertIn("SANDIUM_CHECKPOINT_RESUMABILITY=RESUMABLE_SISO_STATE", result.stdout)
+        self.assertTrue((self.output / ".siso_fs_state").is_file())
+        self.assertFalse((self.output / ".siso_fs_state.journal").exists())
+        meta = json.loads((self.root / "sandium-checkpoint.meta").read_text(encoding="utf-8"))
+        self.assertIsNotNone(meta["siso_state_sha256"])
+        self.assertIsNone(meta["siso_journal_sha256"])
+        packed = self.invoke("restore")
+        self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
+        self.assertIn("SANDIUM_CHECKPOINT_RESTORE=PASS", packed.stdout)
+        self.assertIn("SANDIUM_SISO_STATE_PRESENT=true", packed.stdout)
+        self.assertIn("SANDIUM_SISO_JOURNAL_PRESENT=false", packed.stdout)
+        self.assertEqual((self.output / "obj/sample/sample.o").read_bytes(), expected)
         self.assertTrue(object_file.is_file())
-        self.assertTrue((self.root / "sandium-checkpoint.tar.zst").is_file())
 
     def test_pack_quarantines_dangling_siso_state_symlink(self):
         (self.output / ".siso_fs_state").unlink()
