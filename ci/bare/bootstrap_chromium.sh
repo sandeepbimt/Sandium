@@ -101,10 +101,10 @@ case "$MODE" in
     # fetch android itself runs gclient sync at the current tip before returning.
     # That meant the prior direct-pin step happened too late. Configure only,
     # pin Chromium directly, then do one dependency sync against the pinned DEPS.
-    FETCH_LOG="$ROOT/sandium-fetch.log"
-    SYNC_LOG="$ROOT/sandium-gclient-sync.log"
-    CONFIG_LOG="$ROOT/sandium-gclient-config.log"
-    GIT_TRACE_LOG="$ROOT/sandium-git-trace.log"
+    : > "$FETCH_LOG"
+    : > "$SYNC_LOG"
+    : > "$CONFIG_LOG"
+    : > "$GIT_TRACE_LOG"
     export GIT_TRACE="$GIT_TRACE_LOG"
     export GIT_TERMINAL_PROMPT=0
     export GIT_CONFIG_COUNT=2
