@@ -4,7 +4,11 @@ set +x
 STAGE="$1"; [[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
 ROOT="${CIRCLE_WORKING_DIRECTORY:-$HOME/project}"; ROOT="${ROOT/#\~/$HOME}"; CONTROL="$ROOT/sandium-control"; TS_EPOCH=946684800; TS_POLICY=epoch_946684800_full_tree_v1
 HANDOFF="$ROOT/ci-handoff/stage-$STAGE"; LEDGER="$HANDOFF/ledger.json"; STATUS="$HANDOFF/status.txt"
-PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"
+PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"mkdir -p "$ROOT/sandium-output"
+: > "$ROOT/sandium-fetch.log"
+: > "$ROOT/sandium-gclient-sync.log"
+: > "$ROOT/sandium-gclient-config.log"
+: > "$ROOT/sandium-git-trace.log"
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
 : > "$LOG"; : > "$METRICS"
