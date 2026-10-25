@@ -5,16 +5,6 @@ STAGE="$1"; [[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
 ROOT="${CIRCLE_WORKING_DIRECTORY:-$HOME/project}"; ROOT="${ROOT/#\~/$HOME}"; CONTROL="$ROOT/sandium-control"; TS_EPOCH=946684800; TS_POLICY=epoch_946684800_full_tree_v1
 HANDOFF="$ROOT/ci-handoff/stage-$STAGE"; LEDGER="$HANDOFF/ledger.json"; STATUS="$HANDOFF/status.txt"
 PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"
-if [[ "$STAGE" -gt 1 ]]; then
-  test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
-  if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
-    mkdir -p "$HANDOFF" "$ROOT/sandium-output"
-    cp "$PREV" "$LEDGER"
-    cp "$PREV_STATUS" "$STATUS"
-    echo APK_FAST_PATH=PASS
-    exit 0
-  fi
-fi
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
 : > "$LOG"; : > "$METRICS"
@@ -31,6 +21,15 @@ echo "DIAG_WORKFLOW_ID=${CIRCLE_WORKFLOW_ID:-unknown}"
 echo "DIAG_BUILD_NUM=${CIRCLE_BUILD_NUM:-unknown}"
 echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+if [[ "$STAGE" -gt 1 ]]; then
+  test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
+  if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
+    cp "$PREV" "$LEDGER"
+    cp "$PREV_STATUS" "$STATUS"
+    echo "APK_FAST_PATH=PASS propagated_previous_stage=$((STAGE-1))"
+    exit 0
+  fi
+fi
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
 
 DEPOT="$HOME/depot_tools"; PIN=""
@@ -63,8 +62,9 @@ if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
 fi
 export DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
 echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci"
-# Like the proven Afterbird workflow, each fresh stage recreates the pinned source;
-# only the expensive generated output tree is handed off via the checkpoint cache.
+# Each stage recreates the exact Bare-pinned source/build graph. Compiled action
+# reuse must come from the existing BuildBuddy/Siso remote cache; CircleCI persists
+# only the small source-bound stage ledger, not Chromium output checkpoints.
 echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 bash -n "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"
 python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py"
@@ -78,11 +78,6 @@ for f in "$SRC" "$SRC/DEPS" "$SRC/chrome/VERSION" "$SRC/build/config/compiler/co
 echo "SOURCE_TIMESTAMP_POLICY=$TS_POLICY"; echo SOURCE_TIMESTAMP_VERIFY=PASS
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
 test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
-if [[ "$STAGE" -gt 1 ]]; then
-  test -s "$ROOT/sandium-bare-checkpoint.tar.zst" || { echo "SANDIUM_CHECKPOINT_MISSING=previous stage cache did not restore checkpoint archive" >&2; exit 50; }
-  test -s "$ROOT/sandium-bare-checkpoint.meta" || { echo "SANDIUM_CHECKPOINT_METADATA_MISSING=previous stage cache did not restore metadata" >&2; exit 51; }
-  python3 "$CONTROL/ci/bare/checkpoint.py" restore --root "$ROOT"
-fi
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
@@ -122,9 +117,6 @@ if [[ "$STAGE" -eq 1 ]]; then
   PREV_ARGS=()
 else
   PREV_ARGS=(--previous "$PREV")
-fi
-if [[ -d "$OUT" ]]; then
-  python3 "$CONTROL/ci/bare/checkpoint.py" pack --root "$ROOT"
 fi
 if [[ "$COMPLETE" == true ]]; then
   python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
