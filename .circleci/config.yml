@@ -347,7 +347,8 @@ commands:
                     export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
                     echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
                   fi
-                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
+                  test -x /usr/bin/python3 || { echo "SANDIUM_SYSTEM_PYTHON_PREFLIGHT=FAIL"; exit 127; }
+                  /usr/bin/python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
@@ -2950,7 +2951,8 @@ jobs:
               export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
               echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
             fi
-            python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
+            test -x /usr/bin/python3 || { echo "SANDIUM_SYSTEM_PYTHON_PREFLIGHT=FAIL"; exit 127; }
+            /usr/bin/python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
             STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
             if [[ "$STATUS" == "RESTORED" || "$STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
