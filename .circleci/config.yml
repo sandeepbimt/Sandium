@@ -1,4 +1,9 @@
 version: 2.1
+
+# SOURCE MIGRATION SAFETY:
+# This branch inherits the existing five-stage CI integration, but source-dependent steps are not yet Bare-compatible.
+# Every workflow is blocked by run_sandium_bare_source_ready=false until the Bare adapter and cache identities are reviewed.
+# Never enable that flag merely to make a workflow run. Preserve existing credentials, endpoint/instance assignments and caches.
 parameters:
   # Safety gate: remains false until every source-dependent step is adapted and reviewed for Bare.
   # Existing workflows and credentials are preserved; this flag prevents accidental execution of legacy source steps.
