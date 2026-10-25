@@ -8,7 +8,7 @@
 
 Sandium's only active browser-source authority is Bare Browser and the exact Chromium revision pinned by the selected Bare snapshot. Do not use this default branch as a build-ready browser source. The source migration is being developed on the branch named migration/bare-source-adapter.
 
-That migration branch preserves the existing five-stage CircleCI / BuildBuddy / Siso integration but keeps all workflows blocked by the parameter run_sandium_bare_source_ready=false until every source-dependent step, cache identity, checkpoint, artifact check and test is adapted and reviewed.
+That branch now contains a Bare-only, opt-in source preflight and a full-build workflow that fails closed. The five-stage compile/restore/publish pipeline is not yet wired because persistent Chromium source and build-output storage has not been proven within the existing CircleCI account. The existing CircleCI project, BuildBuddy endpoint/instance, protected credential assignment and cache service remain unchanged.
 
 ## Infrastructure preservation
 
