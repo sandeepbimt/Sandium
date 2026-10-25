@@ -10,7 +10,16 @@ CHROMIUM_COMMIT="1228231501697ff7a4a0150ea8ae6df37bb99331"
 CHROMIUM_VERSION="156.0.8078.25"
 EXPECTED_PATCH_COUNT=164
 
-ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONTROL_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+# The existing CircleCI workflow checks the Sandium control repository out under
+# $HOME/project/brave-core and keeps Chromium at $HOME/project/src. Infer that
+# existing workspace layout without adding new CircleCI variables.
+if [[ "$(basename "$CONTROL_ROOT")" == "brave-core" ]]; then
+  ROOT="$(cd "$CONTROL_ROOT/.." && pwd)"
+else
+  ROOT="$CONTROL_ROOT"
+fi
 BARE_DIR="${SANDIUM_BARE_DIR:-$ROOT/bare-browser}"
 MODE="${1:-inspect}"
 
@@ -25,12 +34,15 @@ case "$MODE" in
     ;;
 esac
 
-if [[ ! -d "$BARE_DIR/.git" ]]; then
+if [[ ! -e "$BARE_DIR" ]]; then
   mkdir -p "$BARE_DIR"
   git -C "$BARE_DIR" init
   git -C "$BARE_DIR" remote add origin "$BARE_REPO_URL"
   git -C "$BARE_DIR" fetch --depth=1 origin "$BARE_COMMIT"
   git -C "$BARE_DIR" checkout --detach FETCH_HEAD
+elif [[ ! -d "$BARE_DIR/.git" ]]; then
+  echo "BARE_DIR_EXISTS_BUT_IS_NOT_A_GIT_CHECKOUT path=$BARE_DIR" >&2
+  exit 9
 fi
 
 actual_bare_commit="$(git -C "$BARE_DIR" rev-parse HEAD)"
@@ -96,7 +108,11 @@ if [[ -n "$(git -C "$CHROMIUM_SRC" status --porcelain)" ]]; then
 fi
 
 # Patch filenames are zero-padded and sorted under LC_ALL=C for deterministic order.
-git -C "$CHROMIUM_SRC" am --3way "$PATCH_DIR"/*.patch
+if ! git -C "$CHROMIUM_SRC" am --3way "$PATCH_DIR"/*.patch; then
+  git -C "$CHROMIUM_SRC" am --abort || true
+  echo "BARE_PATCH_APPLICATION=FAIL; patch application was aborted to restore the original checkout." >&2
+  exit 23
+fi
 
 target_dir="$CHROMIUM_SRC/chrome/browser/resources/bare"
 mkdir -p "$target_dir"
