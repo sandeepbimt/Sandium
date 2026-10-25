@@ -59,7 +59,7 @@ if [[ ! -x "$DEPOT_TOOLS/fetch" || ! -x "$DEPOT_TOOLS/gclient" || ! -x "$DEPOT_T
 fi
 export PATH="$DEPOT_TOOLS:$PATH"
 
-"$BARE_ADAPTER" inspect
+bash "$BARE_ADAPTER" inspect
 python3 "$CONTROL_ROOT/ci/bare/write_cache_identity.py"
 
 if [[ ! -d "$ROOT/src/.git" ]]; then
@@ -82,7 +82,7 @@ if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
   exit 33
 fi
 
-"$BARE_ADAPTER" apply
+bash "$BARE_ADAPTER" apply
 "$DEPOT_TOOLS/gclient" runhooks
 
 test -x "$ROOT/src/build/install-build-deps.sh"
