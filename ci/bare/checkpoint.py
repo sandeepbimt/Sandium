@@ -47,14 +47,19 @@ def load_and_validate(root: Path, control: Path, archive: Path, meta: Path) -> d
         raise IdentityError("Unsupported Bare checkpoint metadata schema")
     if saved.get("archive_sha256") != sha256(archive):
         raise IdentityError("Checkpoint archive SHA-256 mismatch")
-    current = source_identity(control, root)
-    current_digest = identity_digest(current)
-    if saved.get("build_identity_sha256") != current_digest:
-        changed = sorted(
-            key for key, value in current.items()
-            if saved.get("build_identity", {}).get(key) != value
-        )
-        raise IdentityError("Checkpoint source/build identity mismatch: " + ",".join(changed))
+    current = source_identity(control, root, require_gn=False)
+    saved_identity = saved.get("build_identity", {})
+    changed = sorted(
+        key for key, value in current.items()
+        if key != "gn_args_sha256" and saved_identity.get(key) != value
+    )
+    if changed:
+        raise IdentityError("Checkpoint source identity mismatch: " + ",".join(changed))
+    # If an output tree is already present, compare the full generated-GN identity.
+    if current.get("gn_args_sha256") is not None:
+        current_full = source_identity(control, root, require_gn=True)
+        if identity_digest(current_full) != saved.get("build_identity_sha256"):
+            raise IdentityError("Checkpoint build identity mismatch, including generated GN arguments")
     return saved
 
 
@@ -110,14 +115,39 @@ def main() -> int:
     if args.mode == "verify":
         return 0
 
-    # Validation occurs before extraction. Extract only the expected output root.
-    subprocess.run(
-        ["tar", "--use-compress-program=zstd", "-xf", str(archive), "-C", str(root), str(OUT_RELATIVE)],
-        check=True,
-    )
-    if not output.is_dir():
-        raise IdentityError("Checkpoint extraction did not restore the expected Android output directory")
+    # Extract to an isolated temporary root first. Preserve any pre-existing output
+    # directory as a backup rather than deleting it; only swap after extraction passes.
+    with tempfile.TemporaryDirectory(prefix="sandium-bare-restore.", dir=str(root)) as temp_name:
+        temp_root = Path(temp_name)
+        subprocess.run(
+            ["tar", "--use-compress-program=zstd", "-xf", str(archive), "-C", str(temp_root), str(OUT_RELATIVE)],
+            check=True,
+        )
+        staged_output = temp_root / OUT_RELATIVE
+        if not staged_output.is_dir():
+            raise IdentityError("Checkpoint archive does not contain the expected Android output directory")
+        previous = output.with_name("android_Debug_arm64.pre-restore-backup")
+        if previous.exists():
+            raise IdentityError(f"Refusing to overwrite existing preserved output backup: {previous}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if output.exists():
+            os.replace(output, previous)
+        try:
+            os.replace(staged_output, output)
+            restored_identity = source_identity(control, root, require_gn=True)
+            if identity_digest(restored_identity) != saved.get("build_identity_sha256"):
+                raise IdentityError("Restored output identity differs from checkpoint metadata")
+        except Exception:
+            if output.exists():
+                failed = output.with_name("android_Debug_arm64.failed-restore")
+                if not failed.exists():
+                    os.replace(output, failed)
+            if previous.exists():
+                os.replace(previous, output)
+            raise
+        # The pre-restore backup remains intentionally preserved for manual recovery.
     print("SANDIUM_BARE_CHECKPOINT_RESTORE=PASS")
+    print("SANDIUM_PREVIOUS_OUTPUT_PRESERVED=" + str(output.with_name("android_Debug_arm64.pre-restore-backup")))
     return 0
 
 
