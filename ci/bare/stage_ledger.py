@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate source-bound Siso/BuildBuddy execution and cross-stage progress."""
 from __future__ import annotations
-import argparse, hashlib, json, re, sys
+import argparse, hashlib, json, os, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_identity import IdentityError, control_and_workspace, read_pins, source_identity, verify_apk
@@ -128,7 +128,7 @@ def main() -> int:
     if a.stage > 1:
         if handoff.get("SANDIUM_STATE_HANDOFF") != "RESTORED":
             raise IdentityError("Later stage must restore the immediately preceding stage's Siso state")
-        if handoff.get("source_stage") != a.stage - 1 or handoff.get("source_workflow_id") != __import__("os").environ.get("CIRCLE_WORKFLOW_ID", "unknown"):
+        if handoff.get("source_stage") != a.stage - 1 or handoff.get("source_workflow_id") != os.environ.get("CIRCLE_WORKFLOW_ID", "unknown"):
             raise IdentityError("State handoff does not originate from the immediately preceding stage in this workflow")
         if handoff.get("build_identity_sha256") != ident_hash:
             raise IdentityError("State handoff build identity differs from current stage")
