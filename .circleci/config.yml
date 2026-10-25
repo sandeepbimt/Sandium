@@ -1,11 +1,11 @@
 version: 2.1
 
 # SANDIUM BARE-ONLY CI CONTRACT
-# This branch intentionally exposes only a source-level preflight. The full
-# five-stage build is not ready until source/output persistence and cache handover
-# are proven. Do not copy old source-specific workflows into this config.
-# Existing CircleCI project, BuildBuddy endpoint/instance, protected secret
-# assignment and cache service are reused; no credentials or caches are recreated.
+# Isolated Bare APK attempt. Each stage recreates the pinned source and restores
+# the previous stage's compressed Android output checkpoint from a workflow-scoped
+# CircleCI cache, following the proven Afterbird staged-build pattern.
+# Existing CircleCI project, BuildBuddy endpoint/instance and protected secret
+# assignment are reused; no credentials are recreated or caches deleted.
 
 parameters:
   run_sandium_bare_source_preflight:
@@ -237,8 +237,8 @@ workflows:
     jobs:
       - sandium-bare-build-not-ready
 
-  # Explicitly isolated, single-use build lane. All ordinary branches and workflows
-  # remain fail-closed; only pushing this dedicated branch starts this APK attempt.
+  # Explicitly isolated build lane. Trigger it manually on this branch with
+  # run_sandium_bare_apk_once=true; ordinary pushes do not start the APK workflow.
   sandium-bare-apk-once:
     when:
       and:
