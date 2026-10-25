@@ -219,7 +219,7 @@ else
 fi
 python3 "$STATE_TOOL" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
 echo "DIAG_STAGE_OUT_SIZE=$(du -sh "$OUT" 2>/dev/null | cut -f1 || true)"
-echo "DIAG_CHECKPOINT_SIZE=$(stat -c %s "$ROOT/sandium-bare-checkpoint.tar.zst" 2>/dev/null || echo 0)"
+echo "DIAG_SISO_STATE_CAPSULE_SIZE=$(stat -c %s "$STATE_ARCHIVE" 2>/dev/null || echo 0)"
 echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
 trap - EXIT
 exit 0
