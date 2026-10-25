@@ -98,10 +98,45 @@ case "$MODE" in
     : "${BUILDBUDDY_API_KEY:?Existing protected BuildBuddy credential is unavailable; stop without creating a replacement}"
 
     cd "$ROOT"
-    "$DEPOT_TOOLS/fetch" --no-history --nohooks android
+    # Capture fetch/gclient output continuously; Chromium dependency sync can be quiet.
+    FETCH_LOG="$ROOT/sandium-fetch.log"
+    SYNC_LOG="$ROOT/sandium-gclient-sync.log"
+    echo "SANDIUM_FETCH_BEGIN_UTC=$(date -u +%FT%TZ)"
+    echo "SANDIUM_FETCH_COMMAND=fetch --no-history --nohooks --verbose android"
+    set +e
+    "$DEPOT_TOOLS/fetch" --no-history --nohooks --verbose android 2>&1 | tee "$FETCH_LOG"
+    fetch_rc=${PIPESTATUS[0]}
+    set -e
+    echo "SANDIUM_FETCH_END_UTC=$(date -u +%FT%TZ)"
+    echo "SANDIUM_FETCH_EXIT_CODE=$fetch_rc"
+    if [[ "$fetch_rc" -ne 0 ]]; then
+      echo "SANDIUM_FETCH_FAILURE_DIAGNOSTICS_BEGIN"
+      ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 50 || true
+      git -C "$ROOT/src" status --short --branch 2>&1 || true
+      find "$ROOT" -maxdepth 2 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 100 || true
+      tail -n 250 "$FETCH_LOG" 2>/dev/null || true
+      echo "SANDIUM_FETCH_FAILURE_DIAGNOSTICS_END"
+      exit "$fetch_rc"
+    fi
     test -f "$ROOT/.gclient"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
-    "$DEPOT_TOOLS/gclient" sync --no-history --nohooks --revision "src@$CHROMIUM_COMMIT"
+    echo "SANDIUM_GCLIENT_SYNC_BEGIN_UTC=$(date -u +%FT%TZ)"
+    echo "SANDIUM_GCLIENT_SYNC_COMMAND=gclient sync --verbose --no-history --nohooks --revision src@$CHROMIUM_COMMIT"
+    set +e
+    "$DEPOT_TOOLS/gclient" sync --verbose --no-history --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$SYNC_LOG"
+    sync_rc=${PIPESTATUS[0]}
+    set -e
+    echo "SANDIUM_GCLIENT_SYNC_END_UTC=$(date -u +%FT%TZ)"
+    echo "SANDIUM_GCLIENT_SYNC_EXIT_CODE=$sync_rc"
+    if [[ "$sync_rc" -ne 0 ]]; then
+      echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_BEGIN"
+      ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 50 || true
+      git -C "$CHROMIUM_SRC" status --short --branch 2>&1 || true
+      find "$ROOT" -maxdepth 3 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 100 || true
+      tail -n 300 "$SYNC_LOG" 2>/dev/null || true
+      echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_END"
+      exit "$sync_rc"
+    fi
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
