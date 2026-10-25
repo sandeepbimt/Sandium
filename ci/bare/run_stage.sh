@@ -37,10 +37,39 @@ if [[ "$STAGE" -gt 1 ]]; then
   if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
     cp "$PREV" "$LEDGER"
     cp "$PREV_STATUS" "$STATUS"
+    python3 - "$STATE_REPORT" "$PREV" "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" <<'PY'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+p.write_text(json.dumps({
+ "schema":1,"SANDIUM_STATE_HANDOFF":"SKIPPED_APK_ALREADY_VERIFIED",
+ "current_stage":int(sys.argv[3]),"current_workflow_id":sys.argv[4],
+ "previous_ledger":str(sys.argv[2]),"reason":"No remaining build actions; verified APK was already available",
+ "local_compiled_outputs_restored":False
+},indent=2,sort_keys=True)+"\n",encoding="utf-8")
+PY
     echo "APK_FAST_PATH=PASS propagated_previous_stage=$((STAGE-1))"
+    echo "SANDIUM_BUILD_WORK_REMAINING=no"
     exit 0
   fi
 fi
+# A compatible prior useful run may already contain a verified APK. Validate the
+# cache identity, saved manifest, SHA-256, ZIP structure, and recorded signature
+# verification before skipping any source/build work.
+if [[ "$STAGE" -eq 1 && -s "$STATE_ARCHIVE" && -s "$STATE_META" && -s "$ROOT/sandium-output/Sandium-debug-arm64.apk" && -s "$ROOT/sandium-output/build-manifest.json" ]]; then
+  set +e
+  python3 "$STATE_TOOL" reuse-apk --root "$ROOT" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json" --ledger "$LEDGER" --status "$STATUS" --report "$STATE_REPORT"
+  REUSE_RC=$?
+  set -e
+  if [[ "$REUSE_RC" -eq 0 && -s "$STATUS" ]] && grep -qx 'BUILD_FINISHED=true' "$STATUS"; then
+    echo "SANDIUM_PRIOR_APK_REUSE=PASS"
+    echo "SANDIUM_SOURCE_SYNC_RUN=no"
+    echo "SANDIUM_GN_GENERATION_RUN=no"
+    echo "SANDIUM_COMPILATION_RUN=no"
+    exit 0
+  fi
+fi
+
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
 
 DEPOT="$HOME/depot_tools"; PIN=""
