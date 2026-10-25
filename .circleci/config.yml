@@ -1,9 +1,8 @@
 version: 2.1
 
 # SANDIUM BARE-ONLY CI CONTRACT
-# Isolated Bare APK attempt. Each stage recreates the pinned source and restores
-# the previous stage's compressed Android output checkpoint from a workflow-scoped
-# CircleCI cache, following the proven Afterbird staged-build pattern.
+# Bare-only source migration. Full APK builds stay disabled until source preflight
+# and existing BuildBuddy/Siso integration review are complete.
 # Existing CircleCI project, BuildBuddy endpoint/instance and protected secret
 # assignment are reused; no credentials are recreated or caches deleted.
 
@@ -77,20 +76,6 @@ jobs:
             echo "SANDIUM_BARE_CACHE_IDENTITY=PASS"
             echo "CHROMIUM_CHECKOUT_CREATED=no"
             echo "EXISTING_CACHE_DATA_MODIFIED=no"
-
-  sandium-bare-build-not-ready:
-    docker:
-      - image: cimg/python:3.12
-    working_directory: ~/project
-    steps:
-      - run:
-          name: Fail closed until the Bare five-stage pipeline is reviewed
-          command: |
-            echo "SANDIUM_BARE_FULL_BUILD=BLOCKED"
-            echo "Reason: the five-stage workflow has not yet been wired to the Bare source identity/checkpoint adapters."
-            echo "The current CircleCI account's ability to persist the Chromium source and build output within existing limits is not proven."
-            echo "No Chromium sync, compilation, APK packaging, credential mutation or cache deletion was attempted."
-            exit 78
 
   sandium-bare-build-not-ready:
     docker:
