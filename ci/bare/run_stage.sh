@@ -30,6 +30,14 @@ if [[ ! -d "$DEPOT/.git" ]]; then git clone --no-tags --depth=1 https://chromium
 if [[ -n "$PIN" && "$(git -C "$DEPOT" rev-parse HEAD)" != "$PIN" ]]; then git -C "$DEPOT" fetch --depth=1 origin "$PIN"; git -C "$DEPOT" checkout --force --detach "$PIN"; fi
 export PATH="$DEPOT:$PATH" DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
 echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci"
+if [[ "$STAGE" -gt 1 && ! -d "$ROOT/src/.git" ]]; then
+  echo "SANDIUM_STAGE_HANDOFF_MISSING=Chromium source tree was not restored from the prior stage; refusing to repeat source sync." >&2
+  exit 44
+fi
+if [[ "$STAGE" -gt 1 && ! -s "$ROOT/src/out/android_Debug_arm64/build.ninja" ]]; then
+  echo "SANDIUM_STAGE_HANDOFF_MISSING=Generated GN/Ninja output was not restored from the prior stage; refusing to regenerate or rebuild from scratch." >&2
+  exit 44
+fi
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
 SRC="$ROOT/src"; OUT="$SRC/out/android_Debug_arm64"; SDIR="$SRC/build/config/siso"
 test -s "$SDIR/.sisoenv"; printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
