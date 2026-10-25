@@ -737,7 +737,7 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            ./ci/bare/prepare_source.sh inspect
+            bash ./ci/bare/prepare_source.sh inspect
             python3 ci/bare/write_cache_identity.py
       - run:
           name: Verify source boundary and current cache identity inputs
