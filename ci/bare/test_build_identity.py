@@ -33,8 +33,9 @@ class BuildIdentityTests(unittest.TestCase):
                 archive.writestr("AndroidManifest.xml", b"manifest-placeholder")
                 archive.writestr("classes.dex", b"dex-placeholder")
                 archive.writestr("assets/padding.bin", b"x" * 1_100_000)
-            result = MODULE.verify_apk(apk, {"artifact_name": "Sandium-debug-arm64.apk"})
-            self.assertTrue(result["artifact_verified"])
+            result = MODULE.verify_apk(apk, {"artifact_name": "Sandium-debug-arm64.apk"}, require_signature=False)
+            self.assertFalse(result["artifact_verified"])
+            self.assertEqual(result["apksigner_verification"], "NOT_REQUESTED")
             self.assertEqual(result["apk_zip_integrity"], "PASS")
             self.assertEqual(len(result["artifact_sha256"]), 64)
 
