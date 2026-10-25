@@ -412,7 +412,7 @@ commands:
               }
               (
                 cd "$BRAVE"
-                python3 build/util/version.py gen ../chrome/VERSION
+                /usr/bin/python3 build/util/version.py gen ../chrome/VERSION
               )
               test -s "$BRAVE/build/version.gni" || {
                 echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave version.gni generation failed" >&2
