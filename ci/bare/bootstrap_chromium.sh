@@ -223,8 +223,12 @@ SANDIUM_GCLIENT_SPEC
     check_patched_source
     : "${BUILDBUDDY_API_KEY:?Existing protected BuildBuddy credential is unavailable; stop without creating a replacement}"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
+    test -s "$CHROMIUM_SRC/.gn" || { echo "SANDIUM_CHROMIUM_ROOT_MARKER_MISSING=$CHROMIUM_SRC/.gn" >&2; exit 36; }
     test -x "$CHROMIUM_SRC/build/install-build-deps.sh"
-    sudo "$CHROMIUM_SRC/build/install-build-deps.sh" --android
+    # install-build-deps.py locates Chromium's source root from the current
+    # working directory. Call the wrapper while cwd is the actual src root.
+    echo "SANDIUM_INSTALL_BUILD_DEPS_CWD=$CHROMIUM_SRC"
+    (cd "$CHROMIUM_SRC" && sudo ./build/install-build-deps.sh --android)
 
     GN="$CHROMIUM_SRC/buildtools/linux64/gn"
     test -x "$GN"
