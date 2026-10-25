@@ -114,18 +114,19 @@ def source_identity(control: Path, workspace: Path) -> dict[str, Any]:
         raise IdentityError("Pinned extension CRX checksum mismatch")
 
     chromium_head = git(chromium, "rev-parse", "HEAD")
-    if chromium_head != pins["chromium_commit"]:
-        # Once the ordered patch series is applied, the original pin is the
-        # first parent chain's base. The adapter verifies the count and exact base.
-        try:
-            base = git(chromium, "rev-parse", f"HEAD~{len(patches)}")
-        except IdentityError:
-            base = ""
-        if base != pins["chromium_commit"]:
-            raise IdentityError(
-                f"Chromium source identity mismatch: HEAD={chromium_head}, "
-                f"base_after_{len(patches)}_patches={base}, expected={pins['chromium_commit']}"
-            )
+    if chromium_head == pins["chromium_commit"]:
+        raise IdentityError("Bare patch series has not been applied to the pinned Chromium checkout")
+    # Bare's ordered patches are applied as one commit per patch. Confirm the
+    # exact pinned Chromium revision is the base below that patch series.
+    try:
+        base = git(chromium, "rev-parse", f"HEAD~{len(patches)}")
+    except IdentityError:
+        base = ""
+    if base != pins["chromium_commit"]:
+        raise IdentityError(
+            f"Chromium source identity mismatch: HEAD={chromium_head}, "
+            f"base_after_{len(patches)}_patches={base}, expected={pins['chromium_commit']}"
+        )
     version_file = chromium / "chrome" / "VERSION"
     if not version_file.is_file():
         raise IdentityError("Chromium chrome/VERSION is missing")
@@ -186,7 +187,7 @@ def source_identity(control: Path, workspace: Path) -> dict[str, Any]:
         "target": TARGET,
         "target_abi": pins["target_abi"],
         "build_config": pins["build_config"],
-        "toolchain_depot_tools_commit": git(workspace / "depot_tools", "rev-parse", "HEAD"),
+        "toolchain_depot_tools_commit": git(Path.home() / "depot_tools", "rev-parse", "HEAD"),
         "siso_version": siso.splitlines()[0][:500],
         "gn_args_sha256": args_digest.hexdigest(),
         "gclient_sha256": sha256(gclient),
