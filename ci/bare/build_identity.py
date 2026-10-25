@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -197,7 +199,12 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
     }
 
 
-def verify_apk(apk: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+def verify_apk(
+    apk: Path,
+    manifest: dict[str, Any],
+    workspace: Path | None = None,
+    require_signature: bool = True,
+) -> dict[str, Any]:
     if not apk.is_file() or apk.is_symlink():
         raise IdentityError(f"APK is missing or not a regular file: {apk}")
     size = apk.stat().st_size
@@ -215,13 +222,37 @@ def verify_apk(apk: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         name.startswith("classes") and name.endswith(".dex") for name in names
     ):
         raise IdentityError("APK lacks AndroidManifest.xml or DEX bytecode")
+    signature_status = "NOT_REQUESTED"
+    if require_signature:
+        candidates: list[Path] = []
+        resolved = shutil.which("apksigner")
+        if resolved:
+            candidates.append(Path(resolved))
+        if workspace is not None:
+            build_tools = workspace / "src" / "third_party" / "android_build_tools" / "sdk" / "build-tools"
+            if build_tools.is_dir():
+                candidates.extend(sorted(build_tools.glob("*/apksigner"), reverse=True))
+        apksigner = next((p for p in candidates if p.is_file() and os.access(p, os.X_OK)), None)
+        if apksigner is None:
+            raise IdentityError("Android apksigner is unavailable; refusing to mark APK verified")
+        try:
+            result = subprocess.run(
+                [str(apksigner), "verify", "--verbose", "--print-certs", str(apk)],
+                text=True, capture_output=True, timeout=60, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise IdentityError(f"APK signature verification could not run: {exc}") from exc
+        if result.returncode != 0:
+            raise IdentityError("APK signature verification failed: " + (result.stderr or result.stdout)[:1200])
+        signature_status = "PASS"
     return {
         "artifact_name": manifest["artifact_name"],
         "artifact_bytes": size,
         "artifact_sha256": sha256(apk),
         "apk_zip_integrity": "PASS",
         "apk_manifest_and_dex": "PASS",
-        "artifact_verified": True,
+        "apksigner_verification": signature_status,
+        "artifact_verified": signature_status == "PASS" if require_signature else False,
     }
 
 
@@ -246,7 +277,7 @@ def main() -> int:
 
     identity = source_identity(control, workspace)
     if args.mode == "record":
-        artifact = verify_apk(apk, {**identity, "artifact_name": pins["artifact_name"]}) if apk.exists() else {
+        artifact = verify_apk(apk, {**identity, "artifact_name": pins["artifact_name"]}, workspace=workspace) if apk.exists() else {
             "artifact_name": pins["artifact_name"], "artifact_verified": False
         }
         manifest = {
@@ -271,14 +302,14 @@ def main() -> int:
     if saved_identity != identity:
         changed = sorted(k for k in identity if saved.get(k) != identity[k])
         raise IdentityError("Build/source identity mismatch in fields: " + ",".join(changed))
-    artifact = verify_apk(apk, {**identity, "artifact_name": pins["artifact_name"]})
+    artifact = verify_apk(apk, {**identity, "artifact_name": pins["artifact_name"]}, workspace=workspace)
     if saved.get("artifact_sha256") != artifact["artifact_sha256"] or saved.get("artifact_bytes") != artifact["artifact_bytes"]:
         raise IdentityError("APK does not match the saved manifest SHA-256/size")
     print("SANDIUM_BUILD_IDENTITY=PASS")
     print("SANDIUM_APK_INTEGRITY=PASS")
     print("SANDIUM_APK_SHA256=" + artifact["artifact_sha256"])
     print("SANDIUM_APK_BYTES=" + str(artifact["artifact_bytes"]))
-    print("SANDIUM_APK_PACKAGE_NAME=NOT_INFERRED")
+    print("SANDIUM_APKSIGNER_VERIFICATION=PASS")
     return 0
 
 
