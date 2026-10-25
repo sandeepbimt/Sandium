@@ -5,6 +5,10 @@ version: 2.1
 # Every workflow is blocked by run_sandium_bare_source_ready=false until the Bare adapter and cache identities are reviewed.
 # Never enable that flag merely to make a workflow run. Preserve existing credentials, endpoint/instance assignments and caches.
 parameters:
+  # Cheap, source-only checks. This workflow never syncs Chromium or compiles.
+  run_sandium_bare_source_preflight:
+    type: boolean
+    default: false
   # Safety gate: remains false until every source-dependent step is adapted and reviewed for Bare.
   # Existing workflows and credentials are preserved; this flag prevents accidental execution of legacy source steps.
   run_sandium_bare_source_ready:
@@ -699,6 +703,46 @@ commands:
             cat "$ROOT/build-diagnostics/source-timestamp-policy.txt"
 
 jobs:
+  sandium-bare-source-preflight:
+    docker:
+      - image: cimg/python:3.12
+    working_directory: ~/project
+    steps:
+      - checkout:
+          path: sandium-control
+      - run:
+          name: Validate Bare adapter scripts without Chromium sync or compilation
+          command: |
+            set -euo pipefail
+            cd "$HOME/project/sandium-control"
+            python3 -m py_compile ci/bare/build_identity.py ci/bare/configure_siso.py
+            bash -n ci/bare/prepare_source.sh
+            python3 ci/bare/build_identity.py --help >/dev/null
+            python3 ci/bare/configure_siso.py --help >/dev/null
+            test -s ci/bare/source-pin.txt
+            grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
+            grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
+            grep -Fxq 'chromium_version=156.0.8078.25' ci/bare/source-pin.txt
+            echo "SANDIUM_BARE_ADAPTER_SYNTAX=PASS"
+            echo "SANDIUM_SOURCE_PINS=PASS"
+            echo "CHROMIUM_SYNC_RUN=no"
+            echo "SISO_RUN=no"
+            echo "COMPILATION_RUN=no"
+            echo "APK_BUILD_RUN=no"
+      - run:
+          name: Inspect pinned Bare patch series and extension checksum
+          command: |
+            set -euo pipefail
+            cd "$HOME/project/sandium-control"
+            ./ci/bare/prepare_source.sh inspect
+      - run:
+          name: Verify source boundary and current cache identity inputs
+          command: |
+            set -euo pipefail
+            cd "$HOME/project/sandium-control"
+            ! grep -R -n -E 'src/brave|brave-core|Bravearm64\\.apk|Brave-debug-arm64\\.apk' ci/bare
+            echo "SANDIUM_ACTIVE_ADAPTER_SOURCE_BOUNDARY=PASS"
+            echo "EXISTING_BUILD_WORKFLOWS=BLOCKED_BY_CLOSED_READINESS_GATE"
   sandium-fast-regression-gate:
     docker:
       - image: cimg/python:3.12
@@ -3008,3 +3052,7 @@ workflows:
       - smoke-5-independent-handover-verification:
           requires:
             - smoke-4-cache-and-artifact-contract
+  sandium-bare-source-preflight:
+    when: << pipeline.parameters.run_sandium_bare_source_preflight >>
+    jobs:
+      - sandium-bare-source-preflight
