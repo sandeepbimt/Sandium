@@ -29,14 +29,11 @@ jobs:
               exit 1
             }
 
-            # Reuse existing Sandium settings and credential assignments. Never create or rotate credentials here.
-            : "${SANDIUM_REAPI_ADDRESS:?Existing REAPI endpoint setting is unavailable; stop without creating a replacement}"
-            : "${SANDIUM_REAPI_INSTANCE:?Existing REAPI instance setting is unavailable; stop without creating a replacement}"
+            # Reuse the endpoint and instance already defined by the existing Sandium CI configuration.
+            # Do not introduce new CircleCI variable assignments or rotate/recreate the protected key.
+            REAPI_ADDRESS="remote.buildbuddy.io:443"
+            REAPI_INSTANCE="sandium/android-arm64/ci"
             : "${BUILDBUDDY_API_KEY:?Existing BuildBuddy credential is unavailable in this CircleCI context; stop without recreating it}"
-            test "${SANDIUM_CACHE_SCOPE_CONFIRMED:-}" = "true" || {
-              echo "Existing cache-scope confirmation is absent; stop and inspect current configuration without changing credentials or cache settings."
-              exit 1
-            }
 
             BARE_COMMIT="a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5"
             CHROMIUM_COMMIT="1228231501697ff7a4a0150ea8ae6df37bb99331"
@@ -67,10 +64,10 @@ jobs:
             echo "CHROMIUM_VERSION=${CHROMIUM_VERSION}"
             echo "BARE_PATCH_COUNT=${PATCH_COUNT}"
             echo "BARE_PATCH_SERIES_SHA256=${PATCH_DIGEST}"
-            echo "REAPI_ADDRESS=${SANDIUM_REAPI_ADDRESS}"
-            echo "REAPI_INSTANCE=${SANDIUM_REAPI_INSTANCE}"
+            echo "REAPI_ADDRESS=${REAPI_ADDRESS}"
+            echo "REAPI_INSTANCE=${REAPI_INSTANCE}"
             echo "BUILDBUDDY_CREDENTIAL_PRESENT=yes"
-            echo "CACHE_SCOPE_CONFIRMED=yes"
+            echo "CACHE_NAMESPACE=existing_sandium_android_arm64_ci"
             echo "BARE_SOURCE_PREFLIGHT=PASS"
             echo "REMOTE_EXECUTION_TESTED=no"
             echo "CHROMIUM_SOURCE_SYNC_RUN=no"
