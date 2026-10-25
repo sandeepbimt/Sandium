@@ -67,6 +67,11 @@ def control_inputs(control: Path) -> dict[str, str]:
         "ci/bare/gn_args.gn",
         "ci/bare/prepare_source.sh",
         "ci/bare/configure_siso.py",
+        "ci/bare/build_identity.py",
+        "ci/bare/stage_ledger.py",
+        "ci/bare/state_handoff.py",
+        "ci/bare/package_artifact.sh",
+        "ci/bare/bootstrap_chromium.sh",
         "ci/siso/buildbuddy_backend.star",
         "ci/siso/buildbuddy-credential-helper.py",
     )
@@ -272,7 +277,7 @@ def reuse_cached_apk(root: Path, control: Path, archive: Path, meta_path: Path,
         # Preserve an invalid cache candidate for forensic review, but keep it
         # out of the canonical artifact path before a fresh build begins.
         for path in (apk, manifest_path):
-            if path.exists() and not path.is_symlink():
+            if path.exists() or path.is_symlink():
                 rejected = path.with_name(path.name + ".rejected-cache-candidate")
                 if not rejected.exists():
                     os.replace(path, rejected)
