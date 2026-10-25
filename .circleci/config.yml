@@ -3029,6 +3029,27 @@ jobs:
             pnpm --version
             test -x node_modules/.bin/eslint || test -d node_modules
             echo "SANDIUM_CHECKPOINT_VALIDATION_PNPM=READY"
+      # The prepare-only build invokes "gn" by name through Brave's build
+      # driver. A restored Chromium source tree does not guarantee this
+      # machine's PATH includes the GN binary or depot_tools wrappers.
+      - ensure-sandium-depot-tools
+      - run:
+          name: Preflight GN executable for checkpoint validation
+          command: |
+            set -euo pipefail
+            GN_DIR="$HOME/project/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              find "$HOME/project/src" -type f -name gn 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            echo "export PATH=$GN_DIR:\\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            command -v gn
+            gn --version
+            echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS"
       - restore-sandium-build-output:
           stage_index: 1
       - run:
