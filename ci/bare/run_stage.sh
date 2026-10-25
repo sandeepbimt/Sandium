@@ -127,10 +127,13 @@ echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_RE
 # hash-verified Siso state capsule plus ledger/verified APK when available.
 # Compiled objects are never archived here; Siso must prove BuildBuddy cache hits.
 echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
-for script in "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
+for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
 done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$STATE_TOOL"
+python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL"
+python3 "$CONTROL/ci/bare/test_build_identity.py"
+python3 "$CONTROL/ci/bare/test_stage_ledger.py"
+python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
