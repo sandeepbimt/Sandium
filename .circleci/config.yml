@@ -77,18 +77,64 @@ jobs:
             echo "CHROMIUM_CHECKOUT_CREATED=no"
             echo "EXISTING_CACHE_DATA_MODIFIED=no"
 
-  sandium-bare-build-not-ready:
-    docker:
-      - image: cimg/python:3.12
+  sandium-bare-build-stage:
+    parameters:
+      stage_index:
+        type: integer
+    machine:
+      image: ubuntu-2204:current
+    resource_class: large
     working_directory: ~/project
     steps:
+      - checkout:
+          path: sandium-control
+      - when:
+          condition:
+            equal: [2, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 1 checkpoint and ledger
+                keys:
+                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1
+      - when:
+          condition:
+            equal: [3, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 2 checkpoint and ledger
+                keys:
+                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
+      - when:
+          condition:
+            equal: [4, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 3 checkpoint and ledger
+                keys:
+                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
+      - when:
+          condition:
+            equal: [5, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 4 checkpoint and ledger
+                keys:
+                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
       - run:
-          name: Keep full build disabled until Bare migration preflight is reviewed
+          name: Run Bare Android APK stage << parameters.stage_index >> of 5
+          no_output_timeout: 50m
           command: |
-            echo "SANDIUM_BARE_FULL_BUILD=BLOCKED"
-            echo "Reason: project source-of-truth requires source-only preflight and proof of existing BuildBuddy/Siso configuration before a separate build approval."
-            echo "No Chromium sync, compilation, APK packaging, checkpoint archive or cache mutation was attempted."
-            exit 78
+            set -euo pipefail
+            export STAGE_START_TS="$(date +%s)"
+            bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
+      - save_cache:
+          name: Save checkpoint and stage ledger
+          key: sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>
+          paths:
+            - sandium-bare-checkpoint.tar.zst
+            - sandium-bare-checkpoint.meta
+            - ci-handoff/stage-<< parameters.stage_index >>
+            - sandium-output
 
 
 workflows:
@@ -105,12 +151,33 @@ workflows:
     jobs:
       - sandium-bare-build-not-ready
 
-  # Full APK build remains disabled until the Bare-only source preflight and
-  # existing BuildBuddy/Siso integration review are complete.
+  # Explicitly approved five-stage APK attempt on the isolated review branch.
   sandium-bare-apk-once:
     when:
       and:
         - equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]
         - << pipeline.parameters.run_sandium_bare_apk_once >>
     jobs:
-      - sandium-bare-build-not-ready
+      - sandium-bare-build-stage:
+          name: sandium-bare-stage-1
+          stage_index: 1
+      - sandium-bare-build-stage:
+          name: sandium-bare-stage-2
+          stage_index: 2
+          requires:
+            - sandium-bare-stage-1
+      - sandium-bare-build-stage:
+          name: sandium-bare-stage-3
+          stage_index: 3
+          requires:
+            - sandium-bare-stage-2
+      - sandium-bare-build-stage:
+          name: sandium-bare-stage-4
+          stage_index: 4
+          requires:
+            - sandium-bare-stage-3
+      - sandium-bare-build-stage:
+          name: sandium-bare-stage-5
+          stage_index: 5
+          requires:
+            - sandium-bare-stage-4
