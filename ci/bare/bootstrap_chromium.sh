@@ -122,18 +122,31 @@ case "$MODE" in
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
     echo "SANDIUM_GCLIENT_SYNC_BEGIN_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_GCLIENT_SYNC_COMMAND=gclient sync --verbose --no-history --nohooks --revision src@$CHROMIUM_COMMIT"
+    # Bound dependency sync so a blocked Git/network operation cannot consume
+    # the whole CircleCI job. On timeout, capture process, socket, lock and log evidence.
+    SYNC_TIMEOUT_SECONDS="${SANDIUM_GCLIENT_SYNC_TIMEOUT_SECONDS:-1200}"
+    echo "SANDIUM_GCLIENT_SYNC_TIMEOUT_SECONDS=$SYNC_TIMEOUT_SECONDS"
     set +e
-    "$DEPOT_TOOLS/gclient" sync --verbose --no-history --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$SYNC_LOG"
+    timeout --signal=TERM --kill-after=60s "${SYNC_TIMEOUT_SECONDS}s" \
+      "$DEPOT_TOOLS/gclient" sync --verbose --no-history --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$SYNC_LOG"
     sync_rc=${PIPESTATUS[0]}
     set -e
     echo "SANDIUM_GCLIENT_SYNC_END_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_GCLIENT_SYNC_EXIT_CODE=$sync_rc"
     if [[ "$sync_rc" -ne 0 ]]; then
       echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_BEGIN"
-      ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 50 || true
+      echo "SANDIUM_GCLIENT_FAILURE_KIND=$([[ "$sync_rc" -eq 124 || "$sync_rc" -eq 137 ]] && echo TIMEOUT || echo COMMAND_FAILURE)"
+      echo "SANDIUM_GCLIENT_FAILURE_EXIT_CODE=$sync_rc"
+      echo "--- processes ---"
+      ps -eo pid,ppid,etime,stat,%cpu,%mem,wchan:24,args --sort=-%cpu | head -n 80 || true
+      echo "--- network sockets ---"
+      if command -v ss >/dev/null 2>&1; then ss -tpn state established 2>&1 | head -n 100 || true; else echo "ss unavailable"; fi
+      echo "--- git status ---"
       git -C "$CHROMIUM_SRC" status --short --branch 2>&1 || true
-      find "$ROOT" -maxdepth 3 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 100 || true
-      tail -n 300 "$SYNC_LOG" 2>/dev/null || true
+      echo "--- lock files ---"
+      find "$ROOT" -maxdepth 4 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 150 || true
+      echo "--- sync log tail ---"
+      tail -n 400 "$SYNC_LOG" 2>/dev/null || true
       echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_END"
       exit "$sync_rc"
     fi
