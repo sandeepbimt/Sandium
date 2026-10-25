@@ -2967,6 +2967,7 @@ workflows:
   sandium-android-debug-apk:
     when:
       and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
         - << pipeline.parameters.run_sandium_android_apk_build >>
         - << pipeline.parameters.run_sandium_compile_windows >>
     jobs:
