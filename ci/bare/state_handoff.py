@@ -15,7 +15,7 @@ META_NAME = "sandium-stage-state.meta"
 REPORT_NAME = "sandium-state-handoff-report.json"
 OUT_RELATIVE = Path("src/out/android_Debug_arm64")
 STATE_NAMES = (
-    ".siso_fs_state", ".siso_fs_state.0", ".ninja_log", ".ninja_deps",
+    ".siso_fs_state", ".siso_fs_state.journal", ".siso_fs_state.0", ".ninja_log", ".ninja_deps",
     ".siso_config", ".siso_deps", ".siso_filegroups", ".siso_failed_targets",
 )
 VALID_NAMES = set(STATE_NAMES)
