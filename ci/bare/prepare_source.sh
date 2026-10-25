@@ -12,11 +12,11 @@ EXPECTED_PATCH_COUNT=164
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTROL_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-# The existing CircleCI workflow checks the Sandium control repository out under
-# $HOME/project/brave-core and keeps Chromium at $HOME/project/src. Infer that
-# existing workspace layout without adding new CircleCI variables.
-if [[ "$(basename "$CONTROL_ROOT")" == "brave-core" ]]; then
-  ROOT="$(cd "$CONTROL_ROOT/.." && pwd)"
+# Existing CircleCI jobs use $HOME/project as their shared workspace and check
+# this control repository out in a subdirectory. Infer that layout without
+# adding new CircleCI variables.
+if [[ "$CONTROL_ROOT" == "$HOME/project/"* ]]; then
+  ROOT="$HOME/project"
 else
   ROOT="$CONTROL_ROOT"
 fi
