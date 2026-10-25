@@ -160,6 +160,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --prepare_only', segment)
         self.assertIn('SANDIUM_CHECKPOINT_OVERLAY_PREPARE_ONLY=PASS', segment)
         self.assertIn('OUTPUT_ONLY_COMPATIBILITY=FAIL Brave source-overlay prepare-only failed', segment)
+        self.assertIn('name: Ensure Brave build-driver dependencies for checkpoint validation', CONFIG)
+        self.assertIn('- install-sandium-node', CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')])
+        self.assertIn('- restore-sandium-pnpm-cache', CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')])
+        self.assertIn('pnpm install --frozen-lockfile --prefer-offline', CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')])
+        self.assertIn('mkdir -p "$HOME/project/build-diagnostics"', segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
