@@ -397,6 +397,27 @@ commands:
               test ! -L "$OUT/.siso_fs_state"
               test ! -e "$OUT/.siso_fs_state.journal"
               test ! -L "$OUT/.siso_fs_state.journal"
+              # GN evaluates Brave's config.gni, which imports this generated
+              # source file. Normal build jobs generate it before GN; the
+              # validation-only job must do the same before querying effective args.
+              BRAVE="$HOME/project/src/brave"
+              test -s "$HOME/project/src/chrome/VERSION" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL missing src/chrome/VERSION" >&2
+                exit 42
+              }
+              test -s "$HOME/project/src/chrome/VERSION.chromium" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL missing src/chrome/VERSION.chromium" >&2
+                exit 42
+              }
+              (
+                cd "$BRAVE"
+                python3 build/util/version.py gen ../chrome/VERSION
+              )
+              test -s "$BRAVE/build/version.gni" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave version.gni generation failed" >&2
+                exit 42
+              }
+              echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION"
               python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
             import hashlib, json, sys
             from pathlib import Path
