@@ -69,7 +69,7 @@ commands:
             test -s "$VERSION" || { echo "SANDIUM_REQUIRED_INPUT_MISSING=src/chrome/VERSION"; exit 1; }
             test -s "$VERSION_CHROMIUM" || { echo "SANDIUM_REQUIRED_INPUT_MISSING=src/chrome/VERSION.chromium"; exit 1; }
             cd "$BRAVE"
-            python3 build/util/version.py gen ../chrome/VERSION
+            /usr/bin/python3 build/util/version.py gen ../chrome/VERSION
             test -s build/version.gni || { echo "SANDIUM_BRAVE_VERSION_GNI=FAIL"; exit 1; }
             grep -q '^brave_version = ' build/version.gni
             grep -q '^chrome_version_string = ' build/version.gni
@@ -439,7 +439,7 @@ commands:
               test -s "$OUT/args.gn"
               test -s "$OUT/build.ninja"
               echo "SANDIUM_CHECKPOINT_OVERLAY_PREPARE_ONLY=PASS"
-              python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
+              /usr/bin/python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
             import hashlib, json, sys
             from pathlib import Path
             meta = json.loads(Path(sys.argv[1]).read_text())
