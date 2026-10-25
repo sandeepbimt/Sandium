@@ -44,7 +44,24 @@ PY
 fi
 if [[ ! -d "$DEPOT/.git" ]]; then git clone --no-tags --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT"; fi
 if [[ -n "$PIN" && "$(git -C "$DEPOT" rev-parse HEAD)" != "$PIN" ]]; then git -C "$DEPOT" fetch --depth=1 origin "$PIN"; git -C "$DEPOT" checkout --force --detach "$PIN"; fi
-export PATH="$DEPOT:$PATH" DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
+# Bootstrap a fresh depot_tools clone before disabling its updater.
+export PATH="$DEPOT:$PATH"
+if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
+  echo "DEPOT_TOOLS_BOOTSTRAP_BEGIN=$(date -u +%FT%TZ)"
+  if [[ -x "$DEPOT/update_depot_tools" ]]; then
+    (cd "$DEPOT" && ./update_depot_tools)
+  elif [[ -x "$DEPOT/ensure_bootstrap" ]]; then
+    (cd "$DEPOT" && ./ensure_bootstrap)
+  else
+    echo "DEPOT_TOOLS_BOOTSTRAP_HELPER_MISSING" >&2
+    find "$DEPOT" -maxdepth 2 \( -iname "*bootstrap*" -o -iname "*update*depot*" \) -print | head -n 80 >&2 || true
+    exit 46
+  fi
+  test -s "$DEPOT/python3_bin_reldir.txt" || { echo "DEPOT_TOOLS_BOOTSTRAP_MARKER_MISSING" >&2; exit 46; }
+  echo "DEPOT_TOOLS_BOOTSTRAP=PASS"
+  echo "DEPOT_TOOLS_BOOTSTRAP_END=$(date -u +%FT%TZ)"
+fi
+export DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
 echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci"
 # Like the proven Afterbird workflow, each fresh stage recreates the pinned source;
 # only the expensive generated output tree is handed off via the checkpoint cache.
