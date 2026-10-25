@@ -38,6 +38,7 @@ jobs:
               ci/bare/configure_siso.py \
               ci/bare/checkpoint.py \
               ci/bare/stage_ledger.py \
+              ci/bare/state_handoff.py \
               ci/bare/write_cache_identity.py \
               ci/bare/test_build_identity.py \
               ci/bare/stage_contract.py \
@@ -50,6 +51,7 @@ jobs:
             python3 ci/bare/configure_siso.py --help >/dev/null
             python3 ci/bare/checkpoint.py --help >/dev/null
             python3 ci/bare/stage_ledger.py --help >/dev/null
+            python3 ci/bare/state_handoff.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/stage_contract.py
@@ -90,12 +92,21 @@ jobs:
           path: sandium-control
       - when:
           condition:
+            equal: [1, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Discover the latest useful run with matching Bare build inputs
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
+      - when:
+          condition:
             equal: [2, << parameters.stage_index >>]
           steps:
             - restore_cache:
                 name: Restore previous stage 1 ledger
                 keys:
-                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1-
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
@@ -103,7 +114,8 @@ jobs:
             - restore_cache:
                 name: Restore previous stage 2 ledger
                 keys:
-                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2-
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
@@ -111,7 +123,8 @@ jobs:
             - restore_cache:
                 name: Restore previous stage 3 ledger
                 keys:
-                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3-
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
@@ -119,7 +132,8 @@ jobs:
             - restore_cache:
                 name: Restore previous stage 4 ledger
                 keys:
-                  - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4-
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
       - run:
           name: Run Bare Android APK stage << parameters.stage_index >> of 5
           no_output_timeout: 50m
@@ -128,10 +142,13 @@ jobs:
             export STAGE_START_TS="$(date +%s)"
             bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
       - save_cache:
-          name: Save small source-bound stage ledger only
-          key: sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>
+          name: Save Siso state capsule, verified APK (if any), and stage ledger
+          key: sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>-{{ .BuildNum }}
           paths:
+            - sandium-stage-state.tar.zst
+            - sandium-stage-state.meta
             - ci-handoff/stage-<< parameters.stage_index >>
+            - sandium-output
       - store_artifacts:
           name: Upload stage driver and Siso logs
           path: stage-<< parameters.stage_index >>-driver.log
@@ -156,6 +173,10 @@ jobs:
           name: Upload Git subprocess trace
           path: sandium-git-trace.log
           destination: diagnostics/stage-<< parameters.stage_index >>/git-trace.log
+      - store_artifacts:
+          name: Upload state handoff report
+          path: sandium-state-handoff-report.json
+          destination: diagnostics/stage-<< parameters.stage_index >>/state-handoff-report.json
       - store_artifacts:
           name: Upload build output and handoff ledger
           path: ci-handoff/stage-<< parameters.stage_index >>
