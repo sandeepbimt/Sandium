@@ -32,12 +32,15 @@ def control_root() -> Path:
 
 
 def workspace_root(control: Path) -> Path:
-    # CircleCI checks this control repository out beneath $HOME/project.
-    # A local checkout defaults to its own root; no new CI variable is required.
-    expected = Path.home() / "project"
-    if control.parent == expected:
-        return expected
-    return control
+    # CircleCI keeps all job state beneath $HOME/project, even if the control
+    # repository is moved into a subdirectory. A local checkout defaults to its
+    # own root; no new CI variable is required.
+    expected = (Path.home() / "project").resolve()
+    try:
+        control.resolve().relative_to(expected)
+    except ValueError:
+        return control
+    return expected
 
 
 def parse_gclient(path: Path) -> dict[str, Any]:
