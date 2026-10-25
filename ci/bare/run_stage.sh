@@ -33,6 +33,17 @@ echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 rm -f "$LEDGER" "$STATUS" "$STATE_REPORT"
 printf '{"schema":1,"SANDIUM_STATE_HANDOFF":"NOT_RUN","current_stage":%s,"current_workflow_id":"%s","reason":"runner exited before state validation"}\n' "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" > "$STATE_REPORT"
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
+for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
+  bash -n "$script"
+done
+python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py"
+python3 "$CONTROL/ci/bare/test_build_identity.py"
+python3 "$CONTROL/ci/bare/test_stage_ledger.py"
+python3 "$CONTROL/ci/bare/test_state_handoff.py"
+python3 "$CONTROL/ci/bare/stage_contract.py"
+echo "SANDIUM_STATIC_CHECK=PASS"
+echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
 if [[ "$STAGE" -gt 1 ]]; then
   test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
   if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
@@ -85,6 +96,15 @@ if [[ "$STAGE" -eq 1 && -s "$STATE_ARCHIVE" && -s "$STATE_META" && -s "$ROOT/san
   fi
 fi
 
+# Validate the restored prior-run candidate before toolchain/source/network work.
+# Stage 1 records a clean miss and may proceed cold; stages 2-5 must refuse to
+# spend setup time unless the immediately preceding stage saved a valid capsule.
+if [[ "$STAGE" -eq 1 ]]; then
+  python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
+else
+  python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META" --required
+fi
+
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
 
 DEPOT="$HOME/depot_tools"; PIN=""
@@ -126,17 +146,6 @@ echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_RE
 # source-identity cache discovers a prior useful run and hands off a small,
 # hash-verified Siso state capsule plus ledger/verified APK when available.
 # Compiled objects are never archived here; Siso must prove BuildBuddy cache hits.
-echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
-for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
-  bash -n "$script"
-done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py"
-python3 "$CONTROL/ci/bare/test_build_identity.py"
-python3 "$CONTROL/ci/bare/test_stage_ledger.py"
-python3 "$CONTROL/ci/bare/test_state_handoff.py"
-python3 "$CONTROL/ci/bare/stage_contract.py"
-echo "SANDIUM_STATIC_CHECK=PASS"
-echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
 SRC="$ROOT/src"; OUT="$SRC/out/android_Debug_arm64"; SDIR="$SRC/build/config/siso"
 test -s "$SDIR/.sisoenv"; printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
