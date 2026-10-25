@@ -13,19 +13,20 @@ This document defines the state-transfer contract for the Bare-only Android ARM6
 - Target: Android ARM64, Debug, minimum Android 10
 - Expected APK: `Sandium-debug-arm64.apk`
 
-## Reference implementation reviewed
+## Reference implementation and reported results
 
-Reference: [sandeepbimt/iceraven-browser, branch `sandfox/checkpoint-stage-v1`, commit `2b254b9`](https://github.com/sandeepbimt/iceraven-browser/tree/sandfox/checkpoint-stage-v1), specifically `.circleci/config.yml`.
+Reference: [sandeepbimt/iceraven-browser, branch `sandfox/checkpoint-stage-v1`, commit `2b254b9`](https://github.com/sandeepbimt/iceraven-browser/tree/sandfox/checkpoint-stage-v1), especially `.circleci/config.yml`.
 
-The reference provides a concrete staged-checkpoint pattern worth adapting:
+The reference configuration has a concrete staged-checkpoint pattern:
+- stage-scoped CircleCI `save_cache`/`restore_cache` keys;
+- a checkpoint archive plus metadata, including Siso state/journal and compiled output;
+- an independent APK completion marker;
+- early fast-exit in later stages once a previous stage recorded a ZIP-verified APK;
+- a progress gate that rejects an expensive repeated stage if no useful progress or remote execution is demonstrated.
 
-- Stage-specific cache keys use the CircleCI workflow ID, so stages in one workflow can restore the preceding stage's checkpoint.
-- The checkpoint archive and metadata are saved as cache paths, separately from the small APK-completion marker.
-- A later stage checks the completion marker early and halts when a previous stage has already recorded a ZIP-verified APK.
-- The checkpoint self-test checks archive round-tripping for compiled outputs and Siso state/journal files, including timestamp preservation.
-- The stage gate rejects a timed-out build if it did not prove remote work and useful progress; it does not blindly proceed through all five stages.
+Prior project conversation records report that the `2b254b9` run produced a working APK, with Stage 1 taking about 27 minutes and Stages 2–5 taking roughly one second each after the APK-completion check. Earlier notes also report that Stage 2 restored a compatible output checkpoint associated with CircleCI job 140 and reused a 44.5 GB Chromium source cache and 735 MB Siso cache associated with job 146.
 
-**Evidence boundary:** the supplied screenshot shows the source for this reference commit and a CircleCI run marked **Canceled**. The configuration demonstrates the mechanism and its intended checks; the screenshot alone does not prove that the shown run completed all five stages or produced an APK. We must inspect the relevant successful run's logs/artifacts before claiming those outcomes.
+**Evidence qualification:** these timings, cache sizes and job references are carried forward from earlier conversation notes, not independently re-fetched from CircleCI in this turn. The supplied screenshot shows a run marked **Canceled** and does not itself prove end-to-end success. Do not treat the reported values as independently verified live logs. The implementation pattern is grounded in the checked-in config; the run outcomes still need direct log/artifact confirmation.
 
 ## Five-stage contract
 
@@ -39,15 +40,15 @@ The reference provides a concrete staged-checkpoint pattern worth adapting:
 
 A stage may report “no work” only when evidence shows there are no remaining actions for the same build identity. An empty or missing metrics file is not proof of no work. Remote execution must be proven from Siso metrics/logs; GN flags alone do not prove that actions ran remotely. Cache reuse must be proven from metrics/logs; the existence of a cache configuration alone is not proof of a cache hit.
 
-## Adapt the reference, do not copy it blindly
+## Adaptation plan
 
-1. **Reuse the checkpoint idea:** package the output tree and Siso state/journal together with a metadata file that records build identity, archive digest, state mode and stage progress.
-2. **Use immutable, workflow-scoped stage keys:** each stage restores only the expected preceding stage's checkpoint; a new workflow may restore a prior checkpoint only after validating the same pinned source/build identity. Never overwrite a cache key expecting it to mutate—CircleCI caches are immutable once saved.
-3. **Keep an independent completion marker:** only write `BUILD_FINISHED=true` after APK validation and a checksum are recorded. Later stages may fast-exit only after validating the marker and the artifact evidence available to them.
-4. **Preserve the Siso state files:** checkpoint archive must include `.siso_fs_state` and/or the valid journal recovery state, as well as generated build graph, GN args and compiled output. Validate archive round-trip behavior on a harmless fixture before using it for a real build.
-5. **Keep source reconstruction separate from build-output restoration:** the reference config reconstructs the Chromium source in later stages while restoring the output checkpoint. For Sandium, that source must be pinned and patch identity revalidated before accepting the restored output; source sync must not be repeated casually if a supported source hand-off is available.
-6. **Bound each stage and require progress:** a stage that times out without an APK must save a verified checkpoint and show new completed actions/output, with remote-execution evidence. If it cannot prove useful progress, stop rather than paying for another repeated stage.
-7. **Keep full-build and fast checks separate:** fast preflight/documentation checks must never invoke Chromium sync or compilation.
+1. **Separate source cache from output checkpoint.** Use distinct, immutable cache keys for pinned source/dependencies and for each stage's output checkpoint. Include branch/workflow/stage identifiers and source/build identity in the metadata. A cache key itself cannot be mutated after saving.
+2. **Restore only the expected predecessor.** Stage N restores Stage N-1's checkpoint key for the current workflow. Cross-workflow reuse may be a fallback only when metadata matches the exact pinned Bare commit, Chromium base, ordered patch-series digest, CRX checksum, toolchain and GN identity.
+3. **Package build graph, output and Siso state together.** Preserve `build.ninja`, `args.gn`, generated graph/state, compiled outputs, and `.siso_fs_state` and/or a valid journal recovery state. Do not assume Siso's remote action cache replaces this local state.
+4. **Verify restore before compiling.** Check archive checksum, metadata schema, source/build identity and expected paths. Record restored object/output counts and Siso state mode. On a mismatch or missing checkpoint, fail closed; do not silently start an expensive clean sync/build.
+5. **Gate every timed stage on useful progress.** Record before/after object and output counts, completed action/frontier counts, Siso remote execution evidence, cache metrics, build exit code, and checkpoint save result. If the stage times out without producing an APK, only continue if checkpoint validation and measurable progress pass.
+6. **Make APK completion independently verifiable.** Only create `BUILD_FINISHED=true` after the APK is non-empty and ZIP-validated, and record SHA-256 and size. Later stages should restore/read this small marker first, verify it is consistent with artifact evidence, and halt immediately when valid.
+7. **Keep the fast path separate.** Name source-only checks clearly (e.g. `FAST-Preflight`) and the full build `LONG-Full-APK`; the former must never sync Chromium or compile.
 
 ## State that must survive stage boundaries
 
@@ -59,19 +60,16 @@ A stage may report “no work” only when evidence shows there are no remaining
 
 The metadata ledger is small, but it does **not** preserve the Chromium checkout or build output. The existing `ci/bare/checkpoint.py` can package/restore the output directory locally with identity checks; it does not by itself implement CircleCI cache save/restore or prove that Siso state survives a real stage transition.
 
-## State-transfer decision and blocker
+## Current limitations and fail-closed decision
 
-The reference makes a **specific implementation path** available to investigate: use CircleCI's stage-scoped `save_cache`/`restore_cache` pattern for the checkpoint archive and metadata, plus a separate APK completion marker. This is more concrete than assuming a persistent runner or sending a full output tree through a workspace at every stage.
+The Sandfox reference demonstrates a plausible mechanism, but adapting it safely requires:
+- direct review of the cited successful CircleCI run's stage logs and artifacts;
+- confirmation of the current CircleCI plan's applicable cache limits/retention;
+- validation that the Bare output checkpoint is within those limits and that archive restoration preserves required Siso state;
+- mapping the existing Sandium ledger semantics correctly to the five stages;
+- preserving the current full-build parameters as false until all of the above is reviewed.
 
-However, it still needs validation against the current Sandium workflow and account:
-- The reference archive's actual size and cache retention/size behavior for the relevant run have not been verified here.
-- The current CircleCI plan's applicable cache limits and retention need confirmation.
-- CircleCI caches are immutable; stage keys must be unique and correctly scoped.
-- A cache restore miss must fail closed or use an explicitly approved recovery path; it must not silently trigger an expensive clean sync/build.
-- BuildBuddy/Siso action cache is not a substitute for the source checkout, generated GN state, or all local build outputs.
-- The screenshot shows a canceled run, so it is not evidence of end-to-end success.
-
-Therefore this design does **not** claim that a checkpoint has been uploaded, retained, restored, or successfully continued in Sandium. Keep the full-build switch disabled until a harmless archive self-test, cache hand-off validation, identity gates and current-plan limits have been reviewed.
+A cache restore miss must not silently trigger an expensive clean sync/build. CircleCI caches are immutable; keys must be unique and correctly scoped. Siso/BuildBuddy action cache is not a substitute for the source checkout, generated GN state, or all local build outputs.
 
 ## Non-negotiable safety gates
 
@@ -81,19 +79,15 @@ Therefore this design does **not** claim that a checkpoint has been uploaded, re
 - Reject any checkpoint whose source, patch, extension, toolchain, GN or build identity differs.
 - Fail before Chromium sync/compilation when the persistence mechanism or required credentials are absent.
 - Do not claim remote execution, cache reuse, or APK success without captured evidence.
-- Fast documentation/source-only checks and full Chromium builds must remain separate paths. Any future pipeline/job name should make the expected cost obvious (for example, `FAST-Preflight` versus `LONG-Full-APK`).
 
 ## Readiness checklist
 
-The full build remains blocked until all are true:
-
-- [ ] Inspect a successful reference run's logs/artifacts and record its actual checkpoint sizes, stage progress and APK verification result.
-- [ ] Confirm the current CircleCI plan's cache limits and retention behavior.
-- [ ] Adapt the reference's cache key design for Sandium's pinned source identity and immutable cache semantics.
-- [ ] Test archive round-trip, including Siso state/journal and file metadata, on a small harmless fixture.
-- [ ] Align stage-ledger semantics with the five-stage contract: stages 1–2 are preparation/configuration; stage 3 proves real remote execution; stage 4 proves cache reuse or measured no-work; stage 5 verifies the artifact.
-- [ ] Validate identity before restore and after restore, and preserve any pre-existing output.
-- [ ] A separately approved, budget-aware build run is explicitly requested.
+- [ ] Independently inspect successful reference run logs/artifacts and confirm stage durations, checkpoint sizes, restore result, Siso evidence, APK checksum/validation.
+- [ ] Confirm current CircleCI plan cache limits and retention behavior.
+- [ ] Test archive round-trip of Siso state/journal and file metadata on a harmless fixture.
+- [ ] Adapt stage-specific immutable cache keys and identity validation for the Bare pins.
+- [ ] Align stage-ledger semantics: stages 1–2 prepare/configure; stage 3 proves actual remote execution; stage 4 proves cache reuse or measured no-work; stage 5 verifies APK.
+- [ ] Keep the full build disabled until separately approved for a budget-aware run.
 
 ## Current outcome
 
