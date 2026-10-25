@@ -46,6 +46,11 @@ for f in "$SRC" "$SRC/DEPS" "$SRC/chrome/VERSION" "$SRC/build/config/compiler/co
 echo "SOURCE_TIMESTAMP_POLICY=$TS_POLICY"; echo SOURCE_TIMESTAMP_VERIFY=PASS
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
 test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
+if [[ "$STAGE" -gt 1 ]]; then
+  test -s "$ROOT/sandium-bare-checkpoint.tar.zst" || { echo "SANDIUM_CHECKPOINT_MISSING=previous stage cache did not restore checkpoint archive" >&2; exit 50; }
+  test -s "$ROOT/sandium-bare-checkpoint.meta" || { echo "SANDIUM_CHECKPOINT_METADATA_MISSING=previous stage cache did not restore metadata" >&2; exit 51; }
+  python3 "$CONTROL/ci/bare/checkpoint.py" restore --root "$ROOT"
+fi
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
@@ -82,6 +87,9 @@ if [[ "$STAGE" -eq 1 ]]; then
   PREV_ARGS=()
 else
   PREV_ARGS=(--previous "$PREV")
+fi
+if [[ -d "$OUT" ]]; then
+  python3 "$CONTROL/ci/bare/checkpoint.py" pack --root "$ROOT"
 fi
 if [[ "$COMPLETE" == true ]]; then
   python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
