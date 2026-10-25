@@ -150,7 +150,14 @@ jobs:
       - store_artifacts:
           name: Upload gclient sync log when present
           path: sandium-gclient-sync.log
-          destination: diagnostics/stage-<< parameters.stage_index >>/gclient-sync.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/gclient-sync.log      - store_artifacts:
+          name: Upload gclient configuration log
+          path: sandium-gclient-config.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/gclient-config.log
+      - store_artifacts:
+          name: Upload Git subprocess trace
+          path: sandium-git-trace.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/git-trace.log
       - store_artifacts:
           name: Upload build output and handoff ledger
           path: ci-handoff/stage-<< parameters.stage_index >>
