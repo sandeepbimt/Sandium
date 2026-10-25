@@ -32,6 +32,10 @@ parameters:
   run_sandium_checkpoint_restore_validation:
     type: boolean
     default: false
+  # Inspection-only recovery: salvage compiled outputs but never authorize compilation.
+  enable_sandium_output_only_checkpoint_recovery:
+    type: boolean
+    default: false
 commands:
   sandium-smoke-checkpoint:
     parameters:
@@ -65,7 +69,7 @@ commands:
             test -s "$VERSION" || { echo "SANDIUM_REQUIRED_INPUT_MISSING=src/chrome/VERSION"; exit 1; }
             test -s "$VERSION_CHROMIUM" || { echo "SANDIUM_REQUIRED_INPUT_MISSING=src/chrome/VERSION.chromium"; exit 1; }
             cd "$BRAVE"
-            python3 build/util/version.py gen ../chrome/VERSION
+            /usr/bin/python3 build/util/version.py gen ../chrome/VERSION
             test -s build/version.gni || { echo "SANDIUM_BRAVE_VERSION_GNI=FAIL"; exit 1; }
             grep -q '^brave_version = ' build/version.gni
             grep -q '^chrome_version_string = ' build/version.gni
@@ -339,12 +343,23 @@ commands:
                 name: Discover and restore best compatible checkpoint from prior workflows
                 command: |
                   set -euo pipefail
-                  python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
+                  if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+                    export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+                    echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+                  fi
+                  test -x /usr/bin/python3 || { echo "SANDIUM_SYSTEM_PYTHON_PREFLIGHT=FAIL"; exit 127; }
+                  /usr/bin/python3 src/brave/ci/siso/checkpoint_artifact_discovery.py --root "$HOME/project"
       - run:
           name: Restore and integrity-check compressed Siso checkpoint
           command: |
             set -euo pipefail
-            python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
+            DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              echo "SANDIUM_CHECKPOINT_NORMAL_SISO_RESTORE=SKIPPED_OUTPUTS_ONLY"
+              echo "SANDIUM_COMPILE_AUTHORIZATION=DEFERRED_UNTIL_OUTPUT_AND_GN_VALIDATION"
+            else
+              python3 src/brave/ci/siso/checkpoint.py restore --root "$HOME/project"
+            fi
       - run:
           name: Validate restored Android build output and enforce stage handover
           command: |
@@ -352,6 +367,261 @@ commands:
             STAGE_INDEX=<< parameters.stage_index >>
             OUT=src/out/android_Debug_arm64
             STATE=src/brave/ci/siso/build_state.py
+            DISCOVERY_STATUS="$(cat "$HOME/project/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              # Output-only recovery is allowed only for Stage 1 after full
+              # output/GN identity validation, or in the dedicated validation job.
+              # Later stages must receive the fresh resumable checkpoint produced
+              # by Stage 1; they may not independently promote output-only data.
+              if [[ "$STAGE_INDEX" != "1" ]]; then
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_STAGE_MUST_BE_1" >&2
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
+                exit 42
+              fi
+              if [[ "${CIRCLE_JOB:-}" == "sandium-checkpoint-restore-validation" ]]; then
+                if [[ "<< pipeline.parameters.run_sandium_checkpoint_restore_validation >>" != "true" ]]; then
+                  echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=DEDICATED_VALIDATION_NOT_OPTED_IN" >&2
+                  exit 42
+                fi
+              elif [[ "${CIRCLE_JOB:-}" == "stage-1-source-foundation" &&
+                      "<< pipeline.parameters.run_sandium_compile_windows >>" == "true" ]]; then
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=STAGE1_INCREMENTAL_COMPILE_PATH"
+              else
+                echo "SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_NOT_COMPILE_AUTHORIZED" >&2
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED" >&2
+                exit 42
+              fi
+              test -d "$OUT"
+              test -s "$HOME/project/sandium-checkpoint.meta"
+              test -s "$OUT/.sandium-build-state.json"
+              test ! -e "$OUT/.siso_fs_state"
+              test ! -L "$OUT/.siso_fs_state"
+              test ! -e "$OUT/.siso_fs_state.journal"
+              test ! -L "$OUT/.siso_fs_state.journal"
+              # GN evaluates Brave's config.gni, which imports this generated
+              # source file. Normal build jobs generate it before GN; the
+              # validation-only job must do the same before querying effective args.
+              BRAVE="$HOME/project/src/brave"
+              test -s "$HOME/project/src/chrome/VERSION" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL missing src/chrome/VERSION" >&2
+                exit 42
+              }
+              test -s "$HOME/project/src/chrome/VERSION.chromium" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL missing src/chrome/VERSION.chromium" >&2
+                exit 42
+              }
+              (
+                cd "$BRAVE"
+                /usr/bin/python3 build/util/version.py gen ../chrome/VERSION
+              )
+              test -s "$BRAVE/build/version.gni" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave version.gni generation failed" >&2
+                exit 42
+              }
+              echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION"
+              # Output-only checkpoint recovery restores compiled outputs, not
+              # Brave Core's DEPS-managed child repositories. GN requires this
+              # pinned vendor checkout even for prepare-only validation. Sync
+              # Brave dependencies only when this required checkout is absent,
+              # while explicitly preventing a Chromium revision update.
+              REQUIRED_BRAVE_DEP="$BRAVE/vendor/bat-native-tweetnacl/BUILD.gn"
+              if [[ ! -s "$REQUIRED_BRAVE_DEP" ]]; then
+                echo "SANDIUM_BRAVE_CHILD_DEPS=SYNC_REQUIRED missing=$REQUIRED_BRAVE_DEP"
+                cd "$BRAVE"
+                pnpm run sync --sync_chromium=false 2>&1 | tee "$HOME/project/build-diagnostics/checkpoint-brave-deps-sync.log"
+                cd "$HOME/project"
+              fi
+              test -s "$REQUIRED_BRAVE_DEP" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave DEPS sync did not restore $REQUIRED_BRAVE_DEP" >&2
+                exit 42
+              }
+              echo "SANDIUM_BRAVE_CHILD_DEPS=READY"
+              mkdir -p "$HOME/project/build-diagnostics"
+              # GN's Brave overlay imports Chromium branding assets under
+              # src/chrome/app/theme/brave/BRANDING. These source-overlay files
+              # are normally prepared by Brave's build driver; checkpoint-only
+              # validation runs outside that driver, so prepare the GN graph
+              # explicitly in prepare-only mode (no Ninja compile).
+              cd "$BRAVE"
+              set +e
+              pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/checkpoint-overlay-prepare.log"
+              prepare_status=${PIPESTATUS[0]}
+              set -e
+              cd "$HOME/project"
+              if [[ "$prepare_status" -ne 0 ]]; then
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave source-overlay prepare-only failed status=$prepare_status" >&2
+                exit 42
+              fi
+              test -s "$BRAVE/build/version.gni"
+              test -s "$OUT/args.gn"
+              test -s "$OUT/build.ninja"
+              echo "SANDIUM_CHECKPOINT_OVERLAY_PREPARE_ONLY=PASS"
+              /usr/bin/python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
+            import hashlib, json, sys
+            from pathlib import Path
+            meta = json.loads(Path(sys.argv[1]).read_text())
+            state_path = Path(sys.argv[2])
+            state = json.loads(state_path.read_text())
+            if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
+                raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+
+            # Prove the historical build inputs differ only by the audited Siso
+            # config, and that the restored GN identity still matches the checked
+            # out tree. The surrounding shell grants incremental reuse only in the
+            # production Stage 1 compile job; the dedicated validation job remains read-only.
+            import importlib.util, os, subprocess
+            root = Path.home() / "project"
+            brave = root / "src" / "brave"
+            out = root / "src" / "out" / "android_Debug_arm64"
+            spec = importlib.util.spec_from_file_location(
+                "sandium_build_state_audit", brave / "ci" / "siso" / "build_state.py"
+            )
+            if spec is None or spec.loader is None:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL cannot load build-state auditor")
+            auditor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(auditor)
+            audit = auditor._fingerprint_audit(
+                str(state.get("source_commit", "")),
+                str(state.get("build_input_fingerprint", "")),
+            )
+            changed = sorted(item.get("path") for item in audit.get("changed_tracked_input_paths", []))
+            expected_changed = ["build/config/siso/brave_siso_config.star"]
+            if not audit.get("historical_source_available") or audit.get("historical_fingerprint") != state.get("build_input_fingerprint"):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL historical build-input fingerprint is not verified")
+            if audit.get("audit_error") is not None or changed != expected_changed:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL changed source inputs are not limited to the audited Siso config: " + repr(changed))
+            current_commit = subprocess.check_output(
+                ["git", "-C", str(brave), "rev-parse", "HEAD"], text=True
+            ).strip()
+            expected_commit = os.environ.get("CIRCLE_SHA1", "")
+            if expected_commit and current_commit != expected_commit:
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL checked-out Brave commit differs from CircleCI commit")
+            current_gn_fingerprint = auditor._gn_fingerprint()
+            if current_gn_fingerprint != state.get("gn_args_sha256"):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL restored GN arguments do not match current build identity")
+            args = out / "args.gn"
+            ninja = out / "build.ninja"
+            gn = root / "src" / "buildtools" / "linux64" / "gn"
+            for required in (args, ninja, gn):
+                if not required.is_file() or required.stat().st_size == 0:
+                    raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL required GN output/tool missing: " + str(required))
+            if not os.access(gn, os.X_OK):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN tool is not executable: "
+                    + str(gn) + " mode=" + oct(gn.stat().st_mode & 0o777)
+                )
+            if not os.access(args, os.R_OK):
+                raise SystemExit("OUTPUT_ONLY_COMPATIBILITY=FAIL restored args.gn is not readable: " + str(args))
+
+            # Do not grep args.gn or args_generated.gni: those files can omit
+            # defaults and are not a reliable representation of effective GN
+            # values. Ask GN for the resolved values used by this output tree.
+            # Preserve GN's own diagnostic output so a failed query is actionable
+            # instead of collapsing to an opaque CalledProcessError.
+            try:
+                # GN locates the source root by walking up from cwd. The
+                # validation script runs from the CircleCI workspace root, not
+                # Chromium's src/ directory, so run this query from src/ where
+                # the restored Chromium .gn file lives.
+                source_root = root / "src"
+                if not (source_root / ".gn").is_file():
+                    raise SystemExit(
+                        "OUTPUT_ONLY_COMPATIBILITY=FAIL Chromium source-root marker missing: "
+                        + str(source_root / ".gn")
+                    )
+                # Brave patches Chromium's version-code helper to import
+                # brave_version_utils from Brave Core's script/ directory.
+                # This validation runs GN directly (outside Brave's build driver),
+                # so explicitly provide the same module search path.
+                version_utils = brave / "script" / "brave_version_utils.py"
+                if not version_utils.is_file():
+                    raise SystemExit(
+                        "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave version helper missing: "
+                        + str(version_utils)
+                    )
+                query_env = os.environ.copy()
+                existing_pythonpath = query_env.get("PYTHONPATH", "")
+                query_env["PYTHONPATH"] = str(version_utils.parent) + (
+                    os.pathsep + existing_pythonpath if existing_pythonpath else ""
+                )
+                gn_query = subprocess.run(
+                    [str(gn), "args", str(out), "--list"],
+                    cwd=str(source_root), env=query_env,
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=30, check=False
+                )
+            except subprocess.TimeoutExpired as exc:
+                diagnostic = exc.stdout or exc.stderr or ""
+                if isinstance(diagnostic, bytes):
+                    diagnostic = diagnostic.decode("utf-8", errors="replace")
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_BEGIN")
+                print(diagnostic.rstrip())
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_END")
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN args query timed out after 30s "
+                    + "command=" + repr([str(gn), "args", str(out), "--list"])
+                )
+            listed_args = gn_query.stdout or ""
+            if gn_query.returncode != 0:
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_BEGIN")
+                print(listed_args.rstrip())
+                print("SANDIUM_GN_ARGS_QUERY_DIAGNOSTIC_END")
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL GN args query returned "
+                    + str(gn_query.returncode)
+                    + " command=" + repr([str(gn), "args", str(out), "--list"])
+                    + " args_gn_bytes=" + str(args.stat().st_size)
+                    + " build_ninja_bytes=" + str(ninja.stat().st_size)
+                )
+            import re
+            effective_args = {}
+            for line in listed_args.splitlines():
+                match = re.match(r"^\s*(use_remoteexec|use_siso|use_reclient)\s*=\s*(true|false)\s*(?:#.*)?$", line)
+                if match:
+                    effective_args[match.group(1)] = match.group(2)
+            # use_remoteexec is a Brave build-command/runtime flag, not a GN
+            # argument. Validate the two actual GN values from GN, then separately
+            # validate that the compile-window driver passes the runtime flag.
+            expected_gn = {"use_siso": "true", "use_reclient": "false"}
+            if any(effective_args.get(name) != value for name, value in expected_gn.items()):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL effective GN values do not preserve required Siso-only configuration: "
+                    + repr({"expected": expected_gn, "observed": effective_args})
+                )
+            compile_driver = brave / "ci" / "siso" / "run_compile_window.py"
+            driver_text = compile_driver.read_text(encoding="utf-8") if compile_driver.is_file() else ""
+            required_runtime_flags = (
+                '"--use_remoteexec", "true"',
+                '"--gn", "use_siso:true"',
+                '"--gn", "use_reclient:false"',
+            )
+            if not all(flag in driver_text for flag in required_runtime_flags):
+                raise SystemExit(
+                    "OUTPUT_ONLY_COMPATIBILITY=FAIL compile driver does not enforce required Siso runtime flags"
+                )
+            print("SANDIUM_OUTPUT_ONLY_AUDIT=PASS changed_path=build/config/siso/brave_siso_config.star")
+            print("SANDIUM_OUTPUT_ONLY_GN_IDENTITY=PASS")
+            print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
+            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED_FOR_SAFE_REINITIALIZATION")
+            print("SANDIUM_CHECKPOINT_RESUME=INCREMENTAL_FROM_RESTORED_OUTPUTS")
+            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_COMPATIBILITY_PASS")
+            PY
+              # The restored compiled outputs and GN graph have passed identity
+              # checks. Reuse them incrementally only in the production Stage 1
+              # compile job. The validation-only job never receives compile authorization.
+              if [[ "${CIRCLE_JOB:-}" == "stage-1-source-foundation" &&
+                    "<< pipeline.parameters.run_sandium_compile_windows >>" == "true" ]]; then
+                echo 'export SANDIUM_BUILD_OUTPUT_CACHE_HIT=true' >> "$BASH_ENV"
+                echo 'export SANDIUM_SISO_STATE_RESTORED=false' >> "$BASH_ENV"
+                echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=true"
+                echo "SANDIUM_RESUME_MODE=INCREMENTAL_FROM_RESTORED_OUTPUTS"
+                echo "SANDIUM_COMPILE_AUTHORIZATION=INCREMENTAL_OUTPUTS_ONLY"
+              else
+                echo "SANDIUM_BUILD_OUTPUT_CACHE_HIT=false"
+                echo "SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED_VALIDATION_ONLY"
+              fi
+              exit 0
+            fi
             cache_hit=false
             # After clean Siso shutdown, .siso_fs_state is the saved snapshot and
             # .siso_fs_state.journal is normally deleted after being folded into
@@ -709,6 +979,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_resumable_pipeline_contract.py
   stage-1-source-foundation:
     machine:
@@ -2693,10 +2964,15 @@ jobs:
           command: |
             set -euo pipefail
             ROOT="$HOME/project"
-            python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
+            if [[ "<< pipeline.parameters.enable_sandium_output_only_checkpoint_recovery >>" == "true" ]]; then
+              export SANDIUM_ENABLE_OUTPUT_ONLY_RECOVERY=true
+              echo "SANDIUM_OUTPUT_ONLY_RECOVERY_OPT_IN=true"
+            fi
+            test -x /usr/bin/python3 || { echo "SANDIUM_SYSTEM_PYTHON_PREFLIGHT=FAIL"; exit 127; }
+            /usr/bin/python3 "$ROOT/src/brave/ci/siso/checkpoint_artifact_discovery.py" --root "$ROOT" --require-siso-state
             STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
             echo "SANDIUM_CHECKPOINT_DISCOVERY_STATUS=$STATUS"
-            if [[ "$STATUS" == "RESTORED" ]]; then
+            if [[ "$STATUS" == "RESTORED" || "$STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
               META="$ROOT/sandium-checkpoint.meta"
               python3 - "$META" \<<'PY'
             import json, sys
@@ -2752,6 +3028,47 @@ jobs:
             mv brave-core src/brave
             test -d src/brave/.git
       - validate-sandium-source-cache-inputs
+      # The restore-validation job also invokes Brave's build driver in
+      # prepare-only mode. Unlike compile jobs, it previously skipped Node/pnpm
+      # setup and dependency installation, so the validation failed with
+      # "pnpm: command not found" before it could inspect the restored output.
+      - install-sandium-node
+      - restore-sandium-pnpm-cache
+      - run:
+          name: Ensure Brave build-driver dependencies for checkpoint validation
+          command: |
+            set -euo pipefail
+            cd "$HOME/project/src/brave"
+            LOCK_HASH="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
+            if [[ ! -d node_modules || ! -s .sandium-pnpm-lock.sha256 ||
+                  "$(cat .sandium-pnpm-lock.sha256)" != "$LOCK_HASH" ]]; then
+              pnpm install --frozen-lockfile --prefer-offline
+              printf '%s\\n' "$LOCK_HASH" > .sandium-pnpm-lock.sha256
+            fi
+            pnpm --version
+            test -x node_modules/.bin/eslint || test -d node_modules
+            echo "SANDIUM_CHECKPOINT_VALIDATION_PNPM=READY"
+      # The prepare-only build invokes "gn" by name through Brave's build
+      # driver. A restored Chromium source tree does not guarantee this
+      # machine's PATH includes the GN binary or depot_tools wrappers.
+      - ensure-sandium-depot-tools
+      - run:
+          name: Preflight GN executable for checkpoint validation
+          command: |
+            set -euo pipefail
+            GN_DIR="$HOME/project/src/buildtools/linux64"
+            GN_BIN="$GN_DIR/gn"
+            if [[ ! -x "$GN_BIN" ]]; then
+              echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=FAIL"
+              echo "Expected Chromium GN binary is missing or not executable: $GN_BIN"
+              find "$HOME/project/src" -type f -name gn 2>/dev/null | head -n 30 || true
+              exit 1
+            fi
+            echo "export PATH=$GN_DIR:\\$PATH" >> "$BASH_ENV"
+            export PATH="$GN_DIR:$PATH"
+            command -v gn
+            gn --version
+            echo "SANDIUM_GN_EXECUTABLE_PREFLIGHT=PASS"
       - restore-sandium-build-output:
           stage_index: 1
       - run:
@@ -2762,6 +3079,30 @@ jobs:
             OUT="$ROOT/src/out/android_Debug_arm64"
             STATE="$ROOT/src/brave/ci/siso/build_state.py"
             META="$ROOT/sandium-checkpoint.meta"
+            DISCOVERY_STATUS="$(cat "$ROOT/.sandium-checkpoint-discovery-status" 2>/dev/null || true)"
+            if [[ "$DISCOVERY_STATUS" == "RESTORED_OUTPUTS_ONLY" ]]; then
+              test -d "$OUT"
+              test -s "$META"
+              test -s "$OUT/.sandium-build-state.json"
+              test ! -e "$OUT/.siso_fs_state"
+              test ! -L "$OUT/.siso_fs_state"
+              test ! -e "$OUT/.siso_fs_state.journal"
+              test ! -L "$OUT/.siso_fs_state.journal"
+              python3 - "$META" "$OUT/.sandium-build-state.json" \<<'PY'
+            import hashlib, json, sys
+            from pathlib import Path
+            meta = json.loads(Path(sys.argv[1]).read_text())
+            state_path = Path(sys.argv[2])
+            state = json.loads(state_path.read_text())
+            if meta.get("state_sha256") != hashlib.sha256(state_path.read_bytes()).hexdigest():
+                raise SystemExit("OUTPUT_ONLY_VALIDATION=FAIL build-state manifest hash mismatch")
+            print("SANDIUM_CHECKPOINT_RESTORE_MODE=OUTPUTS_ONLY")
+            print("SANDIUM_CHECKPOINT_SISO_STATE=DISCARDED")
+            print("SANDIUM_COMPILE_AUTHORIZATION=NOT_GRANTED")
+            print("SANDIUM_CHECKPOINT_RESTORE_VALIDATION=OUTPUTS_ONLY_PASS")
+            PY
+              exit 0
+            fi
             test -s "$OUT/.sandium-build-state.json"
             test -s "$META"
             EXPECTED_COMMIT="$(git -C "$ROOT/src/brave" rev-parse HEAD)"
@@ -2810,6 +3151,7 @@ jobs:
             python3 tests/ci/test_siso_checkpoint.py
             python3 tests/ci/test_siso_checkpoint_catalog.py
             python3 tests/ci/test_siso_checkpoint_artifact_discovery.py
+            python3 tests/ci/test_checkpoint_output_only_recovery.py
             python3 tests/ci/test_siso_build_state.py
             python3 tests/ci/test_resumable_pipeline_contract.py
             echo "SANDIUM_CHECKPOINT_UNIT_TESTS=PASS"
