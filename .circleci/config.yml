@@ -188,7 +188,8 @@ jobs:
             echo "SANDIUM_FINAL_APK_GATE=PASS"
 
 
-workflows:  sandium-bare-source-preflight:
+workflows:
+  sandium-bare-source-preflight:
     when: << pipeline.parameters.run_sandium_bare_source_preflight >>
     jobs:
       - sandium-bare-source-preflight
@@ -222,6 +223,7 @@ workflows:  sandium-bare-source-preflight:
           name: sandium-bare-stage-5
           stage_index: 5
           requires:
-            - sandium-bare-stage-4      - sandium-bare-apk-required:
+            - sandium-bare-stage-4
+      - sandium-bare-apk-required:
           requires:
             - sandium-bare-stage-5
