@@ -1,30 +1,27 @@
 version: 2.1
 
 parameters:
+  # Keep the existing parameter name so current API triggers/integration do not need reconfiguration.
   run_sandium_rbe_preflight:
     type: boolean
     default: false
 
 jobs:
-  sandium-rbe-configuration-preflight:
+  sandium-bare-source-preflight:
     machine:
       image: ubuntu-2404:current
     resource_class: medium
     steps:
       - run:
-          name: Verify isolated Sandium remote-build configuration
+          name: Verify Bare source and existing Sandium remote-build configuration (no build)
           command: |
             set -euo pipefail
 
-            echo "=== SANDIUM RBE CONFIGURATION PREFLIGHT ONLY ==="
+            echo "=== SANDIUM BARE SOURCE PREFLIGHT ONLY ==="
             echo "CIRCLE_PROJECT_USERNAME=${CIRCLE_PROJECT_USERNAME:-<unset>}"
             echo "CIRCLE_PROJECT_REPONAME=${CIRCLE_PROJECT_REPONAME:-<unset>}"
-            # CircleCI GitHub App projects may expose a provider/org identifier
-            # rather than the GitHub repository owner in CIRCLE_PROJECT_USERNAME.
-            # The API trigger is already scoped to the verified Sandium project slug;
-            # retain the repository-name and pinned-commit checks below.
             test "${CIRCLE_PROJECT_REPONAME:-}" = "Sandium" || {
-              echo "Expected CircleCI project Sandium; stopping."
+              echo "Expected the existing CircleCI project Sandium; stopping."
               exit 1
             }
             test -n "${CIRCLE_SHA1:-}" || {
@@ -32,51 +29,58 @@ jobs:
               exit 1
             }
 
-            : "${SANDIUM_REAPI_ADDRESS:?Set a Sandium-specific REAPI endpoint in CircleCI project/context variables}"
-            : "${SANDIUM_REAPI_INSTANCE:?Set the intended REAPI instance/namespace explicitly}"
-            : "${BUILDBUDDY_API_KEY:?Create a fresh Sandium-specific BuildBuddy API key; do not copy a SANDFOX key}"
+            # Reuse existing Sandium settings and credential assignments. Never create or rotate credentials here.
+            : "${SANDIUM_REAPI_ADDRESS:?Existing REAPI endpoint setting is unavailable; stop without creating a replacement}"
+            : "${SANDIUM_REAPI_INSTANCE:?Existing REAPI instance setting is unavailable; stop without creating a replacement}"
+            : "${BUILDBUDDY_API_KEY:?Existing BuildBuddy credential is unavailable in this CircleCI context; stop without recreating it}"
             test "${SANDIUM_CACHE_SCOPE_CONFIRMED:-}" = "true" || {
-              echo "Set SANDIUM_CACHE_SCOPE_CONFIRMED=true only after confirming the chosen instance/project isolates Sandium cache scope."
+              echo "Existing cache-scope confirmation is absent; stop and inspect current configuration without changing credentials or cache settings."
               exit 1
             }
 
-            PACKAGE_FILE="$(mktemp)"
-            BACKEND_FILE="$(mktemp)"
-            trap 'rm -f "${PACKAGE_FILE}" "${BACKEND_FILE}"' EXIT
-            ROOT_URL="https://raw.githubusercontent.com/sandeepbimt/Sandium/${CIRCLE_SHA1}"
+            BARE_COMMIT="a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5"
+            CHROMIUM_COMMIT="1228231501697ff7a4a0150ea8ae6df37bb99331"
+            CHROMIUM_VERSION="156.0.8078.25"
+            TMP_ROOT="$(mktemp -d)"
+            trap 'rm -rf "${TMP_ROOT}"' EXIT
 
-            curl --fail --silent --show-error "${ROOT_URL}/package.json" -o "${PACKAGE_FILE}"
-            curl --fail --silent --show-error "${ROOT_URL}/ci/siso/buildbuddy_backend.star" -o "${BACKEND_FILE}"
+            git init "${TMP_ROOT}/bare"
+            git -C "${TMP_ROOT}/bare" remote add origin https://github.com/BareBrowser/bare-browser.git
+            git -C "${TMP_ROOT}/bare" fetch --depth=1 origin "${BARE_COMMIT}"
+            git -C "${TMP_ROOT}/bare" checkout --detach FETCH_HEAD
+            test "$(git -C "${TMP_ROOT}/bare" rev-parse HEAD)" = "${BARE_COMMIT}"
 
-            python3 - "${PACKAGE_FILE}" \<<'PY'
-            import json
-            import sys
+            BUILDING_FILE="${TMP_ROOT}/bare/BUILDING.md"
+            README_FILE="${TMP_ROOT}/bare/README.md"
+            test -s "${BUILDING_FILE}"
+            test -s "${README_FILE}"
+            grep -Fq "${CHROMIUM_COMMIT}" "${BUILDING_FILE}"
+            grep -Fq "${CHROMIUM_VERSION}" "${BUILDING_FILE}"
+            grep -Fq 'git am' "${README_FILE}"
 
-            with open(sys.argv[1], encoding="utf-8") as stream:
-                package = json.load(stream)
+            PATCH_COUNT="$(find "${TMP_ROOT}/bare/patches" -maxdepth 1 -type f -name '*.patch' | wc -l | tr -d ' ')"
+            test "${PATCH_COUNT}" -gt 0
+            PATCH_DIGEST="$(find "${TMP_ROOT}/bare/patches" -maxdepth 1 -type f -name '*.patch' -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
 
-            version = package.get("version")
-            chromium = package.get("config", {}).get("projects", {}).get("chrome", {}).get("tag")
-            print("BRAVE_CORE_VERSION=" + str(version))
-            print("CHROMIUM_REVISION=" + str(chromium))
-            if version != "1.100.10" or chromium != "156.0.8078.39":
-                raise SystemExit("Source pins differ from the reviewed feasibility baseline; stop and re-review.")
-            PY
-
-            grep -q 'OSFamily.*Linux' "${BACKEND_FILE}"
-            grep -q 'backend = module' "${BACKEND_FILE}"
+            echo "BARE_COMMIT=${BARE_COMMIT}"
+            echo "CHROMIUM_COMMIT=${CHROMIUM_COMMIT}"
+            echo "CHROMIUM_VERSION=${CHROMIUM_VERSION}"
+            echo "BARE_PATCH_COUNT=${PATCH_COUNT}"
+            echo "BARE_PATCH_SERIES_SHA256=${PATCH_DIGEST}"
             echo "REAPI_ADDRESS=${SANDIUM_REAPI_ADDRESS}"
             echo "REAPI_INSTANCE=${SANDIUM_REAPI_INSTANCE}"
-            echo "BUILDBUDDY_API_KEY_PRESENT=yes"
+            echo "BUILDBUDDY_CREDENTIAL_PRESENT=yes"
             echo "CACHE_SCOPE_CONFIRMED=yes"
-            echo "SANDIUM_RBE_PREFLIGHT=PASS"
+            echo "BARE_SOURCE_PREFLIGHT=PASS"
             echo "REMOTE_EXECUTION_TESTED=no"
-            echo "SOURCE_SYNC_RUN=no"
+            echo "CHROMIUM_SOURCE_SYNC_RUN=no"
+            echo "GN_GENERATION_RUN=no"
             echo "COMPILATION_RUN=no"
-            echo "This job performs static metadata checks only; it does not call BuildBuddy, clone Chromium, run gclient, generate GN or compile."
- 
+            echo "APK_BUILD_RUN=no"
+            echo "This job checks the pinned Bare patch repository only. It does not sync Chromium, generate GN, compile, package an APK, change credentials or clear caches."
+
 workflows:
-  sandium-rbe-preflight:
+  sandium-bare-source-preflight:
     when: << pipeline.parameters.run_sandium_rbe_preflight >>
     jobs:
-      - sandium-rbe-configuration-preflight
+      - sandium-bare-source-preflight
