@@ -98,56 +98,87 @@ case "$MODE" in
     : "${BUILDBUDDY_API_KEY:?Existing protected BuildBuddy credential is unavailable; stop without creating a replacement}"
 
     cd "$ROOT"
-    # Capture fetch/gclient output continuously; Chromium dependency sync can be quiet.
+    # fetch android itself runs gclient sync at the current tip before returning.
+    # That meant the prior direct-pin step happened too late. Configure only,
+    # pin Chromium directly, then do one dependency sync against the pinned DEPS.
     FETCH_LOG="$ROOT/sandium-fetch.log"
     SYNC_LOG="$ROOT/sandium-gclient-sync.log"
-    echo "SANDIUM_FETCH_BEGIN_UTC=$(date -u +%FT%TZ)"
-    echo "SANDIUM_FETCH_COMMAND=fetch --no-history --nohooks android"
+    CONFIG_LOG="$ROOT/sandium-gclient-config.log"
+    GIT_TRACE_LOG="$ROOT/sandium-git-trace.log"
+    export GIT_TRACE="$GIT_TRACE_LOG"
+    export GIT_TERMINAL_PROMPT=0
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=http.lowSpeedLimit
+    export GIT_CONFIG_VALUE_0=0
+    export GIT_CONFIG_KEY_1=http.lowSpeedTime
+    export GIT_CONFIG_VALUE_1=300
+
+    GCLIENT_SPEC=$(cat <<'SANDIUM_GCLIENT_SPEC'
+solutions = [
+  {
+    "name": "src",
+    "url": "https://chromium.googlesource.com/chromium/src.git",
+    "custom_deps": {},
+    "custom_vars": {},
+  },
+]
+target_os = ["android"]
+SANDIUM_GCLIENT_SPEC
+)
+    echo "SANDIUM_GCLIENT_CONFIG_BEGIN_UTC=$(date -u +%FT%TZ)"
     set +e
-    "$DEPOT_TOOLS/fetch" --no-history --nohooks android 2>&1 | tee "$FETCH_LOG"
-    fetch_rc=${PIPESTATUS[0]}
+    "$DEPOT_TOOLS/gclient" config --spec "$GCLIENT_SPEC" 2>&1 | tee "$CONFIG_LOG"
+    config_rc=${PIPESTATUS[0]}
     set -e
-    echo "SANDIUM_FETCH_END_UTC=$(date -u +%FT%TZ)"
-    echo "SANDIUM_FETCH_EXIT_CODE=$fetch_rc"
-    if [[ "$fetch_rc" -ne 0 ]]; then
-      echo "SANDIUM_FETCH_FAILURE_DIAGNOSTICS_BEGIN"
-      ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 50 || true
-      git -C "$ROOT/src" status --short --branch 2>&1 || true
-      find "$ROOT" -maxdepth 2 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 100 || true
-      tail -n 250 "$FETCH_LOG" 2>/dev/null || true
-      echo "SANDIUM_FETCH_FAILURE_DIAGNOSTICS_END"
-      exit "$fetch_rc"
+    echo "SANDIUM_GCLIENT_CONFIG_EXIT_CODE=$config_rc"
+    echo "SANDIUM_GCLIENT_CONFIG_END_UTC=$(date -u +%FT%TZ)"
+    if [[ "$config_rc" -ne 0 ]]; then
+      tail -n 200 "$CONFIG_LOG" 2>/dev/null || true
+      exit "$config_rc"
     fi
-    test -f "$ROOT/.gclient"
-    # Pin src directly before gclient sync. Otherwise fetch(android) checks out
-    # the current tip and the following gclient sync must move the enormous
-    # Chromium checkout backwards to the requested revision, which stalled.
+
     echo "SANDIUM_CHROMIUM_DIRECT_PIN_BEGIN_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_CHROMIUM_DIRECT_PIN=$CHROMIUM_COMMIT"
-    git -C "$CHROMIUM_SRC" remote -v
-    git -C "$CHROMIUM_SRC" -c protocol.version=2 -c http.lowSpeedLimit=0 -c http.lowSpeedTime=300 \
-      fetch --no-tags --depth=1 origin "$CHROMIUM_COMMIT"
-    git -C "$CHROMIUM_SRC" checkout --force --detach "$CHROMIUM_COMMIT"
-    test "$(git -C "$CHROMIUM_SRC" rev-parse HEAD)" = "$CHROMIUM_COMMIT"
+    mkdir -p "$CHROMIUM_SRC"
+    git -C "$CHROMIUM_SRC" init
+    git -C "$CHROMIUM_SRC" remote add origin https://chromium.googlesource.com/chromium/src.git
+    set +e
+    git -C "$CHROMIUM_SRC" -c protocol.version=2 fetch --no-tags --depth=1 origin "$CHROMIUM_COMMIT" 2>&1 | tee "$FETCH_LOG"
+    fetch_rc=${PIPESTATUS[0]}
+    set -e
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_FETCH_EXIT_CODE=$fetch_rc"
+    if [[ "$fetch_rc" -ne 0 ]]; then
+      echo "SANDIUM_CHROMIUM_DIRECT_PIN_FAILURE_DIAGNOSTICS_BEGIN"
+      ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 60 || true
+      tail -n 250 "$FETCH_LOG" 2>/dev/null || true
+      tail -n 200 "$GIT_TRACE_LOG" 2>/dev/null || true
+      echo "SANDIUM_CHROMIUM_DIRECT_PIN_FAILURE_DIAGNOSTICS_END"
+      exit "$fetch_rc"
+    fi
+    git -C "$CHROMIUM_SRC" checkout --force --detach FETCH_HEAD
+    actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
+    if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
+      echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
+      exit 33
+    fi
     echo "SANDIUM_CHROMIUM_DIRECT_PIN_PASS"
     echo "SANDIUM_CHROMIUM_DIRECT_PIN_END_UTC=$(date -u +%FT%TZ)"
+
+    test -f "$ROOT/.gclient"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
     echo "SANDIUM_GCLIENT_SYNC_BEGIN_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_GCLIENT_SYNC_COMMAND=gclient sync --verbose --no-history --nohooks --revision src@$CHROMIUM_COMMIT"
-    # Bound dependency sync so a blocked Git/network operation cannot consume
-    # the whole CircleCI job. On timeout, capture process, socket, lock and log evidence.
     SYNC_TIMEOUT_SECONDS="${SANDIUM_GCLIENT_SYNC_TIMEOUT_SECONDS:-1200}"
     echo "SANDIUM_GCLIENT_SYNC_TIMEOUT_SECONDS=$SYNC_TIMEOUT_SECONDS"
     set +e
-    timeout --signal=TERM --kill-after=60s "${SYNC_TIMEOUT_SECONDS}s" \
-      "$DEPOT_TOOLS/gclient" sync --verbose --no-history --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$SYNC_LOG"
+    timeout --signal=TERM --kill-after=60s "${SYNC_TIMEOUT_SECONDS}s" "$DEPOT_TOOLS/gclient" sync --verbose --no-history --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$SYNC_LOG"
     sync_rc=${PIPESTATUS[0]}
     set -e
     echo "SANDIUM_GCLIENT_SYNC_END_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_GCLIENT_SYNC_EXIT_CODE=$sync_rc"
     if [[ "$sync_rc" -ne 0 ]]; then
       echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_BEGIN"
-      echo "SANDIUM_GCLIENT_FAILURE_KIND=$([[ "$sync_rc" -eq 124 || "$sync_rc" -eq 137 ]] && echo TIMEOUT || echo COMMAND_FAILURE)"
+      echo "SANDIUM_GCLIENT_FAILURE_KIND=$( [[ "$sync_rc" -eq 124 || "$sync_rc" -eq 137 ]] && echo TIMEOUT || echo COMMAND_FAILURE )"
       echo "SANDIUM_GCLIENT_FAILURE_EXIT_CODE=$sync_rc"
       echo "--- processes ---"
       ps -eo pid,ppid,etime,stat,%cpu,%mem,wchan:24,args --sort=-%cpu | head -n 80 || true
@@ -156,12 +187,15 @@ case "$MODE" in
       echo "--- git status ---"
       git -C "$CHROMIUM_SRC" status --short --branch 2>&1 || true
       echo "--- lock files ---"
-      find "$ROOT" -maxdepth 4 \( -name '*.lock' -o -name '*.lck' \) -print 2>/dev/null | head -n 150 || true
+      find "$ROOT" -maxdepth 4 \( -name "*.lock" -o -name "*.lck" \) -print 2>/dev/null | head -n 150 || true
       echo "--- sync log tail ---"
       tail -n 400 "$SYNC_LOG" 2>/dev/null || true
+      echo "--- git trace tail ---"
+      tail -n 400 "$GIT_TRACE_LOG" 2>/dev/null || true
       echo "SANDIUM_GCLIENT_FAILURE_DIAGNOSTICS_END"
       exit "$sync_rc"
     fi
+
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
