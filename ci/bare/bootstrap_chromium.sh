@@ -98,10 +98,10 @@ case "$MODE" in
     : "${BUILDBUDDY_API_KEY:?Existing protected BuildBuddy credential is unavailable; stop without creating a replacement}"
 
     cd "$ROOT"
-    "$DEPOT_TOOLS/fetch" --nohooks android
+    "$DEPOT_TOOLS/fetch" --no-history --nohooks android
     test -f "$ROOT/.gclient"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
-    "$DEPOT_TOOLS/gclient" sync --nohooks --revision "src@$CHROMIUM_COMMIT"
+    "$DEPOT_TOOLS/gclient" sync --no-history --nohooks --revision "src@$CHROMIUM_COMMIT"
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
