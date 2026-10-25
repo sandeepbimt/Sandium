@@ -1,8 +1,19 @@
-# SANDIUM Bare Android ARM64 Debug build arguments.
+# Sandium/Bare Android ARM64 Debug APK.
 target_os="android"
 target_cpu="arm64"
 is_desktop_android=true
 is_debug=true
+is_java_debug=false
+is_component_build=false
+dcheck_always_on=false
+symbol_level=0
+blink_symbol_level=0
+v8_symbol_level=0
+android_static_analysis="off"
+disable_fieldtrial_testing_config=true
+chrome_public_manifest_package="org.sandium.browser"
+android_override_version_code="801000115"
+android_override_version_name="1.0.1"
 use_siso=true
 use_reclient=false
 use_remoteexec=true
