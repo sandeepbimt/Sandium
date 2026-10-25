@@ -7,7 +7,13 @@ HANDOFF="$ROOT/ci-handoff/stage-$STAGE"; LEDGER="$HANDOFF/ledger.json"; STATUS="
 PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"
 if [[ "$STAGE" -gt 1 ]]; then
   test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
-  if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then echo APK_FAST_PATH=PASS; exit 0; fi
+  if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
+    mkdir -p "$HANDOFF" "$ROOT/sandium-output"
+    cp "$PREV" "$LEDGER"
+    cp "$PREV_STATUS" "$STATUS"
+    echo APK_FAST_PATH=PASS
+    exit 0
+  fi
 fi
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
