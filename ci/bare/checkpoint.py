@@ -114,6 +114,11 @@ def main() -> int:
     print("SANDIUM_BARE_CHECKPOINT_SHA256=" + saved["archive_sha256"])
     if args.mode == "verify":
         return 0
+    if output.is_dir() and not output.is_symlink():
+        current_identity = source_identity(control, root, require_gn=True)
+        if identity_digest(current_identity) == saved.get("build_identity_sha256"):
+            print("SANDIUM_BARE_CHECKPOINT_RESTORE=SKIPPED_ALREADY_VALID")
+            return 0
 
     # Extract to an isolated temporary root first. Preserve any pre-existing output
     # directory as a backup rather than deleting it; only swap after extraction passes.
