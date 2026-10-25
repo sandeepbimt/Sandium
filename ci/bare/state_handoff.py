@@ -147,6 +147,122 @@ def pack(root: Path, control: Path, stage: int, workflow_id: str, ledger_path: P
     print("SANDIUM_STATE_HANDOFF_BUILD_IDENTITY_SHA256=" + ident_hash)
     return 0
 
+def preflight(root: Path, control: Path, archive: Path, meta_path: Path,
+              stage: int, workflow_id: str, required: bool) -> int:
+    def miss(reason: str) -> int:
+        payload = {
+            "schema": SCHEMA, "SANDIUM_STATE_HANDOFF": "MISS",
+            "SANDIUM_PRIOR_USEFUL_RUN": "REJECTED" if (meta_path.exists() or meta_path.is_symlink()) else "NOT_FOUND",
+            "reason": reason, "current_stage": stage,
+            "current_workflow_id": workflow_id or "unknown",
+            "state_files_restored": [], "local_compiled_outputs_restored": False,
+            "preflight_only": True,
+        }
+        write_json(root / REPORT_NAME, payload)
+        print("SANDIUM_STATE_HANDOFF_PREFLIGHT=MISS")
+        print("SANDIUM_STATE_HANDOFF_REASON=" + reason)
+        # Move incompatible candidates out of the canonical cache paths so a
+        # failed run cannot republish the same bad candidate as the newest key.
+        quarantine = root / "sandium-rejected-state-candidates"
+        for candidate in (archive, meta_path):
+            if candidate.exists() or candidate.is_symlink():
+                try:
+                    quarantine.mkdir(parents=True, exist_ok=True)
+                    target = quarantine / (candidate.name + ".rejected")
+                    if target.exists() or target.is_symlink():
+                        target = quarantine / (candidate.name + f".stage-{stage}.rejected")
+                    if not target.exists() and not target.is_symlink():
+                        os.replace(candidate, target)
+                except OSError as exc:
+                    print("SANDIUM_STATE_HANDOFF_QUARANTINE_WARNING=" + str(exc), file=sys.stderr)
+        if required:
+            print("SANDIUM_STATE_HANDOFF_ERROR=Required checkpoint failed preflight: " + reason, file=sys.stderr)
+            return 42
+        return 0
+
+    try:
+        if not archive.is_file() or archive.is_symlink() or not meta_path.is_file() or meta_path.is_symlink():
+            return miss("archive_or_metadata_not_found")
+        meta = load_json(meta_path)
+        if meta.get("schema") != SCHEMA or meta.get("format") != "siso-state-only":
+            return miss("unsupported_schema_or_format")
+        if meta.get("archive_name") != archive.name or meta.get("archive_sha256") != sha256(archive):
+            return miss("archive_hash_or_name_mismatch")
+        if not useful(meta):
+            return miss("prior_run_not_proven_useful")
+
+        saved_stage = int(meta.get("stage", 0))
+        saved_workflow = str(meta.get("workflow_id", "unknown"))
+        if stage > 1 and (saved_stage != stage - 1 or saved_workflow != workflow_id):
+            return miss(f"expected_stage_{stage-1}_same_workflow_got_{saved_stage}_{saved_workflow}")
+        if meta.get("control_inputs") != control_inputs(control):
+            return miss("control_input_hash_mismatch")
+        ident = meta.get("build_identity", {})
+        ident_hash = digest(ident)
+        if meta.get("build_identity_sha256") != ident_hash:
+            return miss("embedded_build_identity_hash_mismatch")
+        ledger = meta.get("stage_ledger", {})
+        if not isinstance(ledger, dict) or ledger.get("build_identity_sha256") != ident_hash:
+            return miss("embedded_stage_ledger_identity_mismatch")
+        ledger_bytes = (json.dumps(ledger, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        ledger_sha = hashlib.sha256(ledger_bytes).hexdigest()
+        if meta.get("stage_ledger_sha256") != ledger_sha:
+            return miss("embedded_stage_ledger_hash_mismatch")
+
+        entries = meta.get("state_files")
+        if not isinstance(entries, list) or not entries:
+            return miss("state_file_manifest_missing")
+        names, expected = [], {}
+        for item in entries:
+            if not isinstance(item, dict):
+                return miss("invalid_state_file_manifest_entry")
+            name = str(item.get("name", ""))
+            if name not in VALID_NAMES or "/" in name or "\\" in name or name in names:
+                return miss("unsafe_or_duplicate_state_file_name")
+            names.append(name)
+            expected[name] = str(item.get("sha256", ""))
+        if not any(name in (".siso_fs_state", ".siso_fs_state.0") for name in names):
+            return miss("state_manifest_has_no_siso_state")
+
+        with tempfile.TemporaryDirectory(prefix="sandium-state-preflight.", dir=str(root)) as temp:
+            tmp_root = Path(temp)
+            members = subprocess.check_output(
+                ["tar", "--use-compress-program=zstd", "-tf", str(archive)],
+                text=True, stderr=subprocess.STDOUT,
+            ).splitlines()
+            if sorted(members) != sorted(names):
+                return miss("archive_members_do_not_match_manifest")
+            subprocess.run(
+                ["tar", "--use-compress-program=zstd", "-xf", str(archive), "-C", str(tmp_root)],
+                check=True,
+            )
+            for name in names:
+                member = tmp_root / name
+                if not member.is_file() or member.is_symlink() or sha256(member) != expected[name]:
+                    return miss("state_file_hash_mismatch:" + name)
+
+        payload = {
+            "schema": SCHEMA,
+            "SANDIUM_STATE_HANDOFF": "PREFLIGHT_PASS",
+            "SANDIUM_PRIOR_USEFUL_RUN": "CANDIDATE_VALIDATED" if stage == 1 else "CURRENT_WORKFLOW_PREVIOUS_STAGE",
+            "source_workflow_id": saved_workflow,
+            "source_stage": saved_stage,
+            "current_workflow_id": workflow_id or "unknown",
+            "current_stage": stage,
+            "build_identity_sha256": ident_hash,
+            "state_files_validated": names,
+            "local_compiled_outputs_restored": False,
+            "full_source_identity_check": "PENDING_AFTER_SOURCE_AND_GN_SETUP",
+        }
+        write_json(root / REPORT_NAME, payload)
+        print("SANDIUM_STATE_HANDOFF_PREFLIGHT=PASS")
+        print("SANDIUM_PRIOR_USEFUL_RUN=" + payload["SANDIUM_PRIOR_USEFUL_RUN"])
+        print("SANDIUM_STATE_FILES_VALIDATED=" + ",".join(names))
+        print("SANDIUM_STATE_HANDOFF_BUILD_IDENTITY_SHA256=" + ident_hash)
+        return 0
+    except (IdentityError, OSError, ValueError, KeyError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+        return miss("validation_error:" + str(exc))
+
 def restore(root: Path, control: Path, archive: Path, meta_path: Path,
             stage: int, workflow_id: str, required: bool) -> int:
     def miss(reason: str) -> int:
@@ -408,6 +524,10 @@ def main() -> int:
     p.add_argument("--root", type=Path); p.add_argument("--stage", type=int, choices=range(1,6), required=True)
     p.add_argument("--workflow-id", default="unknown"); p.add_argument("--archive", type=Path); p.add_argument("--meta", type=Path)
     p.add_argument("--required", action="store_true")
+    p = subs.add_parser("preflight")
+    p.add_argument("--root", type=Path); p.add_argument("--stage", type=int, choices=range(1,6), required=True)
+    p.add_argument("--workflow-id", default="unknown"); p.add_argument("--archive", type=Path); p.add_argument("--meta", type=Path)
+    p.add_argument("--required", action="store_true")
     p = subs.add_parser("reuse-apk")
     p.add_argument("--root", type=Path); p.add_argument("--workflow-id", default="unknown")
     p.add_argument("--archive", type=Path); p.add_argument("--meta", type=Path)
@@ -426,6 +546,8 @@ def main() -> int:
     if args.mode == "reuse-apk":
         return reuse_cached_apk(root, control, archive, meta, args.apk.resolve(), args.manifest.resolve(),
                                 args.ledger.resolve(), args.status.resolve(), args.report.resolve(), args.workflow_id)
+    if args.mode == "preflight":
+        return preflight(root, control, archive, meta, args.stage, args.workflow_id, args.required)
     return restore(root, control, archive, meta, args.stage, args.workflow_id, args.required)
 
 if __name__ == "__main__":
