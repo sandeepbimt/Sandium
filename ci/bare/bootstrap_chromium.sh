@@ -146,11 +146,14 @@ SANDIUM_GCLIENT_SPEC
     mkdir -p "$CHROMIUM_SRC"
     git -C "$CHROMIUM_SRC" init
     git -C "$CHROMIUM_SRC" remote add origin https://chromium.googlesource.com/chromium/src.git
+    PIN_FETCH_TIMEOUT_SECONDS="${SANDIUM_CHROMIUM_PIN_FETCH_TIMEOUT_SECONDS:-900}"
+    echo "SANDIUM_CHROMIUM_PIN_FETCH_TIMEOUT_SECONDS=$PIN_FETCH_TIMEOUT_SECONDS"
     set +e
-    git -C "$CHROMIUM_SRC" -c protocol.version=2 fetch --no-tags --depth=1 origin "$CHROMIUM_COMMIT" 2>&1 | tee "$FETCH_LOG"
+    timeout --signal=TERM --kill-after=60s "${PIN_FETCH_TIMEOUT_SECONDS}s" git -C "$CHROMIUM_SRC" -c protocol.version=2 fetch --no-tags --depth=1 origin "$CHROMIUM_COMMIT" 2>&1 | tee "$FETCH_LOG"
     fetch_rc=${PIPESTATUS[0]}
     set -e
     echo "SANDIUM_CHROMIUM_DIRECT_PIN_FETCH_EXIT_CODE=$fetch_rc"
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_FETCH_KIND=$([[ "$fetch_rc" -eq 124 || "$fetch_rc" -eq 137 ]] && echo TIMEOUT || echo COMMAND_FAILURE)"
     if [[ "$fetch_rc" -ne 0 ]]; then
       echo "SANDIUM_CHROMIUM_DIRECT_PIN_FAILURE_DIAGNOSTICS_BEGIN"
       ps -eo pid,ppid,etime,stat,%cpu,%mem,args --sort=-%cpu | head -n 60 || true
