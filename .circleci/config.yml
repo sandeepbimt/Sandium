@@ -1,10 +1,10 @@
 version: 2.1
 
 # SANDIUM BARE-ONLY CI CONTRACT
-# Bare-only source migration. Full APK builds stay disabled until source preflight
-# and existing BuildBuddy/Siso integration review are complete.
+# Five-stage Bare APK attempt; each stage is source-pinned, time-bounded and
+# publishes source-sync, Git trace, Siso, metrics and artifact diagnostics.
 # Existing CircleCI project, BuildBuddy endpoint/instance and protected secret
-# assignment are reused; no credentials are recreated or caches deleted.
+# assignment are reused; no credentials are recreated or caches are deleted.
 
 parameters:
   run_sandium_bare_source_preflight:
