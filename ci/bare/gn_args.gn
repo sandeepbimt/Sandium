@@ -1,0 +1,8 @@
+# SANDIUM Bare Android ARM64 Debug build arguments.
+target_os="android"
+target_cpu="arm64"
+is_desktop_android=true
+is_debug=true
+use_siso=true
+use_reclient=false
+use_remoteexec=true
