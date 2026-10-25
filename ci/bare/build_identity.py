@@ -303,6 +303,8 @@ def main() -> int:
         changed = sorted(k for k in identity if saved.get(k) != identity[k])
         raise IdentityError("Build/source identity mismatch in fields: " + ",".join(changed))
     artifact = verify_apk(apk, {**identity, "artifact_name": pins["artifact_name"]}, workspace=workspace)
+    if saved.get("artifact_verified") is not True or saved.get("apksigner_verification") != "PASS":
+        raise IdentityError("Saved manifest does not contain successful APK signature-verification evidence")
     if saved.get("artifact_sha256") != artifact["artifact_sha256"] or saved.get("artifact_bytes") != artifact["artifact_bytes"]:
         raise IdentityError("APK does not match the saved manifest SHA-256/size")
     print("SANDIUM_BUILD_IDENTITY=PASS")
