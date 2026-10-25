@@ -419,6 +419,23 @@ commands:
                 exit 42
               }
               echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION"
+              # Output-only checkpoint recovery restores compiled outputs, not
+              # Brave Core's DEPS-managed child repositories. GN requires this
+              # pinned vendor checkout even for prepare-only validation. Sync
+              # Brave dependencies only when this required checkout is absent,
+              # while explicitly preventing a Chromium revision update.
+              REQUIRED_BRAVE_DEP="$BRAVE/vendor/bat-native-tweetnacl/BUILD.gn"
+              if [[ ! -s "$REQUIRED_BRAVE_DEP" ]]; then
+                echo "SANDIUM_BRAVE_CHILD_DEPS=SYNC_REQUIRED missing=$REQUIRED_BRAVE_DEP"
+                cd "$BRAVE"
+                pnpm run sync --sync_chromium=false 2>&1 | tee "$HOME/project/build-diagnostics/checkpoint-brave-deps-sync.log"
+                cd "$HOME/project"
+              fi
+              test -s "$REQUIRED_BRAVE_DEP" || {
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave DEPS sync did not restore $REQUIRED_BRAVE_DEP" >&2
+                exit 42
+              }
+              echo "SANDIUM_BRAVE_CHILD_DEPS=READY"
               mkdir -p "$HOME/project/build-diagnostics"
               # GN's Brave overlay imports Chromium branding assets under
               # src/chrome/app/theme/brave/BRANDING. These source-overlay files
