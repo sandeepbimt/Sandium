@@ -102,9 +102,9 @@ case "$MODE" in
     FETCH_LOG="$ROOT/sandium-fetch.log"
     SYNC_LOG="$ROOT/sandium-gclient-sync.log"
     echo "SANDIUM_FETCH_BEGIN_UTC=$(date -u +%FT%TZ)"
-    echo "SANDIUM_FETCH_COMMAND=fetch --no-history --nohooks --verbose android"
+    echo "SANDIUM_FETCH_COMMAND=fetch --no-history --nohooks android"
     set +e
-    "$DEPOT_TOOLS/fetch" --no-history --nohooks --verbose android 2>&1 | tee "$FETCH_LOG"
+    "$DEPOT_TOOLS/fetch" --no-history --nohooks android 2>&1 | tee "$FETCH_LOG"
     fetch_rc=${PIPESTATUS[0]}
     set -e
     echo "SANDIUM_FETCH_END_UTC=$(date -u +%FT%TZ)"
