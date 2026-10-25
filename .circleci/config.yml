@@ -134,7 +134,8 @@ jobs:
             - sandium-bare-checkpoint.tar.zst
             - sandium-bare-checkpoint.meta
             - ci-handoff/stage-<< parameters.stage_index >>
-            - sandium-output      - store_artifacts:
+            - sandium-output
+      - store_artifacts:
           name: Upload stage driver and Siso logs
           path: stage-<< parameters.stage_index >>-driver.log
           destination: diagnostics/stage-<< parameters.stage_index >>/driver.log
