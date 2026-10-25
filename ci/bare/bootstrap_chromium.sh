@@ -119,6 +119,18 @@ case "$MODE" in
       exit "$fetch_rc"
     fi
     test -f "$ROOT/.gclient"
+    # Pin src directly before gclient sync. Otherwise fetch(android) checks out
+    # the current tip and the following gclient sync must move the enormous
+    # Chromium checkout backwards to the requested revision, which stalled.
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_BEGIN_UTC=$(date -u +%FT%TZ)"
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN=$CHROMIUM_COMMIT"
+    git -C "$CHROMIUM_SRC" remote -v
+    git -C "$CHROMIUM_SRC" -c protocol.version=2 -c http.lowSpeedLimit=0 -c http.lowSpeedTime=300 \
+      fetch --no-tags --depth=1 origin "$CHROMIUM_COMMIT"
+    git -C "$CHROMIUM_SRC" checkout --force --detach "$CHROMIUM_COMMIT"
+    test "$(git -C "$CHROMIUM_SRC" rev-parse HEAD)" = "$CHROMIUM_COMMIT"
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_PASS"
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_END_UTC=$(date -u +%FT%TZ)"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
     echo "SANDIUM_GCLIENT_SYNC_BEGIN_UTC=$(date -u +%FT%TZ)"
     echo "SANDIUM_GCLIENT_SYNC_COMMAND=gclient sync --verbose --no-history --nohooks --revision src@$CHROMIUM_COMMIT"
