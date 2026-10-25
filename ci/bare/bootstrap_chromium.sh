@@ -59,6 +59,9 @@ if [[ ! -x "$DEPOT_TOOLS/fetch" || ! -x "$DEPOT_TOOLS/gclient" || ! -x "$DEPOT_T
 fi
 export PATH="$DEPOT_TOOLS:$PATH"
 
+"$BARE_ADAPTER" inspect
+python3 "$CONTROL_ROOT/ci/bare/write_cache_identity.py"
+
 if [[ ! -d "$ROOT/src/.git" ]]; then
   if [[ -e "$ROOT/.gclient" || -e "$ROOT/src" ]]; then
     echo "SANDIUM_CHROMIUM_WORKSPACE_CONFLICT=true; refusing to overwrite existing source state." >&2
@@ -87,8 +90,11 @@ sudo "$ROOT/src/build/install-build-deps.sh" --android
 
 GN="$ROOT/src/buildtools/linux64/gn"
 test -x "$GN"
-"$GN" gen "$ROOT/src/out/android_Debug_arm64" --args='target_os="android" target_cpu="arm64" is_desktop_android=true is_debug=true use_siso=true use_reclient=false use_remoteexec=true'
+GN_ARGS_FILE="$CONTROL_ROOT/ci/bare/gn_args.gn"
+test -s "$GN_ARGS_FILE"
+"$GN" gen "$ROOT/src/out/android_Debug_arm64" --args="$(cat "$GN_ARGS_FILE")"
 
+python3 "$CONTROL_ROOT/ci/bare/write_cache_identity.py"
 python3 "$IDENTITY_TOOL" --mode record --root "$ROOT" --output "$ROOT/sandium-output"
 echo "SANDIUM_CHROMIUM_SOURCE_PREPARATION=PASS"
 echo "SANDIUM_GN_GENERATION=PASS"
