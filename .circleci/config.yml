@@ -143,14 +143,6 @@ workflows:
     jobs:
       - sandium-bare-source-preflight
 
-  sandium-bare-android-apk:
-    when:
-      and:
-        - << pipeline.parameters.run_sandium_bare_source_ready >>
-        - << pipeline.parameters.run_sandium_bare_android_apk_build >>
-    jobs:
-      - sandium-bare-build-not-ready
-
   # Explicitly approved five-stage APK attempt on the isolated review branch.
   sandium-bare-apk-once:
     when:
