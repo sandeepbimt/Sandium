@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_identity import IdentityError, control_and_workspace, source_identity
+from build_identity import IdentityError, control_and_workspace, read_pins, source_identity
 
 SCHEMA = 1
 ARCHIVE_NAME = "sandium-stage-state.tar.zst"
@@ -59,6 +59,23 @@ def useful(meta: dict) -> bool:
     apk = ledger.get("artifact_verified") is True and ledger.get("apksigner_verification") == "PASS"
     return (progress > 0 and total > 0 and remote) or apk
 
+def control_inputs(control: Path) -> dict[str, str]:
+    paths = (
+        "ci/bare/source-pin.txt",
+        "ci/bare/gn_args.gn",
+        "ci/bare/prepare_source.sh",
+        "ci/bare/configure_siso.py",
+        "ci/siso/buildbuddy_backend.star",
+        "ci/siso/buildbuddy-credential-helper.py",
+    )
+    result = {}
+    for rel in paths:
+        path = control / rel
+        if not path.is_file() or path.is_symlink():
+            raise IdentityError("Build input missing/unsafe: " + rel)
+        result[rel] = sha256(path)
+    return result
+
 def toolchain_pin(meta_path: Path) -> None:
     meta = load_json(meta_path)
     if meta.get("schema") != SCHEMA or meta.get("format") != "siso-state-only":
@@ -109,6 +126,7 @@ def pack(root: Path, control: Path, stage: int, workflow_id: str, ledger_path: P
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "workflow_id": workflow_id or "unknown", "stage": stage, "source": "Bare",
         "build_identity": ident, "build_identity_sha256": ident_hash,
+        "control_inputs": control_inputs(control),
         "stage_ledger_sha256": sha256(ledger_path), "stage_ledger": ledger,
         "archive_name": archive.name, "archive_sha256": archive_hash, "state_files": files,
         "local_compiled_outputs_archived": False,
@@ -157,6 +175,8 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
         elif saved_stage != stage - 1 or saved_workflow != workflow_id:
             return miss(f"expected_stage_{stage-1}_same_workflow_got_{saved_stage}_{saved_workflow}")
 
+        if meta.get("control_inputs") != control_inputs(control):
+            return miss("control_input_hash_mismatch")
         ident = source_identity(control, root, require_gn=True)
         ident_hash = digest(ident)
         saved_ident = meta.get("build_identity", {})
@@ -233,6 +253,121 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
     except (IdentityError, OSError, ValueError, KeyError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         return miss("validation_error:" + str(exc))
 
+
+def reuse_cached_apk(root: Path, control: Path, archive: Path, meta_path: Path,
+                     apk: Path, manifest_path: Path, ledger_path: Path,
+                     status_path: Path, report_path: Path, workflow_id: str) -> int:
+    def miss(reason: str) -> int:
+        write_json(report_path, {
+            "schema": SCHEMA, "SANDIUM_STATE_HANDOFF": "MISS",
+            "SANDIUM_PRIOR_USEFUL_RUN": "REJECTED", "reason": reason,
+            "current_stage": 1, "current_workflow_id": workflow_id or "unknown",
+            "state_files_restored": [], "local_compiled_outputs_restored": False,
+        })
+        print("SANDIUM_PRIOR_APK_REUSE=MISS")
+        print("SANDIUM_PRIOR_APK_REUSE_REASON=" + reason)
+        # Preserve an invalid cache candidate for forensic review, but keep it
+        # out of the canonical artifact path before a fresh build begins.
+        for path in (apk, manifest_path):
+            if path.exists() and not path.is_symlink():
+                rejected = path.with_name(path.name + ".rejected-cache-candidate")
+                if not rejected.exists():
+                    os.replace(path, rejected)
+        return 1
+    try:
+        if not archive.is_file() or not meta_path.is_file() or not apk.is_file() or not manifest_path.is_file():
+            return miss("complete_prior_apk_candidate_not_found")
+        meta = load_json(meta_path)
+        if meta.get("schema") != SCHEMA or meta.get("format") != "siso-state-only":
+            return miss("unsupported_state_capsule")
+        if meta.get("archive_name") != archive.name or meta.get("archive_sha256") != sha256(archive):
+            return miss("state_capsule_checksum_mismatch")
+        if not useful(meta):
+            return miss("prior_run_not_useful")
+        if meta.get("control_inputs") != control_inputs(control):
+            return miss("control_input_hash_mismatch")
+        ident = meta.get("build_identity", {})
+        ident_hash = digest(ident)
+        if meta.get("build_identity_sha256") != ident_hash:
+            return miss("cached_build_identity_hash_mismatch")
+        pins = read_pins(control)
+        expected = {
+            "bare_commit": pins["bare_commit"],
+            "chromium_commit": pins["chromium_commit"],
+            "chromium_version": pins["chromium_version"],
+            "target_abi": pins["target_abi"],
+            "build_config": pins["build_config"],
+            "bare_repository": pins["bare_repository"],
+        }
+        for key, value in expected.items():
+            if ident.get(key) != value:
+                return miss("pinned_input_mismatch:" + key)
+        manifest = load_json(manifest_path)
+        if manifest.get("build_identity_sha256") != ident_hash:
+            return miss("cached_manifest_build_identity_mismatch")
+        if {key: manifest.get(key) for key in ident} != ident:
+            return miss("cached_manifest_source_identity_mismatch")
+        if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS":
+            return miss("cached_apk_lacks_prior_signature_verification")
+        if manifest.get("artifact_sha256") != sha256(apk) or manifest.get("artifact_bytes") != apk.stat().st_size:
+            return miss("cached_apk_hash_or_size_mismatch")
+        if apk.stat().st_size < 1_000_000:
+            return miss("cached_apk_unexpectedly_small")
+        import zipfile
+        with zipfile.ZipFile(apk) as zf:
+            if zf.testzip() is not None:
+                return miss("cached_apk_zip_integrity_failed")
+            names = set(zf.namelist())
+            if "AndroidManifest.xml" not in names or not any(n.startswith("classes") and n.endswith(".dex") for n in names):
+                return miss("cached_apk_missing_manifest_or_dex")
+        ledger = meta.get("stage_ledger", {})
+        if not isinstance(ledger, dict) or not ledger.get("artifact_verified"):
+            return miss("prior_ledger_does_not_record_verified_apk")
+        current_ledger = {
+            **ledger,
+            "schema": 3,
+            "stage": 1,
+            "evidence": "VERIFIED_APK_REUSED_FROM_PRIOR_USEFUL_RUN",
+            "prior_useful_run": {
+                "workflow_id": meta.get("workflow_id", "unknown"),
+                "stage": meta.get("stage"),
+                "state_capsule_sha256": meta.get("archive_sha256"),
+            },
+            "state_handoff": {
+                "SANDIUM_STATE_HANDOFF": "REUSED_VERIFIED_APK",
+                "SANDIUM_PRIOR_USEFUL_RUN": "ACCEPTED",
+                "source_workflow_id": meta.get("workflow_id", "unknown"),
+                "source_stage": meta.get("stage"),
+                "current_workflow_id": workflow_id or "unknown",
+                "current_stage": 1,
+                "build_identity_sha256": ident_hash,
+                "local_compiled_outputs_restored": False,
+                "compiled_output_reuse": "Verified APK reused; no compile needed",
+            },
+        }
+        write_json(ledger_path, current_ledger)
+        write_json(report_path, current_ledger["state_handoff"])
+        status = {
+            "BUILD_FINISHED": "true",
+            "APK_ARCHIVE_VALID": "true",
+            "APK_SIGNATURE_VERIFIED": "true",
+            "APK_SHA256": sha256(apk),
+            "APK_SIZE_BYTES": str(apk.stat().st_size),
+            "BUILD_IDENTITY_SHA256": ident_hash,
+            "STAGE": "1",
+            "REUSED_PRIOR_VERIFIED_APK": "true",
+            "SOURCE_WORKFLOW_ID": str(meta.get("workflow_id", "unknown")),
+            "SOURCE_STAGE": str(meta.get("stage", "unknown")),
+        }
+        status_path.write_text("".join(f"{k}={v}\n" for k, v in status.items()), encoding="utf-8")
+        print("SANDIUM_PRIOR_APK_REUSE=PASS")
+        print("SANDIUM_PRIOR_APK_SHA256=" + sha256(apk))
+        print("SANDIUM_PRIOR_APK_BYTES=" + str(apk.stat().st_size))
+        print("SANDIUM_PRIOR_USEFUL_WORKFLOW_ID=" + str(meta.get("workflow_id", "unknown")))
+        return 0
+    except (IdentityError, OSError, ValueError, KeyError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+        return miss("validation_error:" + str(exc))
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="mode", required=True)
@@ -245,6 +380,12 @@ def main() -> int:
     p.add_argument("--root", type=Path); p.add_argument("--stage", type=int, choices=range(1,6), required=True)
     p.add_argument("--workflow-id", default="unknown"); p.add_argument("--archive", type=Path); p.add_argument("--meta", type=Path)
     p.add_argument("--required", action="store_true")
+    p = subs.add_parser("reuse-apk")
+    p.add_argument("--root", type=Path); p.add_argument("--workflow-id", default="unknown")
+    p.add_argument("--archive", type=Path); p.add_argument("--meta", type=Path)
+    p.add_argument("--apk", type=Path, required=True); p.add_argument("--manifest", type=Path, required=True)
+    p.add_argument("--ledger", type=Path, required=True); p.add_argument("--status", type=Path, required=True)
+    p.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     control, inferred_root = control_and_workspace(Path(__file__))
     root = args.root.resolve() if args.root else inferred_root
@@ -254,6 +395,9 @@ def main() -> int:
     meta = args.meta.resolve() if args.meta else root / META_NAME
     if args.mode == "pack":
         return pack(root, control, args.stage, args.workflow_id, args.ledger, archive, meta)
+    if args.mode == "reuse-apk":
+        return reuse_cached_apk(root, control, archive, meta, args.apk.resolve(), args.manifest.resolve(),
+                                args.ledger.resolve(), args.status.resolve(), args.report.resolve(), args.workflow_id)
     return restore(root, control, archive, meta, args.stage, args.workflow_id, args.required)
 
 if __name__ == "__main__":
