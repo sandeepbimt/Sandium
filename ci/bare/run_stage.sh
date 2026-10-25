@@ -31,22 +31,37 @@ echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 # Cross-run caches may contain a previous stage's ledger at the same path.
 # Never let stale status suppress this stage's failure status.
 rm -f "$LEDGER" "$STATUS" "$STATE_REPORT"
+printf '{"schema":1,"SANDIUM_STATE_HANDOFF":"NOT_RUN","current_stage":%s,"current_workflow_id":"%s","reason":"runner exited before state validation"}\n' "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" > "$STATE_REPORT"
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
 if [[ "$STAGE" -gt 1 ]]; then
   test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
   if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
-    cp "$PREV" "$LEDGER"
-    cp "$PREV_STATUS" "$STATUS"
-    python3 - "$STATE_REPORT" "$PREV" "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" <<'PY'
-import json,sys
+    python3 - "$PREV" "$LEDGER" "$PREV_STATUS" "$STATUS" "$STATE_REPORT" "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" <<'PY'
+import hashlib,json,sys
 from pathlib import Path
-p=Path(sys.argv[1])
-p.write_text(json.dumps({
+prev,ledger_out,prev_status,status_out,report_out=map(Path,sys.argv[1:6])
+stage=int(sys.argv[6]); workflow=sys.argv[7]
+ledger=json.loads(prev.read_text(encoding="utf-8"))
+prior_status={}
+for line in prev_status.read_text(encoding="utf-8").splitlines():
+ if "=" in line:
+  k,v=line.split("=",1); prior_status[k]=v
+identity_hash=ledger.get("build_identity_sha256","")
+ledger["previous_stage_ledger_sha256"]=hashlib.sha256(prev.read_bytes()).hexdigest()
+ledger["stage"]=stage
+ledger["evidence"]="VERIFIED_APK_COMPLETE_FAST_PATH"
+ledger["state_handoff"]={
  "schema":1,"SANDIUM_STATE_HANDOFF":"SKIPPED_APK_ALREADY_VERIFIED",
- "current_stage":int(sys.argv[3]),"current_workflow_id":sys.argv[4],
- "previous_ledger":str(sys.argv[2]),"reason":"No remaining build actions; verified APK was already available",
- "local_compiled_outputs_restored":False
-},indent=2,sort_keys=True)+"\n",encoding="utf-8")
+ "source_stage":stage-1,"source_workflow_id":workflow,
+ "current_stage":stage,"current_workflow_id":workflow,
+ "build_identity_sha256":identity_hash,
+ "local_compiled_outputs_restored":False,
+ "reason":"A verified APK already exists; no compilation work remains"
+}
+ledger_out.write_text(json.dumps(ledger,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+prior_status["STAGE"]=str(stage)
+status_out.write_text("".join(f"{k}={v}\n" for k,v in prior_status.items()),encoding="utf-8")
+report_out.write_text(json.dumps(ledger["state_handoff"],indent=2,sort_keys=True)+"\n",encoding="utf-8")
 PY
     echo "APK_FAST_PATH=PASS propagated_previous_stage=$((STAGE-1))"
     echo "SANDIUM_BUILD_WORK_REMAINING=no"
@@ -107,9 +122,10 @@ if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
 fi
 export DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
 echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci"
-# Each stage recreates the exact Bare-pinned source/build graph. Compiled action
-# reuse must come from the existing BuildBuddy/Siso remote cache; CircleCI persists
-# only the small source-bound stage ledger, not Chromium output checkpoints.
+# Each stage recreates the exact Bare-pinned source/build graph. CircleCI's
+# source-identity cache discovers a prior useful run and hands off a small,
+# hash-verified Siso state capsule plus ledger/verified APK when available.
+# Compiled objects are never archived here; Siso must prove BuildBuddy cache hits.
 echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 for script in "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
