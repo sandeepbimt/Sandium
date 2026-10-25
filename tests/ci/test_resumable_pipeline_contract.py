@@ -165,6 +165,11 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('- restore-sandium-pnpm-cache', CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')])
         self.assertIn('pnpm install --frozen-lockfile --prefer-offline', CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')])
         self.assertIn('mkdir -p "$HOME/project/build-diagnostics"', segment)
+        validation_job = CONFIG[CONFIG.index('  sandium-checkpoint-restore-validation:'):CONFIG.index('  sandium-android-debug-apk:')]
+        self.assertIn('- ensure-sandium-depot-tools', validation_job)
+        self.assertIn('name: Preflight GN executable for checkpoint validation', validation_job)
+        self.assertIn('GN_BIN="$GN_DIR/gn"', validation_job)
+        self.assertIn('gn --version', validation_job)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
