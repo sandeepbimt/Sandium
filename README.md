@@ -10,7 +10,7 @@ This branch is an isolated Bare migration workspace. Its active CircleCI configu
 - An opt-in source-only preflight (default off).
 - A full-build workflow that fails closed before source sync or compilation.
 
-The five-stage compile/restore/publish workflow is **not yet wired**. The existing CircleCI account's ability to persist the Chromium source and build output within current limits must be proven before that workflow is implemented.
+The five-stage compile/restore/publish workflow is **not yet wired**. CircleCI Free includes only 2 GB of included storage, so the design must avoid persisting the full Chromium source/output tree there. Use the existing BuildBuddy/Siso remote action cache for cross-stage compile reuse and pass only small source-bound stage ledgers through CircleCI. Actual remote execution/cache hits must be proven before the full-build gate can open.
 
 ## Source boundary
 
