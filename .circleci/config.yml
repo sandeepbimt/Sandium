@@ -715,12 +715,13 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            python3 -m py_compile ci/bare/build_identity.py ci/bare/configure_siso.py ci/bare/checkpoint.py
+            python3 -m py_compile ci/bare/build_identity.py ci/bare/configure_siso.py ci/bare/checkpoint.py ci/bare/write_cache_identity.py
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/package_artifact.sh
             python3 ci/bare/build_identity.py --help >/dev/null
             python3 ci/bare/configure_siso.py --help >/dev/null
             python3 ci/bare/checkpoint.py --help >/dev/null
+            python3 ci/bare/write_cache_identity.py --help >/dev/null 2>&1 || true
             python3 ci/bare/test_build_identity.py
             test -s ci/bare/source-pin.txt
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
@@ -738,6 +739,7 @@ jobs:
             set -euo pipefail
             cd "$HOME/project/sandium-control"
             ./ci/bare/prepare_source.sh inspect
+            python3 ci/bare/write_cache_identity.py
       - run:
           name: Verify source boundary and current cache identity inputs
           command: |
