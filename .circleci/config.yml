@@ -1,5 +1,10 @@
 version: 2.1
 parameters:
+  # Safety gate: remains false until every source-dependent step is adapted and reviewed for Bare.
+  # Existing workflows and credentials are preserved; this flag prevents accidental execution of legacy source steps.
+  run_sandium_bare_source_ready:
+    type: boolean
+    default: false
   run_sandium_android_apk_build:
     type: boolean
     default: false
@@ -2899,24 +2904,39 @@ jobs:
             - smoke-state/stage-5.json
 workflows:
   sandium-checkpoint-discovery-probe:
-    when: << pipeline.parameters.run_sandium_checkpoint_discovery_probe >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_checkpoint_discovery_probe >>
     jobs:
       - sandium-checkpoint-discovery-probe
   sandium-checkpoint-unit-tests:
-    when: << pipeline.parameters.run_sandium_checkpoint_unit_tests >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_checkpoint_unit_tests >>
     jobs:
       - sandium-checkpoint-unit-tests
   sandium-checkpoint-discovery:
-    when: << pipeline.parameters.run_sandium_checkpoint_discovery >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_checkpoint_discovery >>
     jobs:
       - sandium-checkpoint-discovery
   sandium-checkpoint-restore-validation:
-    when: << pipeline.parameters.run_sandium_checkpoint_restore_validation >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_checkpoint_restore_validation >>
     jobs:
       - sandium-checkpoint-restore-validation
   # Optional standalone gate for diagnosis; production APK builds run the same gate in Stage 1.
   sandium-fast-regression:
-    when: << pipeline.parameters.run_sandium_fast_regression >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_fast_regression >>
     jobs:
       - sandium-fast-regression-gate
   # Controlled bootstrap workflow: run only Stage 1 so its checkpoint can
@@ -2926,6 +2946,7 @@ workflows:
     # even when the multi-stage compile-windows switch is false. APK build remains disabled.
     when:
       and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
         - << pipeline.parameters.run_sandium_stage1_bootstrap >>
         - not: << pipeline.parameters.run_sandium_android_apk_build >>
     jobs:
@@ -2933,6 +2954,7 @@ workflows:
   sandium-android-preflight:
     when:
       and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
         - << pipeline.parameters.run_sandium_android_apk_build >>
         - not: << pipeline.parameters.run_sandium_compile_windows >>
     jobs:
@@ -2962,7 +2984,10 @@ workflows:
           requires:
             - stage-4-finish-and-package
   sandium-ci-smoke-test:
-    when: << pipeline.parameters.run_sandium_ci_smoke_test >>
+    when:
+      and:
+        - << pipeline.parameters.run_sandium_bare_source_ready >>
+        - << pipeline.parameters.run_sandium_ci_smoke_test >>
     jobs:
       - smoke-1-contract-and-foundation
       - smoke-2-build-state-tests:
