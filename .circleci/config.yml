@@ -418,6 +418,25 @@ commands:
                 exit 42
               }
               echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION"
+              # GN's Brave overlay imports Chromium branding assets under
+              # src/chrome/app/theme/brave/BRANDING. These source-overlay files
+              # are normally prepared by Brave's build driver; checkpoint-only
+              # validation runs outside that driver, so prepare the GN graph
+              # explicitly in prepare-only mode (no Ninja compile).
+              cd "$BRAVE"
+              set +e
+              pnpm run build Debug --target_os=android --target_arch=arm64 --target_android_output_format=apk --use_remoteexec true --gn use_siso:true --gn use_reclient:false --prepare_only 2>&1 | tee "$HOME/project/build-diagnostics/checkpoint-overlay-prepare.log"
+              prepare_status=${PIPESTATUS[0]}
+              set -e
+              cd "$HOME/project"
+              if [[ "$prepare_status" -ne 0 ]]; then
+                echo "OUTPUT_ONLY_COMPATIBILITY=FAIL Brave source-overlay prepare-only failed status=$prepare_status" >&2
+                exit 42
+              fi
+              test -s "$BRAVE/build/version.gni"
+              test -s "$OUT/args.gn"
+              test -s "$OUT/build.ninja"
+              echo "SANDIUM_CHECKPOINT_OVERLAY_PREPARE_ONLY=PASS"
               python3 - "$HOME/project/sandium-checkpoint.meta" "$OUT/.sandium-build-state.json" \<<'PY'
             import hashlib, json, sys
             from pathlib import Path
