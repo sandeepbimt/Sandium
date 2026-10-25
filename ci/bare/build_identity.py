@@ -83,7 +83,7 @@ def read_pins(control: Path) -> dict[str, str]:
     return values
 
 
-def source_identity(control: Path, workspace: Path) -> dict[str, Any]:
+def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> dict[str, Any]:
     pins = read_pins(control)
     bare = workspace / "bare-browser"
     chromium = workspace / "src"
@@ -159,11 +159,12 @@ def source_identity(control: Path, workspace: Path) -> dict[str, Any]:
             data = path.read_bytes()
             args_digest.update(path.name.encode("utf-8") + b"\0" + data)
             effective_args += data.decode("utf-8", errors="replace") + "\n"
-    if not effective_args:
+    if not effective_args and require_gn:
         raise IdentityError("Generated GN argument files are missing")
-    for name, value in (("use_siso", "true"), ("use_reclient", "false"), ("use_remoteexec", "true")):
-        if not re.search(rf"(?m)^\s*{name}\s*=\s*{value}\s*$", effective_args):
-            raise IdentityError(f"Effective GN arguments do not prove {name}={value}")
+    if effective_args:
+        for name, value in (("use_siso", "true"), ("use_reclient", "false"), ("use_remoteexec", "true")):
+            if not re.search(rf"(?m)^\s*{name}\s*=\s*{value}\s*$", effective_args):
+                raise IdentityError(f"Effective GN arguments do not prove {name}={value}")
 
     try:
         siso = subprocess.check_output(["siso", "version"], text=True, stderr=subprocess.STDOUT, timeout=10).strip()
@@ -189,7 +190,7 @@ def source_identity(control: Path, workspace: Path) -> dict[str, Any]:
         "build_config": pins["build_config"],
         "toolchain_depot_tools_commit": git(Path.home() / "depot_tools", "rev-parse", "HEAD"),
         "siso_version": siso.splitlines()[0][:500],
-        "gn_args_sha256": args_digest.hexdigest(),
+        "gn_args_sha256": args_digest.hexdigest() if effective_args else None,
         "gclient_sha256": sha256(gclient),
         "backend_config_sha256": sha256(backend),
         "credential_helper_sha256": sha256(helper),
