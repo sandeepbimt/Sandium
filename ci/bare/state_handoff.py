@@ -161,8 +161,24 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
         write_json(root / REPORT_NAME, report)
         print("SANDIUM_STATE_HANDOFF=MISS")
         print("SANDIUM_STATE_HANDOFF_REASON=" + reason)
+        # Bad candidates must not be saved again under a new cache key and keep
+        # winning CircleCI's newest-prefix lookup. Quarantine only these restored
+        # working-copy files; no remote cache objects are deleted or mutated.
+        quarantine = root / "sandium-rejected-state-candidates"
+        for candidate in (archive, meta_path):
+            if candidate.exists() or candidate.is_symlink():
+                try:
+                    quarantine.mkdir(parents=True, exist_ok=True)
+                    target = quarantine / (candidate.name + ".rejected")
+                    if target.exists() or target.is_symlink():
+                        target = quarantine / (candidate.name + f".{stage}.rejected")
+                    if not target.exists() and not target.is_symlink():
+                        os.replace(candidate, target)
+                except OSError as exc:
+                    print("SANDIUM_STATE_HANDOFF_QUARANTINE_WARNING=" + str(exc), file=sys.stderr)
         if required:
-            raise IdentityError("Required previous-stage handoff missing/incompatible: " + reason)
+            print("SANDIUM_STATE_HANDOFF_ERROR=Required previous-stage handoff missing/incompatible: " + reason, file=sys.stderr)
+            return 42
         return 0
     try:
         if not archive.is_file() or not meta_path.is_file():
@@ -276,11 +292,16 @@ def reuse_cached_apk(root: Path, control: Path, archive: Path, meta_path: Path,
         print("SANDIUM_PRIOR_APK_REUSE_REASON=" + reason)
         # Preserve an invalid cache candidate for forensic review, but keep it
         # out of the canonical artifact path before a fresh build begins.
+        quarantine = root / "sandium-rejected-apk-candidates"
         for path in (apk, manifest_path):
             if path.exists() or path.is_symlink():
-                rejected = path.with_name(path.name + ".rejected-cache-candidate")
-                if not rejected.exists():
-                    os.replace(path, rejected)
+                try:
+                    quarantine.mkdir(parents=True, exist_ok=True)
+                    rejected = quarantine / (path.name + ".rejected")
+                    if not rejected.exists() and not rejected.is_symlink():
+                        os.replace(path, rejected)
+                except OSError as move_error:
+                    print("SANDIUM_PRIOR_APK_QUARANTINE_WARNING=" + str(move_error), file=sys.stderr)
         return 1
     try:
         if not archive.is_file() or not meta_path.is_file() or not apk.is_file() or not manifest_path.is_file():
