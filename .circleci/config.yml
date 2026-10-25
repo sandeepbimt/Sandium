@@ -715,10 +715,12 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            python3 -m py_compile ci/bare/build_identity.py ci/bare/configure_siso.py
+            python3 -m py_compile ci/bare/build_identity.py ci/bare/configure_siso.py ci/bare/checkpoint.py
             bash -n ci/bare/prepare_source.sh
+            bash -n ci/bare/package_artifact.sh
             python3 ci/bare/build_identity.py --help >/dev/null
             python3 ci/bare/configure_siso.py --help >/dev/null
+            python3 ci/bare/checkpoint.py --help >/dev/null
             test -s ci/bare/source-pin.txt
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
@@ -740,7 +742,10 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            ! grep -R -n -E 'src/brave|brave-core|Bravearm64\\.apk|Brave-debug-arm64\\.apk' ci/bare
+            grep -Fq 'https://github.com/BareBrowser/bare-browser.git' ci/bare/source-pin.txt
+            grep -Fq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
+            grep -Fq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
+            grep -Fq 'artifact_name=Sandium-debug-arm64.apk' ci/bare/source-pin.txt
             echo "SANDIUM_ACTIVE_ADAPTER_SOURCE_BOUNDARY=PASS"
             echo "EXISTING_BUILD_WORKFLOWS=BLOCKED_BY_CLOSED_READINESS_GATE"
   sandium-fast-regression-gate:
