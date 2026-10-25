@@ -12,6 +12,9 @@ mkdir -p "$ROOT/sandium-output"
 : > "$ROOT/sandium-git-trace.log"
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
+STATE_TOOL="$CONTROL/ci/bare/state_handoff.py"
+STATE_ARCHIVE="$ROOT/sandium-stage-state.tar.zst"; STATE_META="$ROOT/sandium-stage-state.meta"
+STATE_REPORT="$ROOT/sandium-state-handoff-report.json"
 : > "$LOG"; : > "$METRICS"
 WALL=2820; [[ "$STAGE" -eq 5 ]] && WALL=3300
 exec > >(tee -a "$DRIVER") 2>&1
@@ -25,6 +28,9 @@ echo "DIAG_CIRCLE_BRANCH=${CIRCLE_BRANCH:-unknown}"
 echo "DIAG_WORKFLOW_ID=${CIRCLE_WORKFLOW_ID:-unknown}"
 echo "DIAG_BUILD_NUM=${CIRCLE_BUILD_NUM:-unknown}"
 echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
+# Cross-run caches may contain a previous stage's ledger at the same path.
+# Never let stale status suppress this stage's failure status.
+rm -f "$LEDGER" "$STATUS" "$STATE_REPORT"
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
 if [[ "$STAGE" -gt 1 ]]; then
   test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
@@ -45,6 +51,11 @@ print(json.load(open(sys.argv[1],encoding="utf-8")).get("build_identity",{}).get
 PY
 )"
   [[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo PREVIOUS_DEPOT_TOOLS_PIN_INVALID >&2; exit 43; }
+elif [[ -s "$STATE_META" ]]; then
+  # A prior useful run's manifest pins depot_tools before the state capsule is
+  # validated against the current source/GN identity.
+  PIN="$(python3 "$STATE_TOOL" toolchain-pin --meta "$STATE_META" 2>/dev/null || true)"
+  if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then PIN=""; echo "SANDIUM_PRIOR_TOOLCHAIN_PIN=UNAVAILABLE"; else echo "SANDIUM_PRIOR_TOOLCHAIN_PIN=$PIN"; fi
 fi
 if [[ ! -d "$DEPOT/.git" ]]; then git clone --no-tags --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT"; fi
 if [[ -n "$PIN" && "$(git -C "$DEPOT" rev-parse HEAD)" != "$PIN" ]]; then git -C "$DEPOT" fetch --depth=1 origin "$PIN"; git -C "$DEPOT" checkout --force --detach "$PIN"; fi
@@ -74,7 +85,7 @@ echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 for script in "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
 done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py"
+python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$STATE_TOOL"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
@@ -89,6 +100,11 @@ grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 python3 "$CONTROL/ci/bare/write_cache_identity.py"
+if [[ "$STAGE" -eq 1 ]]; then
+  python3 "$STATE_TOOL" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
+else
+  python3 "$STATE_TOOL" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META" --required
+fi
 ELAPSED=$(( $(date +%s) - STAGE_START_TS )); REMAIN=$(( WALL - ELAPSED ))
 echo "SANDIUM_SETUP_SECONDS=$ELAPSED"; echo "SANDIUM_REMAINING_COMPILE_SECONDS=$REMAIN"
 [[ "$REMAIN" -gt 120 ]] || { echo STAGE_SETUP_CONSUMED_BUDGET >&2; exit 47; }
@@ -126,9 +142,9 @@ else
   PREV_ARGS=(--previous "$PREV")
 fi
 if [[ "$COMPLETE" == true ]]; then
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
 else
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" "${PREV_ARGS[@]}"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
 fi
 if [[ "$COMPLETE" == true ]]; then
   HASH="$(sha256sum "$ROOT/sandium-output/Sandium-debug-arm64.apk" | awk '{print $1}')"; BYTES="$(stat -c %s "$ROOT/sandium-output/Sandium-debug-arm64.apk")"
@@ -143,6 +159,7 @@ else
   printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$DONE" "$TOTAL" > "$STATUS"
   echo SANDIUM_APK_READY=false
 fi
+python3 "$STATE_TOOL" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
 echo "DIAG_STAGE_OUT_SIZE=$(du -sh "$OUT" 2>/dev/null | cut -f1 || true)"
 echo "DIAG_CHECKPOINT_SIZE=$(stat -c %s "$ROOT/sandium-bare-checkpoint.tar.zst" 2>/dev/null || echo 0)"
 echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
