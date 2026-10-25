@@ -172,8 +172,9 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
         saved_stage = int(meta.get("stage", 0))
         saved_workflow = str(meta.get("workflow_id", "unknown"))
         if stage == 1:
-            if saved_workflow == workflow_id:
-                return miss("stage1_candidate_not_from_a_prior_workflow")
+            # A same-workflow rerun can also resume a successfully saved earlier
+            # stage; the immutable build-number cache key prevents self-reading.
+            pass
         elif saved_stage != stage - 1 or saved_workflow != workflow_id:
             return miss(f"expected_stage_{stage-1}_same_workflow_got_{saved_stage}_{saved_workflow}")
 
