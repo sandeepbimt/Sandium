@@ -154,6 +154,9 @@ class ResumablePipelineContractTests(unittest.TestCase):
         self.assertIn('if not version_utils.is_file():', segment)
         self.assertIn('query_env["PYTHONPATH"] = str(version_utils.parent)', segment)
         self.assertIn('env=query_env', segment)
+        self.assertIn('python3 build/util/version.py gen ../chrome/VERSION', segment)
+        self.assertIn('SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION', segment)
+        self.assertIn('test -s "$BRAVE/build/version.gni"', segment)
 
     def test_checkpoint_artifacts_are_published_and_discovery_precedes_restore(self):
         self.assertEqual(CONFIG.count("Publish stage-"), 5)
