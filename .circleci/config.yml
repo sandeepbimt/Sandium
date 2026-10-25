@@ -93,7 +93,7 @@ jobs:
             equal: [2, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore stage 1 checkpoint and ledger
+                name: Restore previous stage 1 ledger
                 keys:
                   - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1
       - when:
@@ -101,7 +101,7 @@ jobs:
             equal: [3, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore stage 2 checkpoint and ledger
+                name: Restore previous stage 2 ledger
                 keys:
                   - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
       - when:
@@ -109,7 +109,7 @@ jobs:
             equal: [4, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore stage 3 checkpoint and ledger
+                name: Restore previous stage 3 ledger
                 keys:
                   - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
       - when:
@@ -117,7 +117,7 @@ jobs:
             equal: [5, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore stage 4 checkpoint and ledger
+                name: Restore previous stage 4 ledger
                 keys:
                   - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
       - run:
@@ -128,13 +128,10 @@ jobs:
             export STAGE_START_TS="$(date +%s)"
             bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
       - save_cache:
-          name: Save checkpoint and stage ledger
+          name: Save small source-bound stage ledger only
           key: sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>
           paths:
-            - sandium-bare-checkpoint.tar.zst
-            - sandium-bare-checkpoint.meta
             - ci-handoff/stage-<< parameters.stage_index >>
-            - sandium-output
       - store_artifacts:
           name: Upload stage driver and Siso logs
           path: stage-<< parameters.stage_index >>-driver.log
@@ -169,8 +166,29 @@ jobs:
           destination: artifacts/stage-<< parameters.stage_index >>
 
 
-workflows:
-  sandium-bare-source-preflight:
+  sandium-bare-apk-required:
+    docker:
+      - image: cimg/python:3.12
+    working_directory: ~/project
+    steps:
+      - restore_cache:
+          name: Restore final-stage source-bound ledger
+          keys:
+            - sandium-bare-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-5
+      - run:
+          name: Require a verified APK from the five-stage build
+          command: |
+            set -euo pipefail
+            STATUS="$HOME/project/ci-handoff/stage-5/status.txt"
+            test -s "$STATUS" || { echo "SANDIUM_FINAL_APK_GATE=FAIL missing stage-5 status" >&2; exit 1; }
+            cat "$STATUS"
+            grep -qx "BUILD_FINISHED=true" "$STATUS" || { echo "SANDIUM_FINAL_APK_GATE=FAIL no verified APK after five stages" >&2; exit 1; }
+            grep -qx "APK_ARCHIVE_VALID=true" "$STATUS"
+            grep -qx "APK_SIGNATURE_VERIFIED=true" "$STATUS"
+            echo "SANDIUM_FINAL_APK_GATE=PASS"
+
+
+workflows:  sandium-bare-source-preflight:
     when: << pipeline.parameters.run_sandium_bare_source_preflight >>
     jobs:
       - sandium-bare-source-preflight
@@ -204,4 +222,6 @@ workflows:
           name: sandium-bare-stage-5
           stage_index: 5
           requires:
-            - sandium-bare-stage-4
+            - sandium-bare-stage-4      - sandium-bare-apk-required:
+          requires:
+            - sandium-bare-stage-5
