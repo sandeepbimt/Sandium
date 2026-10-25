@@ -92,135 +92,18 @@ jobs:
             echo "No Chromium sync, compilation, APK packaging, credential mutation or cache deletion was attempted."
             exit 78
 
-  sandium-bare-build-stage:
-    parameters:
-      stage_index:
-        type: integer
-    machine:
-      image: ubuntu-2404:current
-    resource_class: large
-    working_directory: ~/project
-    steps:
-      - checkout:
-          path: sandium-control
-      - when:
-          condition:
-            not:
-              equal: [1, << parameters.stage_index >>]
-          steps:
-            - attach_workspace:
-                at: .
-      - run:
-          name: Record bounded stage start time
-          command: |
-            set -euo pipefail
-            echo "export STAGE_START_TS=$(date +%s)" >> "$BASH_ENV"
-            echo "SANDIUM_STAGE_INDEX=<< parameters.stage_index >>"
-      - when:
-          condition:
-            not:
-              equal: [1, << parameters.stage_index >>]
-          steps:
-            - run:
-                name: Skip later stages if the APK is already verified
-                command: |
-                  set -euo pipefail
-                  STATUS="$HOME/project/ci-handoff/stage-$((<< parameters.stage_index >>-1))/status.txt"
-                  if grep -qx 'BUILD_FINISHED=true' "$STATUS"; then
-                    cat "$STATUS"
-                    echo "SANDIUM_APK_FAST_EXIT=true"
-                    circleci-agent step halt
-                  fi
-      - when:
-          condition:
-            equal: [2, << parameters.stage_index >>]
-          steps:
-            - restore_cache:
-                name: Restore stage 1 Bare output checkpoint
-                keys:
-                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1
-      - when:
-          condition:
-            equal: [3, << parameters.stage_index >>]
-          steps:
-            - restore_cache:
-                name: Restore stage 2 Bare output checkpoint
-                keys:
-                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
-      - when:
-          condition:
-            equal: [4, << parameters.stage_index >>]
-          steps:
-            - restore_cache:
-                name: Restore stage 3 Bare output checkpoint
-                keys:
-                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
-      - when:
-          condition:
-            equal: [5, << parameters.stage_index >>]
-          steps:
-            - restore_cache:
-                name: Restore stage 4 Bare output checkpoint
-                keys:
-                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
-      - run:
-          name: Run source-pinned Siso compilation slice
-          no_output_timeout: 50m
-          command: |
-            set -euo pipefail
-            bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
-      - save_cache:
-          name: Save Bare output checkpoint for the next stage
-          key: sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>
-          paths:
-            - sandium-bare-checkpoint.tar.zst
-            - sandium-bare-checkpoint.meta
-      - when:
-          condition: always
-          steps:
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-driver.log
-                destination: sandium-build/stage-<< parameters.stage_index >>/driver.log
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-siso.log
-                destination: sandium-build/stage-<< parameters.stage_index >>/siso.log
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-metrics.jsonl
-                destination: sandium-build/stage-<< parameters.stage_index >>/siso-metrics.jsonl
-            - store_artifacts:
-                path: ci-handoff/stage-<< parameters.stage_index >>
-                destination: sandium-build/stage-<< parameters.stage_index >>/ledger-status
-            - store_artifacts:
-                path: sandium-output
-                destination: sandium-build/stage-<< parameters.stage_index >>/artifact-and-manifest
-      - persist_to_workspace:
-          root: .
-          paths:
-            - ci-handoff/stage-<< parameters.stage_index >>
-
-  sandium-bare-apk-required:
+  sandium-bare-build-not-ready:
     docker:
       - image: cimg/python:3.12
     working_directory: ~/project
     steps:
-      - checkout:
-          path: sandium-control
-      - attach_workspace:
-          at: .
       - run:
-          name: Require a verified APK from one of the five stages
+          name: Keep full build disabled until Bare migration preflight is reviewed
           command: |
-            set -euo pipefail
-            for stage in 1 2 3 4 5; do
-              STATUS="$HOME/project/ci-handoff/stage-$stage/status.txt"
-              if grep -qx 'BUILD_FINISHED=true' "$STATUS" 2>/dev/null; then
-                cat "$STATUS"
-                echo "SANDIUM_FINAL_APK_GATE=PASS stage=$stage"
-                exit 0
-              fi
-            done
-            echo "SANDIUM_FINAL_APK_GATE=FAIL no stage produced a signature-verified APK." >&2
-            exit 1
+            echo "SANDIUM_BARE_FULL_BUILD=BLOCKED"
+            echo "Reason: project source-of-truth requires source-only preflight and proof of existing BuildBuddy/Siso configuration before a separate build approval."
+            echo "No Chromium sync, compilation, APK packaging, checkpoint archive or cache mutation was attempted."
+            exit 78
 
 
 workflows:
@@ -237,37 +120,12 @@ workflows:
     jobs:
       - sandium-bare-build-not-ready
 
-  # Explicitly isolated build lane. Trigger it manually on this branch with
-  # run_sandium_bare_apk_once=true; ordinary pushes do not start the APK workflow.
+  # Full APK build remains disabled until the Bare-only source preflight and
+  # existing BuildBuddy/Siso integration review are complete.
   sandium-bare-apk-once:
     when:
       and:
         - equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]
         - << pipeline.parameters.run_sandium_bare_apk_once >>
     jobs:
-      - sandium-bare-build-stage:
-          name: sandium-bare-stage-1
-          stage_index: 1
-      - sandium-bare-build-stage:
-          name: sandium-bare-stage-2
-          stage_index: 2
-          requires:
-            - sandium-bare-stage-1
-      - sandium-bare-build-stage:
-          name: sandium-bare-stage-3
-          stage_index: 3
-          requires:
-            - sandium-bare-stage-2
-      - sandium-bare-build-stage:
-          name: sandium-bare-stage-4
-          stage_index: 4
-          requires:
-            - sandium-bare-stage-3
-      - sandium-bare-build-stage:
-          name: sandium-bare-stage-5
-          stage_index: 5
-          requires:
-            - sandium-bare-stage-4
-      - sandium-bare-apk-required:
-          requires:
-            - sandium-bare-stage-5
+      - sandium-bare-build-not-ready
