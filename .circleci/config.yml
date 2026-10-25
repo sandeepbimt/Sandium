@@ -721,7 +721,6 @@ jobs:
             python3 ci/bare/build_identity.py --help >/dev/null
             python3 ci/bare/configure_siso.py --help >/dev/null
             python3 ci/bare/checkpoint.py --help >/dev/null
-            python3 ci/bare/write_cache_identity.py --help >/dev/null 2>&1 || true
             python3 ci/bare/test_build_identity.py
             test -s ci/bare/source-pin.txt
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
