@@ -418,6 +418,7 @@ commands:
                 exit 42
               }
               echo "SANDIUM_BRAVE_VERSION_GNI=GENERATED_FOR_VALIDATION"
+              mkdir -p "$HOME/project/build-diagnostics"
               # GN's Brave overlay imports Chromium branding assets under
               # src/chrome/app/theme/brave/BRANDING. These source-overlay files
               # are normally prepared by Brave's build driver; checkpoint-only
@@ -3008,6 +3009,26 @@ jobs:
             mv brave-core src/brave
             test -d src/brave/.git
       - validate-sandium-source-cache-inputs
+      # The restore-validation job also invokes Brave's build driver in
+      # prepare-only mode. Unlike compile jobs, it previously skipped Node/pnpm
+      # setup and dependency installation, so the validation failed with
+      # "pnpm: command not found" before it could inspect the restored output.
+      - install-sandium-node
+      - restore-sandium-pnpm-cache
+      - run:
+          name: Ensure Brave build-driver dependencies for checkpoint validation
+          command: |
+            set -euo pipefail
+            cd "$HOME/project/src/brave"
+            LOCK_HASH="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
+            if [[ ! -d node_modules || ! -s .sandium-pnpm-lock.sha256 ||
+                  "$(cat .sandium-pnpm-lock.sha256)" != "$LOCK_HASH" ]]; then
+              pnpm install --frozen-lockfile --prefer-offline
+              printf '%s\\n' "$LOCK_HASH" > .sandium-pnpm-lock.sha256
+            fi
+            pnpm --version
+            test -x node_modules/.bin/eslint || test -d node_modules
+            echo "SANDIUM_CHECKPOINT_VALIDATION_PNPM=READY"
       - restore-sandium-build-output:
           stage_index: 1
       - run:
