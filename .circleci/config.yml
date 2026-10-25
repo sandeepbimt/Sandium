@@ -131,12 +131,50 @@ jobs:
                     echo "SANDIUM_APK_FAST_EXIT=true"
                     circleci-agent step halt
                   fi
+      - when:
+          condition:
+            equal: [2, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 1 Bare output checkpoint
+                keys:
+                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1
+      - when:
+          condition:
+            equal: [3, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 2 Bare output checkpoint
+                keys:
+                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2
+      - when:
+          condition:
+            equal: [4, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 3 Bare output checkpoint
+                keys:
+                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3
+      - when:
+          condition:
+            equal: [5, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore stage 4 Bare output checkpoint
+                keys:
+                  - sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4
       - run:
           name: Run source-pinned Siso compilation slice
           no_output_timeout: 50m
           command: |
             set -euo pipefail
             bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
+      - save_cache:
+          name: Save Bare output checkpoint for the next stage
+          key: sandium-bare-checkpoint-v1-{{ .Branch }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>
+          paths:
+            - sandium-bare-checkpoint.tar.zst
+            - sandium-bare-checkpoint.meta
       - when:
           condition: always
           steps:
@@ -204,7 +242,7 @@ workflows:
   sandium-bare-apk-once:
     when:
       and:
-        - equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]
+        - equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]
         - << pipeline.parameters.run_sandium_bare_apk_once >>
     jobs:
       - sandium-bare-build-stage:
