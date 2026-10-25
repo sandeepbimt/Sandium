@@ -20,6 +20,16 @@ DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRI
 : > "$LOG"; : > "$METRICS"
 WALL=2820; [[ "$STAGE" -eq 5 ]] && WALL=3300
 exec > >(tee -a "$DRIVER") 2>&1
+echo "DIAG_STAGE_START_UTC=$(date -u +%FT%TZ)"
+echo "DIAG_HOST=$(hostname)"
+echo "DIAG_KERNEL=$(uname -a)"
+echo "DIAG_CPU_COUNT=$(nproc)"
+echo "DIAG_MEMORY_BEGIN"; free -h; echo "DIAG_MEMORY_END"
+echo "DIAG_DISK_BEGIN"; df -h "$ROOT"; echo "DIAG_DISK_END"
+echo "DIAG_CIRCLE_BRANCH=${CIRCLE_BRANCH:-unknown}"
+echo "DIAG_WORKFLOW_ID=${CIRCLE_WORKFLOW_ID:-unknown}"
+echo "DIAG_BUILD_NUM=${CIRCLE_BUILD_NUM:-unknown}"
+echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
 
@@ -74,6 +84,9 @@ if [[ "$EVIDENCE" != true ]] && kill -0 "$PID" 2>/dev/null; then
   echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL >&2; kill -INT -- "-$PID" 2>/dev/null || true; sleep 5; kill -TERM -- "-$PID" 2>/dev/null || true; sleep 5; kill -KILL -- "-$PID" 2>/dev/null || true
 fi
 set +e; wait "$PID"; RET=$?; set -e; echo AUTONINJA_EXIT_CODE=$RET
+echo "DIAG_METRICS_LINES=$(wc -l < "$METRICS" 2>/dev/null || echo 0)"
+echo "DIAG_METRICS_HEAD_BEGIN"; head -n 10 "$METRICS" 2>/dev/null || true; echo "DIAG_METRICS_HEAD_END"
+echo "DIAG_SISO_LOG_TAIL_BEGIN"; tail -n 160 "$LOG" 2>/dev/null || true; echo "DIAG_SISO_LOG_TAIL_END"
 for i in $(seq 1 30); do pgrep -x siso >/dev/null 2>&1 || break; sleep 2; done
 if pgrep -x siso >/dev/null 2>&1; then echo SISO_SHUTDOWN=FAILED >&2; pkill -TERM -x siso 2>/dev/null || true; sleep 5; pkill -KILL -x siso 2>/dev/null || true; exit 48; fi
 [[ "$RET" -eq 0 || "$RET" -eq 124 ]] || { echo "BUILD_SLICE_FAILED=$RET" >&2; exit 49; }
@@ -109,5 +122,8 @@ else
   printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$DONE" "$TOTAL" > "$STATUS"
   echo SANDIUM_APK_READY=false
 fi
+echo "DIAG_STAGE_OUT_SIZE=$(du -sh "$OUT" 2>/dev/null | cut -f1 || true)"
+echo "DIAG_CHECKPOINT_SIZE=$(stat -c %s "$ROOT/sandium-bare-checkpoint.tar.zst" 2>/dev/null || echo 0)"
+echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
 trap - EXIT
 exit 0
