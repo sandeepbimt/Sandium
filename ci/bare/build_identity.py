@@ -149,8 +149,12 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
     gclient = workspace / ".gclient"
     backend = control / "ci" / "siso" / "buildbuddy_backend.star"
     helper = control / "ci" / "siso" / "buildbuddy-credential-helper.py"
+    siso_env = chromium / "build" / "config" / "siso" / ".sisoenv"
+    siso_rc = chromium / "build" / "config" / "siso" / ".sisorc"
     if not gclient.is_file() or not backend.is_file() or not helper.is_file():
         raise IdentityError("Required existing .gclient/backend/credential-helper file is missing")
+    if require_gn and (not siso_env.is_file() or not siso_rc.is_file()):
+        raise IdentityError("Generated Siso .sisoenv/.sisorc configuration is missing")
 
     out = chromium / "out" / "android_Debug_arm64"
     args_files = [out / "args.gn", out / "args_generated.gni"]
@@ -196,6 +200,8 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
         "gclient_sha256": sha256(gclient),
         "backend_config_sha256": sha256(backend),
         "credential_helper_sha256": sha256(helper),
+        "siso_env_sha256": sha256(siso_env) if siso_env.is_file() else None,
+        "siso_rc_sha256": sha256(siso_rc) if siso_rc.is_file() else None,
     }
 
 
