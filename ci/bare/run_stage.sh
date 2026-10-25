@@ -11,6 +11,7 @@ if [[ "$STAGE" -gt 1 ]]; then
 fi
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
+: > "$LOG"; : > "$METRICS"
 WALL=2820; [[ "$STAGE" -eq 5 ]] && WALL=3300
 exec > >(tee -a "$DRIVER") 2>&1
 trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
