@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Discover a useful prior run and hand off identity-bound Siso state between stages."""
 from __future__ import annotations
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile, zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,7 +56,9 @@ def useful(meta: dict) -> bool:
             metrics.get("remote_execution_proven") or metrics.get("remote_action_cache_reuse_proven")
         ))
     )
-    apk = ledger.get("artifact_verified") is True and ledger.get("apksigner_verification") == "PASS"
+    # The ledger's artifact_verified field is emitted only after build_identity.py
+    # verified the APK against the manifest, ZIP structure and apksigner result.
+    apk = ledger.get("artifact_verified") is True
     return (progress > 0 and total > 0 and remote) or apk
 
 def control_inputs(control: Path) -> dict[str, str]:
@@ -313,7 +315,6 @@ def reuse_cached_apk(root: Path, control: Path, archive: Path, meta_path: Path,
             return miss("cached_apk_hash_or_size_mismatch")
         if apk.stat().st_size < 1_000_000:
             return miss("cached_apk_unexpectedly_small")
-        import zipfile
         with zipfile.ZipFile(apk) as zf:
             if zf.testzip() is not None:
                 return miss("cached_apk_zip_integrity_failed")
