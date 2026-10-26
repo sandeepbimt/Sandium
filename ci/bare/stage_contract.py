@@ -11,8 +11,10 @@ STAGES = [
 def validate():
  errors=[]
  run_stage = __import__("pathlib").Path(__file__).with_name("run_stage.sh").read_text(encoding="utf-8")
- if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" not in run_stage:
-  errors.append("APK completion must fail closed without final-log Siso remote action proof")
+ if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_REQUIRED_REMOTE_OR_CACHE_PROOF" not in run_stage:
+  errors.append("APK completion must fail closed without required final-log Siso remote/cache proof")
+ if "EVIDENCE_REQUIREMENTS+=(--require-cache)" not in run_stage:
+  errors.append("stages 2-5 must require remote action-cache hits to prove reuse")
  if 'siso_evidence.py" --require-remote --log "$LOG" --metrics "$METRICS"' not in run_stage:
   errors.append("final Siso logs/metrics must be parsed using the reviewed evidence helper")
  if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_LOGS" not in run_stage:
