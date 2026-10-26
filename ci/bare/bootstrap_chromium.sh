@@ -11,6 +11,13 @@ fi
 PIN_FILE="$CONTROL_ROOT/ci/bare/source-pin.txt"
 BARE_ADAPTER="$CONTROL_ROOT/ci/bare/prepare_source.sh"
 SISO_ADAPTER="$CONTROL_ROOT/ci/bare/configure_siso.py"
+CREDENTIAL_HELPER="$CONTROL_ROOT/ci/siso/buildbuddy-credential-helper.py"
+# Siso executes the credential helper directly (execve), not via `python3`.
+# Normalize the working-tree mode because some checkouts/cache restores yield 0644.
+test -f "$CREDENTIAL_HELPER" || { echo "SANDIUM_CREDENTIAL_HELPER_MISSING=$CREDENTIAL_HELPER" >&2; exit 46; }
+chmod 0755 "$CREDENTIAL_HELPER"
+test -x "$CREDENTIAL_HELPER" || { echo "SANDIUM_CREDENTIAL_HELPER_NOT_EXECUTABLE=$CREDENTIAL_HELPER" >&2; exit 46; }
+echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=PASS"
 IDENTITY_TOOL="$CONTROL_ROOT/ci/bare/build_identity.py"
 CACHE_IDENTITY_TOOL="$CONTROL_ROOT/ci/bare/write_cache_identity.py"
 MODE="${1:-inspect}"
