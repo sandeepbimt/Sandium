@@ -100,5 +100,45 @@ class OutputCheckpointTests(unittest.TestCase):
             with self.assertRaises(M.CheckpointError):
                 M.output_manifest(output)
 
+    def test_pack_and_restore_full_output_checkpoint_end_to_end(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            files = make_output(output)
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 25,
+                "total_action_count": 100,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": True,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                packed = M.command_pack(root, control, 1, "wf-1", ledger, partial=False)
+                self.assertEqual(packed, 0)
+                checkpoint = root / M.CHECKPOINT_NAME
+                self.assertTrue(checkpoint.is_dir())
+                self.assertTrue((checkpoint / M.META_NAME).is_file())
+                self.assertFalse(output.exists())
+
+                # A later stage runs GN first and creates a fresh output shell.
+                output.mkdir(parents=True)
+                (output / "args.gn").write_text("fresh args\\n", encoding="utf-8")
+                (output / "build.ninja").write_text("fresh graph\\n", encoding="utf-8")
+                restored = M.command_restore(root, control, 2, "wf-1", required=True)
+                self.assertEqual(restored, 0)
+                self.assertTrue((output / ".siso_fs_state").is_file())
+                self.assertEqual((output / "build.ninja").read_text(encoding="utf-8"), "build edge\\n")
+                self.assertFalse(checkpoint.exists())
+                self.assertFalse((output / M.META_NAME).exists())
+                report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
+                self.assertTrue(report["local_compiled_outputs_restored"])
+                self.assertEqual(report["source_stage"], 1)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
