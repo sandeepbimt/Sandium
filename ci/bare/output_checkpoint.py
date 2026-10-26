@@ -5,7 +5,8 @@ The checkpoint is stored beside src/, not under src/, so a restored output never
 looks like a partial Chromium checkout to bootstrap_chromium.sh. Files are moved
 on the same filesystem rather than copied locally; CircleCI's cache handles the
 cross-job transfer. Checkpoints are rejected when source, toolchain, Siso, GN,
-or control inputs differ.
+or build-affecting control inputs differ. Pipeline orchestration changes alone
+must not invalidate otherwise compatible compiled output.
 """
 from __future__ import annotations
 
@@ -29,7 +30,6 @@ CHECKPOINT_NAME = "sandium-build-output-checkpoint"
 META_NAME = ".sandium-output-checkpoint.meta.json"
 REPORT_NAME = "sandium-state-handoff-report.json"
 CONTROL_INPUTS = (
-    ".circleci/config.yml",
     "ci/bare/source-pin.txt",
     "ci/bare/gn_args.gn",
     "ci/bare/prepare_source.sh",
