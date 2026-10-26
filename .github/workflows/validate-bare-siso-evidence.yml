@@ -1,0 +1,101 @@
+name: Validate Sandium Siso Evidence Gate (no Chromium build)
+
+on:
+  push:
+    branches:
+      - fix/bare-siso-evidence-from-sandfox-20261026
+    paths:
+      - ".circleci/config.yml"
+      - ".github/workflows/validate-bare-siso-evidence.yml"
+      - "ci/bare/**"
+      - "ci/siso/**"
+  pull_request:
+    branches:
+      - build/bare-apk-once-20261025
+    paths:
+      - ".circleci/config.yml"
+      - ".github/workflows/validate-bare-siso-evidence.yml"
+      - "ci/bare/**"
+      - "ci/siso/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-sandium-siso-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Siso evidence gate, shell/Python and CircleCI schema only
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check shell and Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ci/bare/run_stage.sh
+          bash -n ci/bare/bootstrap_chromium.sh
+          bash -n ci/bare/prepare_source.sh
+          bash -n ci/bare/package_artifact.sh
+          python3 -m py_compile ci/bare/*.py
+          echo "SANDIUM_SHELL_PYTHON_SYNTAX=PASS"
+
+      - name: Run offline regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/bare/test_build_identity.py
+          python3 ci/bare/test_stage_ledger.py
+          python3 ci/bare/test_state_handoff.py
+          python3 ci/bare/test_siso_evidence.py
+          python3 ci/bare/stage_contract.py
+          echo "SANDIUM_OFFLINE_TESTS=PASS"
+
+      - name: Verify compatibility with proven SANDFOX Siso summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import importlib.util
+          import sys
+
+          path = Path("ci/bare/siso_evidence.py")
+          spec = importlib.util.spec_from_file_location("siso_evidence_contract", path)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          line = "local:16660 remote:16674 cache:30278 cache-write:0(err:0) fallback:0 retry:0 skip:34067"
+          evidence = module.parse_text(line)
+          assert evidence.remote_proven, "must recognize successful SANDFOX remote action summary"
+          assert evidence.cache_reuse_proven, "must recognize successful SANDFOX remote action cache summary"
+          assert evidence.remote_actions == 16674
+          assert evidence.cache_hits == 30278
+
+          runner = Path("ci/bare/run_stage.sh").read_text()
+          assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" in runner
+          assert 'wait "$PID"' in runner, "must wait for final Siso summary before final evidence gate"
+          assert "Do not kill a healthy Siso build merely because its remote/cache summary has not been flushed yet." in runner
+          assert "240-second" not in runner, "old four-minute kill watchdog must be absent"
+          print("SANDFOX_SISO_SUMMARY_COMPATIBILITY=PASS")
+          print("NO_PREMATURE_REMOTE_EVIDENCE_KILL=PASS")
+          PY
+
+      - name: Validate CircleCI config (configuration only; no CircleCI pipeline is triggered)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh -o /tmp/install-circleci-cli.sh
+          sudo bash /tmp/install-circleci-cli.sh
+          circleci config validate .circleci/config.yml
+          echo "CIRCLECI_CONFIG_SCHEMA=PASS"
