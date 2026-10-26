@@ -111,7 +111,10 @@ PY
     echo "APK_FAST_PATH=PASS propagated_previous_stage=$((STAGE-1))"
     echo "SANDIUM_BUILD_WORK_REMAINING=no"
     exit 0
-  # A compatible prior useful run may already contain a verified APK. Validate the
+  fi
+fi
+
+# A compatible prior useful run may already contain a verified APK. Validate the
 # cache identity, saved manifest, SHA-256, ZIP structure, and recorded signature
 # verification before skipping any source/build work.
 if [[ "$STAGE" -eq 1 && -s "$STATE_ARCHIVE" && -s "$STATE_META" && -s "$ROOT/sandium-output/Sandium-debug-arm64.apk" && -s "$ROOT/sandium-output/build-manifest.json" ]]; then
