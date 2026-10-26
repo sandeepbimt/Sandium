@@ -17,6 +17,8 @@ def validate():
     run_stage = (here / "run_stage.sh").read_text(encoding="utf-8")
     output_checkpoint = (here / "output_checkpoint.py").read_text(encoding="utf-8")
     fast_apk = (here / "fast_apk.py").read_text(encoding="utf-8")
+    manifest_preflight_path = here / "manifest_preflight.py"
+    manifest_preflight = manifest_preflight_path.read_text(encoding="utf-8") if manifest_preflight_path.is_file() else ""
     timestamp = "epoch_946684800_regular_files_v1"
 
     if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
@@ -31,6 +33,16 @@ def validate():
         errors.append("runner must record the regular-files-only timestamp policy")
     if 'output_checkpoint.py" restore' not in run_stage or 'output_checkpoint.py" pack' not in run_stage:
         errors.append("runner must restore and pack the full GN output tree")
+    if not manifest_preflight:
+        errors.append("runner must have a dedicated manifest preflight helper")
+    if 'manifest_preflight.py"' not in run_stage:
+        errors.append("runner must prime the restored Siso manifest before compilation")
+    elif run_stage.index('manifest_preflight.py"') > run_stage.index('timeout --signal=INT --kill-after=60s'):
+        errors.append("manifest preflight must run before the timed compile window")
+    if "NINJA_REGEN_GATE=FAIL" in run_stage:
+        errors.append("one supported Siso manifest regeneration must not discard a completed stage window")
+    if "two consecutive dry runs" not in manifest_preflight or '"-n"' not in manifest_preflight:
+        errors.append("manifest preflight must be a no-op dry run with a bounded stability check")
     if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("full output checkpoint must write explicit handoff evidence")
     if "SANDIUM_APK_FAST_PATH=PASS" not in fast_apk:
