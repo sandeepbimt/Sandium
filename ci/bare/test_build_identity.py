@@ -22,6 +22,7 @@ class BuildIdentityTests(unittest.TestCase):
         self.assertEqual(values["bare_commit"], "a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5")
         self.assertEqual(values["chromium_commit"], "1228231501697ff7a4a0150ea8ae6df37bb99331")
         self.assertEqual(values["chromium_version"], "156.0.8078.25")
+        self.assertEqual(values["toolchain_depot_tools_commit"], "faceefec3fab70643e950caad40fded806877988")
         self.assertEqual(values["artifact_name"], "Sandium-debug-arm64.apk")
 
     def test_apk_integrity_requires_manifest_and_dex(self) -> None:
