@@ -7,11 +7,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_identity import IdentityError, control_and_workspace, read_pins, source_identity, verify_apk
 
 SCHEMA = 3
-# Siso progress denominators can vary slightly when a restored manifest is
-# regenerated and already-current outputs are resolved. The pinned source/GN
-# build identity is still required to match exactly; reject only material graph
-# drift rather than a handful of progress-counter edges.
-MAX_GRAPH_TOTAL_DRIFT = 0.01
 
 def sha(path: Path) -> str:
     h = hashlib.sha256()
@@ -95,16 +90,7 @@ def validate_progress(stage: int, metrics: dict, done: int, total: int, previous
     prior_total = int(previous.get("total_action_count", 0))
     prior_done = int(previous.get("max_completed_actions", 0))
     if prior_total and prior_total != total:
-        drift = abs(total - prior_total) / prior_total
-        if drift > MAX_GRAPH_TOTAL_DRIFT:
-            raise IdentityError(
-                f"Build graph action count changed beyond {MAX_GRAPH_TOTAL_DRIFT:.0%} tolerance: "
-                f"prior={prior_total} current={total}"
-            )
-        print(
-            "SANDIUM_GRAPH_TOTAL_VARIANCE=ACCEPTED "
-            f"prior={prior_total} current={total} drift_pct={drift * 100:.4f}"
-        )
+        raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
     if done <= prior_done: raise IdentityError(f"No forward progress: prior={prior_done} current={done}")
     if metrics.get("remote_action_cache_reuse_proven"): return "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS"
     return "REMOTE_EXECUTION_WITH_FORWARD_PROGRESS"
