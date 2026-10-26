@@ -128,12 +128,12 @@ class OutputCheckpointTests(unittest.TestCase):
 
                 # A later stage runs GN first and creates a fresh output shell.
                 output.mkdir(parents=True)
-                (output / "args.gn").write_text("fresh args\\n", encoding="utf-8")
-                (output / "build.ninja").write_text("fresh graph\\n", encoding="utf-8")
+                (output / "args.gn").write_text("fresh args\n", encoding="utf-8")
+                (output / "build.ninja").write_text("fresh graph\n", encoding="utf-8")
                 restored = M.command_restore(root, control, 2, "wf-1", required=True)
                 self.assertEqual(restored, 0)
                 self.assertTrue((output / ".siso_fs_state").is_file())
-                self.assertEqual((output / "build.ninja").read_text(encoding="utf-8"), "build edge\\n")
+                self.assertEqual((output / "build.ninja").read_text(encoding="utf-8"), "build edge\n")
                 self.assertFalse(checkpoint.exists())
                 self.assertFalse((output / M.META_NAME).exists())
                 report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
