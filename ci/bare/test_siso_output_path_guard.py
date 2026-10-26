@@ -30,8 +30,12 @@ class GuardTests(unittest.TestCase):
         patched, changed = guard.patch_text(fixture)
         self.assertTrue(changed)
         self.assertLess(
-            patched.index("ctx.fs.canonpath(crash_dir)"),
             patched.index('if ".." in crash_dir.split("/")'),
+            patched.index("ctx.fs.canonpath(crash_dir)"),
+        )
+        self.assertLess(
+            patched.index('if ".." in crash_dir.split("\\\\")'),
+            patched.index("ctx.fs.canonpath(crash_dir)"),
         )
         self.assertIn(guard.MARKER, patched)
         self.assertIn(guard.GUARDED_BLOCK, patched)
