@@ -84,6 +84,8 @@ jobs:
           assert "sandium-bare-v1-" not in config, "final APK gate still uses the obsolete cache namespace"
           final_gate = config.split("  sandium-bare-apk-required:", 1)[1].split("\n\nworkflows:", 1)[0]
           assert final_gate.index("- checkout:") < final_gate.index("- restore_cache:"), "final gate must checkout sandium-control before computing cache checksums"
+          for fragment in ("Sandium-debug-arm64.apk", "build-manifest.json", "hashlib.sha256", "artifact_sha256", "apksigner_verification", "archive.testzip()"):
+              assert fragment in final_gate, "final APK file verification missing: " + fragment
           assert "python3 \"$STATE_TOOL\" preflight" in runner, "handoff preflight is not called"
           assert runner.index(" preflight --root ") < runner.index('bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source'), "handoff preflight must happen before Chromium source sync"
           assert "SANDIUM_STATE_HANDOFF_PREFLIGHT=PASS" in handoff
