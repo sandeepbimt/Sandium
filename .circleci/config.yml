@@ -159,6 +159,10 @@ jobs:
           path: stage-<< parameters.stage_index >>-metrics.jsonl
           destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
       - store_artifacts:
+          name: Upload Siso native output summary and action diagnostics
+          path: stage-<< parameters.stage_index >>-siso-output.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/siso-output.log
+      - store_artifacts:
           name: Upload Chromium fetch log when present
           path: sandium-fetch.log
           destination: diagnostics/stage-<< parameters.stage_index >>/fetch.log
