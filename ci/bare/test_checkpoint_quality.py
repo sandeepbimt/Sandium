@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Offline tests for green-only compiled-output checkpoint selection."""
+import hashlib
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location("sandium_checkpoint_quality", HERE / "checkpoint_quality.py")
+assert SPEC and SPEC.loader
+M = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(M)
+
+IDENTITY = {
+    "schema": 1, "bare_commit": "a" * 40, "chromium_commit": "b" * 40,
+    "chromium_version": "156.0.8078.25", "target": "android-arm64-debug-apk",
+    "toolchain_depot_tools_commit": "c" * 40, "gn_args_sha256": "d" * 64,
+}
+CONTROL_HASHES = {name: hashlib.sha256(name.encode()).hexdigest() for name in M.OC.CONTROL_INPUTS}
+
+
+def digest_file(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def make_candidate(root: Path, *, stage=1, workflow="old-workflow", kind="completed-stage",
+                   record_valid=True, min_payload=200) -> Path:
+    checkpoint = root / M.OC.CHECKPOINT_NAME
+    checkpoint.mkdir(parents=True)
+    files = {
+        "args.gn": b"use_siso=true\n",
+        "build.ninja": b"build target\n",
+        ".siso_fs_state": b"siso filesystem state\n",
+        "obj-placeholder.bin": b"x" * max(1, min_payload),
+    }
+    for name, payload in files.items():
+        (checkpoint / name).write_bytes(payload)
+    output_files = {name: digest_file(checkpoint / name) for name in files}
+    output_bytes = sum((checkpoint / name).stat().st_size for name in files)
+    meta = {
+        "schema": M.OC.SCHEMA,
+        "checkpoint_name": M.OC.CHECKPOINT_NAME,
+        "output_relative_path": M.OC.OUT_RELATIVE.as_posix(),
+        "checkpoint_kind": kind,
+        "stage_record_valid": record_valid,
+        "stage": stage,
+        "workflow_id": workflow,
+        "build_identity": IDENTITY,
+        "build_identity_sha256": M.OC.identity_digest(IDENTITY),
+        "control_inputs": CONTROL_HASHES,
+        "output_files": output_files,
+        "output_bytes": output_bytes,
+    }
+    (checkpoint / M.OC.META_NAME).write_text(json.dumps(meta), encoding="utf-8")
+    return checkpoint
+
+
+class CheckpointQualityTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.control = self.root / "control"
+        self.control.mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def validate(self, stage=2, workflow="current-workflow", min_bytes=100):
+        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \
+             patch.object(M, "source_identity", return_value=IDENTITY):
+            return M.validate_candidate(
+                root=self.root, control=self.control, stage=stage,
+                workflow_id=workflow, min_output_bytes=min_bytes,
+            )
+
+    def test_accepts_substantial_completed_predecessor_with_matching_identity(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
+        result = self.validate()
+        self.assertEqual(result["source_stage"], 1)
+        self.assertTrue(result["stage_record_valid"])
+        self.assertGreaterEqual(result["output_bytes"], 100)
+
+    def test_rejects_metadata_only_16_byte_checkpoint(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=1)
+        with self.assertRaisesRegex(M.CheckpointQualityError, "too_small"):
+            self.validate(min_bytes=10000)
+
+    def test_rejects_failed_or_partial_stage_checkpoint(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow",
+                       kind="partial-stage", record_valid=False, min_payload=200)
+        with self.assertRaisesRegex(M.CheckpointQualityError, "not_a_green_completed_stage"):
+            self.validate()
+
+    def test_rejects_wrong_predecessor_stage(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
+        with self.assertRaisesRegex(M.CheckpointQualityError, "wrong_predecessor_stage"):
+            self.validate(stage=3)
+
+    def test_rejects_checkpoint_from_other_workflow_for_continuation(self):
+        make_candidate(self.root, stage=1, workflow="old-workflow", min_payload=200)
+        with self.assertRaisesRegex(M.CheckpointQualityError, "immediate_predecessor"):
+            self.validate(stage=2, workflow="current-workflow")
+
+    def test_allows_prior_workflow_candidate_for_stage_one_selection(self):
+        make_candidate(self.root, stage=1, workflow="old-workflow", min_payload=200)
+        result = self.validate(stage=1, workflow="new-workflow")
+        self.assertEqual(result["source_stage"], 1)
+
+    def test_rejects_build_identity_mismatch(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
+        other_identity = dict(IDENTITY, chromium_commit="e" * 40)
+        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \
+             patch.object(M, "source_identity", return_value=other_identity):
+            with self.assertRaisesRegex(M.CheckpointQualityError, "identity_mismatch"):
+                M.validate_candidate(
+                    root=self.root, control=self.control, stage=2,
+                    workflow_id="current-workflow", min_output_bytes=100,
+                )
+
+    def test_rejects_declared_actual_payload_size_mismatch(self):
+        checkpoint = make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
+        meta_path = checkpoint / M.OC.META_NAME
+        meta = json.loads(meta_path.read_text())
+        meta["output_bytes"] += 1
+        meta_path.write_text(json.dumps(meta))
+        with self.assertRaisesRegex(M.CheckpointQualityError, "size_mismatch"):
+            self.validate()
+
+    def test_quarantines_rejected_local_candidate_without_deleting_it(self):
+        checkpoint = make_candidate(self.root, stage=1, workflow="current-workflow",
+                                   kind="partial-stage", record_valid=False, min_payload=200)
+        rejected = M.quarantine_candidate(self.root)
+        self.assertIsNotNone(rejected)
+        self.assertFalse(checkpoint.exists())
+        self.assertTrue((rejected / M.OC.META_NAME).is_file())
+
+    def test_missing_candidate_is_not_treated_as_valid(self):
+        with self.assertRaisesRegex(M.CheckpointQualityError, "missing_or_unsafe"):
+            self.validate()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

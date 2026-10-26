@@ -17,6 +17,8 @@ def validate():
     run_stage = (here / "run_stage.sh").read_text(encoding="utf-8")
     output_checkpoint = (here / "output_checkpoint.py").read_text(encoding="utf-8")
     fast_apk = (here / "fast_apk.py").read_text(encoding="utf-8")
+    quality_path = here / "checkpoint_quality.py"
+    quality = quality_path.read_text(encoding="utf-8") if quality_path.is_file() else ""
     manifest_preflight_path = here / "manifest_preflight.py"
     manifest_preflight = manifest_preflight_path.read_text(encoding="utf-8") if manifest_preflight_path.is_file() else ""
     progress_normalizer_path = here / "normalize_progress_total.py"
@@ -43,8 +45,10 @@ def validate():
         errors.append("manifest preflight must run before the timed compile window")
     if "NINJA_REGEN_GATE=FAIL" in run_stage:
         errors.append("one supported Siso manifest regeneration must not discard a completed stage window")
-    if "two consecutive dry runs" not in manifest_preflight or '"-n"' not in manifest_preflight:
-        errors.append("manifest preflight must be a no-op dry run with a bounded stability check")
+    if "mode=filesystem-only" not in manifest_preflight or "siso_dry_run_in_preflight=no" not in manifest_preflight:
+        errors.append("preflight must not run the known-repeating Siso no-op regeneration path")
+    if "handled_by_real_siso_build" not in manifest_preflight:
+        errors.append("manifest regeneration must be delegated to the actual Siso build after filesystem validation")
     if not progress_normalizer:
         errors.append("small action-count variance helper is missing")
     if 'normalize_progress_total.py"' not in run_stage:
@@ -55,6 +59,16 @@ def validate():
         errors.append("progress normalization must require exact build identity and a 1% maximum drift")
     if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("full output checkpoint must write explicit handoff evidence")
+    if not quality:
+        errors.append("compiled-output checkpoint quality validator is missing")
+    if 'checkpoint_quality.py" --root "$ROOT"' not in run_stage:
+        errors.append("runner must reject invalid/tiny cached checkpoints before restore")
+    if 'checkpoint_quality.py" --root "$ROOT"' not in run_stage or "--produced" not in run_stage:
+        errors.append("runner must validate checkpoint quality before publishing")
+    if "MIN_GOOD_OUTPUT_BYTES = 512 * 1024 * 1024" not in quality:
+        errors.append("checkpoint selection must reject metadata-only and undersized output trees")
+    if "candidate_is_not_a_green_completed_stage" not in quality or "checkpoint_size_mismatch" not in quality:
+        errors.append("checkpoint quality must require green-stage metadata and match declared/actual size")
     if "SANDIUM_APK_FAST_PATH=PASS" not in fast_apk:
         errors.append("cached APK fast path must verify and propagate the current stage")
     if "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" not in fast_apk:
