@@ -98,7 +98,7 @@ jobs:
           assert "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" in fast_apk
           assert "subprocess.run" not in fast_apk, "cached APK fast path must not claim to rerun apksigner"
           assert "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" in runner
-          assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('test -s "$SDIR/.sisoenv"') < runner.index('bootstrap_chromium.sh" configure'), "source-only preparation must not require GN-generated Siso files"
+          assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('bootstrap_chromium.sh" configure') < runner.index('test -s "$SDIR/.sisoenv"'), "source-only preparation must not require GN-generated Siso files"
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
           assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
           assert "WAIT -lt 240" not in runner and 'kill -INT -- "$PID"' not in runner
