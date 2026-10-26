@@ -33,17 +33,7 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            python3 -m py_compile \
-              ci/bare/build_identity.py \
-              ci/bare/configure_siso.py \
-              ci/bare/checkpoint.py \
-              ci/bare/stage_ledger.py \
-              ci/bare/state_handoff.py \
-              ci/bare/write_cache_identity.py \
-              ci/bare/test_build_identity.py \
-              ci/bare/stage_contract.py \
-              ci/bare/test_stage_ledger.py \
-              ci/bare/test_state_handoff.py
+            python3 -m py_compile ci/bare/*.py ci/siso/*.py
             bash -n ci/bare/run_stage.sh
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
@@ -53,9 +43,15 @@ jobs:
             python3 ci/bare/checkpoint.py --help >/dev/null
             python3 ci/bare/stage_ledger.py --help >/dev/null
             python3 ci/bare/state_handoff.py --help >/dev/null
+            python3 ci/bare/output_checkpoint.py --help >/dev/null
+            python3 ci/bare/fast_apk.py --help >/dev/null
+            python3 ci/bare/cache_fingerprint.py --help >/dev/null
+            python3 ci/bare/source_cache_fingerprint.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py
+            python3 ci/bare/test_output_checkpoint.py
+            python3 ci/bare/test_fast_apk.py
             python3 ci/bare/stage_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
