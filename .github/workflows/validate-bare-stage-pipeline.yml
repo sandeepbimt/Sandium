@@ -89,18 +89,18 @@ jobs:
           assert config.index("fast_apk.py") < config.index("Restore the best previous compiled-output checkpoint"), "APK fast-path check must precede large output restore"
           assert config.index("Save the synchronized source tree") < config.index("Build one bounded incremental window"), "source cache must be created before GN output"
           assert config.index("Start the full stage budget clock") < config.index("restore_cache:"), "stage budget must include setup and restores"
-          assert "sandium-state-v2-{{ checksum \\"sandium-control/.sandium-cache-fingerprint.txt\\" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-" in config, "final gate must restore the current workflow's Stage 5 state"
+          assert 'sandium-state-v2-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's Stage 5 state"
 
           assert "SANDIUM_OUTPUT_CHECKPOINT=RESTORED" in checkpoint
-          assert "local_compiled_outputs_restored\\": True" in checkpoint
-          assert "META_NAME = \\".sandium-output-checkpoint.meta.json\\"" in checkpoint
+          assert '"local_compiled_outputs_restored": True' in checkpoint
+          assert 'META_NAME = ".sandium-output-checkpoint.meta.json"' in checkpoint
           assert "SANDIUM_APK_FAST_PATH=PASS" in fast_apk
           assert "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" in fast_apk
-          assert "apksigner_verification\\" )" not in fast_apk
+          assert "subprocess.run" not in fast_apk, "cached APK fast path must not claim to rerun apksigner"
           assert "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" in runner
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
           assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
-          assert "WAIT -lt 240" not in runner and "kill -INT -- \\"$PID\\"" not in runner
+          assert "WAIT -lt 240" not in runner and 'kill -INT -- "$PID"' not in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW" in runner
           assert "epoch_946684800_regular_files_v1" in runner
