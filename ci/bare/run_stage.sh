@@ -38,10 +38,11 @@ echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
 done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py"
+python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py" "$CONTROL/ci/bare/siso_evidence.py" "$CONTROL/ci/bare/test_siso_evidence.py"
 python3 "$CONTROL/ci/bare/test_build_identity.py"
 python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
+python3 "$CONTROL/ci/bare/test_siso_evidence.py"
 python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
