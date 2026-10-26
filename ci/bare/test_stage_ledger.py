@@ -30,17 +30,7 @@ class LedgerTests(unittest.TestCase):
   prev={"max_completed_actions":10,"total_action_count":100}
   with self.assertRaises(IdentityError): M.validate_progress(2,{"remote_execution_proven":True},10,100,prev)
   self.assertEqual(M.validate_progress(2,{"remote_action_cache_reuse_proven":True},20,100,prev),"REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS")
- def test_minor_graph_total_variance_from_manifest_refresh_is_tolerated(self):
-  prior={"max_completed_actions":53323,"total_action_count":109081}
-  metrics={"remote_action_cache_reuse_proven":True}
-  self.assertEqual(
-   M.validate_progress(2,metrics,54738,109087,prior),
-   "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS",
-  )
-
- def test_material_graph_total_drift_fails(self):
+ def test_graph_total_must_be_stable(self):
   from build_identity import IdentityError
-  previous={"max_completed_actions":10,"total_action_count":100}
-  with self.assertRaisesRegex(IdentityError,"beyond 1% tolerance"):
-   M.validate_progress(2,{"remote_execution_proven":True},20,105,previous)
+  with self.assertRaises(IdentityError): M.validate_progress(2,{"remote_execution_proven":True},20,101,{"max_completed_actions":10,"total_action_count":100})
 if __name__=="__main__": unittest.main(verbosity=2)
