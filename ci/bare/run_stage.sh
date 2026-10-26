@@ -313,8 +313,19 @@ else
   printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$DONE" "$TOTAL" > "$STATUS"
   echo SANDIUM_APK_READY=false
 fi
+echo "DIAG_SISO_STATE_FILES_BEGIN"
+find "$OUT" -maxdepth 1 -type f \( -name ".siso_fs_state*" -o -name ".ninja_log" -o -name ".ninja_deps" \) -printf '%f %s bytes\n' 2>/dev/null | sort || true
+echo "DIAG_SISO_STATE_FILES_END"
+# The full output checkpoint is the primary stage-to-stage continuation path.
+# A small state capsule is useful too, but failure to make that optional capsule
+# must not prevent us from preserving a valid full output checkpoint.
+set +e
 python3 "$STATE_TOOL" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
-echo "DIAG_STAGE_OUT_SIZE=$(du -sh "$OUT" 2>/dev/null | cut -f1 || true)"
+STATE_PACK_RC=$?
+set -e
+if [[ "$STATE_PACK_RC" -ne 0 ]]; then
+  echo "SANDIUM_STATE_HANDOFF_PACK=MISS rc=$STATE_PACK_RC; attempting full output checkpoint"
+fi
 echo "DIAG_SISO_STATE_CAPSULE_SIZE=$(stat -c %s "$STATE_ARCHIVE" 2>/dev/null || echo 0)"
 python3 "$CONTROL/ci/bare/output_checkpoint.py" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER"
 echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
