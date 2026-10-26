@@ -153,7 +153,8 @@ jobs:
           normalizer = Path("ci/bare/normalize_progress_total.py").read_text(encoding="utf-8")
           assert "MAX_GRAPH_TOTAL_DRIFT = 0.01" in normalizer
           assert "build identity differs" in normalizer
-          assert 'normalize_progress_total.py"' in runner and runner.index('normalize_progress_total.py"') < runner.index('stage_ledger.py" --stage')
+          assert 'python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage' in runner
+          assert runner.index('python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage') < runner.index('stage_ledger.py" --stage')
           assert "epoch_946684800_regular_files_v1" in runner
           assert 'find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch' in runner
           assert 'test -s "$ROOT/.gclient_entries"' in bootstrap
