@@ -206,6 +206,46 @@ jobs:
             grep -qx "BUILD_FINISHED=true" "$STATUS" || { echo "SANDIUM_FINAL_APK_GATE=FAIL no verified APK after five stages" >&2; exit 1; }
             grep -qx "APK_ARCHIVE_VALID=true" "$STATUS"
             grep -qx "APK_SIGNATURE_VERIFIED=true" "$STATUS"
+            APK="$HOME/project/sandium-output/Sandium-debug-arm64.apk"
+            MANIFEST="$HOME/project/sandium-output/build-manifest.json"
+            test -s "$APK" || { echo "SANDIUM_FINAL_APK_GATE=FAIL APK file is missing" >&2; exit 1; }
+            test -s "$MANIFEST" || { echo "SANDIUM_FINAL_APK_GATE=FAIL build manifest is missing" >&2; exit 1; }
+            python3 - "$STATUS" "$APK" "$MANIFEST" <<'PY'
+            import hashlib, json, sys, zipfile
+            from pathlib import Path
+
+            status_path, apk_path, manifest_path = map(Path, sys.argv[1:4])
+            status = {}
+            for line in status_path.read_text(encoding="utf-8").splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    status[key] = value
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+            size = apk_path.stat().st_size
+            if size < 1_000_000:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK is unexpectedly small")
+            if status.get("APK_SHA256") != digest or status.get("APK_SIZE_BYTES") != str(size):
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK hash/size differs from stage status")
+            if manifest.get("artifact_sha256") != digest or manifest.get("artifact_bytes") != size:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK hash/size differs from manifest")
+            identity = manifest.get("build_identity_sha256")
+            if not identity or status.get("BUILD_IDENTITY_SHA256") != identity:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL build identity differs between status and manifest")
+            if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS":
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL manifest lacks recorded APK signature verification")
+            with zipfile.ZipFile(apk_path) as archive:
+                if archive.testzip() is not None:
+                    raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK ZIP integrity check failed")
+                names = set(archive.namelist())
+                if "AndroidManifest.xml" not in names or not any(name.startswith("classes") and name.endswith(".dex") for name in names):
+                    raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK is missing AndroidManifest.xml or DEX")
+            print("SANDIUM_FINAL_APK_FILE=PASS")
+            print("SANDIUM_FINAL_APK_HASH_SIZE=PASS")
+            print("SANDIUM_FINAL_APK_BUILD_IDENTITY=PASS")
+            print("SANDIUM_FINAL_APK_SIGNATURE_RECORD=PASS")
+            print("SANDIUM_FINAL_APK_ZIP_STRUCTURE=PASS")
+            PY
             echo "SANDIUM_FINAL_APK_GATE=PASS"
 
 
