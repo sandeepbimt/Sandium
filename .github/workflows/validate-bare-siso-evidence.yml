@@ -83,7 +83,8 @@ jobs:
           assert evidence.cache_hits == 30278
 
           runner = Path("ci/bare/run_stage.sh").read_text()
-          assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" in runner
+          assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_REQUIRED_REMOTE_OR_CACHE_PROOF" in runner
+          assert "EVIDENCE_REQUIREMENTS+=(--require-cache)" in runner, "later stages must prove actual cache hits"
           assert 'wait "$PID"' in runner, "must wait for final Siso summary before final evidence gate"
           assert '"$OUT/siso_output"' in runner, "must inspect the native Siso summary file observed in SANDFOX"
           assert 'stage-$STAGE-siso-output.log' in runner, "must preserve native Siso output for diagnostics"
