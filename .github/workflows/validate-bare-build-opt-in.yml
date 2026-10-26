@@ -1,0 +1,51 @@
+name: Validate Bare APK build opt-in gate (no build)
+
+on:
+  push:
+    branches:
+      - fix/bare-build-opt-in-only
+    paths:
+      - ".circleci/config.yml"
+      - ".github/workflows/validate-bare-build-opt-in.yml"
+  pull_request:
+    branches:
+      - build/bare-apk-once-20261025
+    paths:
+      - ".circleci/config.yml"
+      - ".github/workflows/validate-bare-build-opt-in.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-opt-in-gate:
+    name: Validate CircleCI YAML and explicit opt-in (no Chromium build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Parse and assert fail-closed workflow gate
+        shell: ruby
+        run: |
+          require "yaml"
+          config = YAML.load_file(".circleci/config.yml")
+          param = config.fetch("parameters").fetch("run_sandium_bare_apk_once")
+          abort "opt-in parameter must be Boolean false by default" unless param["type"] == "boolean" && param["default"] == false
+
+          condition = config.fetch("workflows").fetch("sandium-bare-apk-once").fetch("when").fetch("and")
+          branch_guard = condition.any? { |item| item.is_a?(Hash) && item["equal"] == ["build/bare-apk-once-20261025", "<< pipeline.git.branch >>"] }
+          opt_in_guard = condition.include?("<< pipeline.parameters.run_sandium_bare_apk_once >>")
+          abort "workflow must require the dedicated build branch AND explicit opt-in" unless branch_guard && opt_in_guard
+
+          jobs = config.fetch("workflows").fetch("sandium-bare-apk-once").fetch("jobs")
+          stages = jobs.filter_map { |job| job.values.first["stage_index"] if job.is_a?(Hash) && job.key?("sandium-bare-build-stage") }
+          abort "workflow must retain sequential five-stage build" unless stages == [1, 2, 3, 4, 5]
+          abort "final APK gate is missing" unless jobs.any? { |job| job.is_a?(Hash) && job.key?("sandium-bare-apk-required") }
+          puts "CIRCLECI_YAML_PARSE=PASS"
+          puts "APK_BUILD_DEFAULT_OPT_IN=FALSE"
+          puts "APK_BUILD_BRANCH_GUARD=PASS"
+          puts "APK_BUILD_EXPLICIT_OPT_IN_GUARD=PASS"
+          puts "FIVE_STAGE_SEQUENCE=PASS"
+          puts "NO_CHROMIUM_BUILD_EXECUTED=true"
