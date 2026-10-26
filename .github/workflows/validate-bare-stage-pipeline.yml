@@ -82,7 +82,7 @@ jobs:
           assert "equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]" in config, "expensive APK workflow must be isolated to the dedicated build branch"
           assert "equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]" not in config, "review branch must not be eligible for the expensive APK workflow"
           assert "sandium-bare-v1-" not in config, "final APK gate still uses the obsolete cache namespace"
-          final_gate = config.split("  sandium-bare-apk-required:", 1)[1].split("\\n\\nworkflows:", 1)[0]
+          final_gate = config.split("  sandium-bare-apk-required:", 1)[1].split("\n\nworkflows:", 1)[0]
           assert final_gate.index("- checkout:") < final_gate.index("- restore_cache:"), "final gate must checkout sandium-control before computing cache checksums"
           assert "python3 \"$STATE_TOOL\" preflight" in runner, "handoff preflight is not called"
           assert runner.index(" preflight --root ") < runner.index('bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source'), "handoff preflight must happen before Chromium source sync"
