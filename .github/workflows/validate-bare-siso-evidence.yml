@@ -85,6 +85,9 @@ jobs:
           runner = Path("ci/bare/run_stage.sh").read_text()
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" in runner
           assert 'wait "$PID"' in runner, "must wait for final Siso summary before final evidence gate"
+          assert '"$OUT/siso_output"' in runner, "must inspect the native Siso summary file observed in SANDFOX"
+          assert 'stage-$STAGE-siso-output.log' in runner, "must preserve native Siso output for diagnostics"
+          assert "stage-<< parameters.stage_index >>-siso-output.log" in Path(".circleci/config.yml").read_text(), "CircleCI must publish native Siso output"
           assert "Do not kill a healthy Siso build" in runner
           assert "been flushed yet." in runner
           assert "240-second" not in runner, "old four-minute kill watchdog must be absent"
