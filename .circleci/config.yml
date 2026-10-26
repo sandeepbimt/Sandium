@@ -122,11 +122,46 @@ jobs:
               equal: [1, << parameters.stage_index >>]
           steps:
             - run:
-                name: Skip later stages if the APK is already verified
+                name: Skip later stages only when previous APK status is fully verified
                 command: |
                   set -euo pipefail
-                  STATUS="$HOME/project/ci-handoff/stage-$((<< parameters.stage_index >>-1))/status.txt"
-                  if grep -qx 'BUILD_FINISHED=true' "$STATUS"; then
+                  PREV_STAGE="$HOME/project/ci-handoff/stage-$((<< parameters.stage_index >>-1))"
+                  STATUS="$PREV_STAGE/status.txt"
+                  LEDGER="$PREV_STAGE/ledger.json"
+                  MANIFEST="$HOME/project/sandium-output/Sandium-debug-arm64.manifest.json"
+                  APK="$HOME/project/sandium-output/Sandium-debug-arm64.apk"
+                  if grep -qx 'BUILD_FINISHED=true' "$STATUS" \
+                    && grep -qx 'APK_ARCHIVE_VALID=true' "$STATUS" \
+                    && grep -qx 'APK_SIGNATURE_VERIFIED=true' "$STATUS" \
+                    && test -s "$LEDGER" \
+                    && test -s "$MANIFEST" \
+                    && test -s "$APK"; then
+                    python3 - "$STATUS" "$LEDGER" "$MANIFEST" "$APK" <<'PY'
+                  import hashlib, json, pathlib, sys, zipfile
+                  status_path, ledger_path, manifest_path, apk_path = map(pathlib.Path, sys.argv[1:])
+                  status = dict(line.split("=", 1) for line in status_path.read_text().splitlines() if "=" in line)
+                  ledger = json.loads(ledger_path.read_text())
+                  manifest = json.loads(manifest_path.read_text())
+                  digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+                  size = apk_path.stat().st_size
+                  if size < 1_000_000:
+                      raise SystemExit("cached APK unexpectedly small")
+                  if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS":
+                      raise SystemExit("cached APK manifest lacks prior signature verification")
+                  if manifest.get("artifact_sha256") != digest or manifest.get("artifact_bytes") != size:
+                      raise SystemExit("cached APK differs from manifest")
+                  if ledger.get("artifact_verified") is not True:
+                      raise SystemExit("ledger does not record verified APK")
+                  if status.get("APK_SHA256") != digest or status.get("APK_SIZE_BYTES") != str(size):
+                      raise SystemExit("cached status does not match APK")
+                  with zipfile.ZipFile(apk_path) as archive:
+                      if archive.testzip() is not None:
+                          raise SystemExit("cached APK ZIP integrity failure")
+                      names = set(archive.namelist())
+                      if "AndroidManifest.xml" not in names or not any(n.startswith("classes") and n.endswith(".dex") for n in names):
+                          raise SystemExit("cached APK missing manifest or DEX")
+                  print("SANDIUM_APK_FAST_EXIT_ARTIFACT_REVALIDATION=PASS")
+                  PY
                     cat "$STATUS"
                     echo "SANDIUM_APK_FAST_EXIT=true"
                     circleci-agent step halt
@@ -199,8 +234,7 @@ workflows:
     jobs:
       - sandium-bare-build-not-ready
 
-  # Explicitly isolated, single-use build lane. All ordinary branches and workflows
-  # remain fail-closed; only pushing this dedicated branch starts this APK attempt.
+  # The APK workflow is restricted to the dedicated branch and explicit opt-in.
   sandium-bare-apk-once:
     when:
       and:
