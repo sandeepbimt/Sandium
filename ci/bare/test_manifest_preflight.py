@@ -50,7 +50,7 @@ class ManifestPreflightTests(unittest.TestCase):
             )
 
     def test_no_regeneration_passes_after_one_dry_run(self):
-        run, calls = self.fake_run([("ninja: no work to do.\\n", 0)])
+        run, calls = self.fake_run([("ninja: no work to do.\n", 0)])
         self.assertEqual(self.call_preflight(run), 0)
         self.assertEqual(len(calls), 1)
         command, cwd = calls[0]
@@ -60,8 +60,8 @@ class ManifestPreflightTests(unittest.TestCase):
         self.assertIn("SISO MANIFEST PREFLIGHT ATTEMPT 1", self.log.read_text())
 
     def test_single_regeneration_is_warmed_then_stability_checked(self):
-        output = "[0/2] 0.7s S Regenerating ninja files\\n[0/2] 12s F Regenerating ninja files\\n12s Regenerating ninja files\\n"
-        run, calls = self.fake_run([(output, 0), ("ninja: no work to do.\\n", 0)])
+        output = "[0/2] 0.7s S Regenerating ninja files\n[0/2] 12s F Regenerating ninja files\n12s Regenerating ninja files\n"
+        run, calls = self.fake_run([(output, 0), ("ninja: no work to do.\n", 0)])
         self.assertEqual(self.call_preflight(run), 0)
         self.assertEqual(len(calls), 2)
         text = self.log.read_text()
@@ -69,20 +69,20 @@ class ManifestPreflightTests(unittest.TestCase):
         self.assertIn("ATTEMPT 2 EXIT CODE 0", text)
 
     def test_repeated_regeneration_fails_before_compile_window(self):
-        regen = "[0/2] Regenerating ninja files\\n"
+        regen = "[0/2] Regenerating ninja files\n"
         run, calls = self.fake_run([(regen, 0), (regen, 0)])
         with self.assertRaises(M.ManifestPreflightError):
             self.call_preflight(run)
         self.assertEqual(len(calls), 2)
 
     def test_nonzero_dry_run_fails_closed(self):
-        run, calls = self.fake_run([("Siso failed\\n", 49)])
+        run, calls = self.fake_run([("Siso failed\n", 49)])
         with self.assertRaises(M.ManifestPreflightError):
             self.call_preflight(run)
         self.assertEqual(len(calls), 1)
 
     def test_build_identity_change_during_preflight_fails_closed(self):
-        run, calls = self.fake_run([("ninja: no work to do.\\n", 0)])
+        run, calls = self.fake_run([("ninja: no work to do.\n", 0)])
         with patch.object(M, "identity_digest", side_effect=["before", "after"]), \
              patch.object(M.subprocess, "run", side_effect=run):
             with self.assertRaises(M.ManifestPreflightError):
@@ -93,9 +93,9 @@ class ManifestPreflightTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_manifest_regeneration_progress_lines_are_one_invocation_event(self):
-        text = "[0/2] Regenerating ninja files\\n[0/2] F Regenerating ninja files\\n12s Regenerating ninja files\\n"
+        text = "[0/2] Regenerating ninja files\n[0/2] F Regenerating ninja files\n12s Regenerating ninja files\n"
         self.assertTrue(M.has_manifest_regeneration(text))
-        self.assertFalse(M.has_manifest_regeneration("ninja: no work to do.\\n"))
+        self.assertFalse(M.has_manifest_regeneration("ninja: no work to do.\n"))
 
 
 if __name__ == "__main__":
