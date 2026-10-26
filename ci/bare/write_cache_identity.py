@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -60,8 +61,22 @@ def main() -> int:
     if expected_crx != actual_crx:
         raise SystemExit("SANDIUM_CACHE_IDENTITY_ERROR=extension checksum mismatch")
 
+    pin_values = {}
+    for line in pin_file.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            pin_values[key.strip()] = value.strip()
+    toolchain_revision = pin_values.get("toolchain_depot_tools_commit", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", toolchain_revision):
+        raise SystemExit("SANDIUM_CACHE_IDENTITY_ERROR=depot_tools commit pin is missing or invalid")
     toolchain = Path.home() / "depot_tools"
-    toolchain_revision = git(toolchain, "rev-parse", "HEAD") if (toolchain / ".git").is_dir() else "unavailable-before-toolchain-setup"
+    if (toolchain / ".git").is_dir():
+        actual_toolchain = git(toolchain, "rev-parse", "HEAD")
+        if actual_toolchain != toolchain_revision:
+            raise SystemExit(
+                "SANDIUM_CACHE_IDENTITY_ERROR=depot_tools pin mismatch: expected "
+                + toolchain_revision + ", got " + actual_toolchain
+            )
     values = {
         "schema": 1,
         "bare_commit": EXPECTED_BARE,
