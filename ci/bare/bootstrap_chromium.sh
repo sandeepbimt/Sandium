@@ -179,7 +179,6 @@ SANDIUM_GCLIENT_SPEC
       exit "$fetch_rc"
     fi
     git -C "$CHROMIUM_SRC" checkout --force --detach FETCH_HEAD
-    test -s "$ROOT/.gclient_entries" || { echo "SANDIUM_GCLIENT_ENTRIES_MISSING_AFTER_SYNC" >&2; exit 37; }
     test -s "$CHROMIUM_SRC/DEPS" || { echo "SANDIUM_CHROMIUM_DEPS_MISSING_AFTER_SYNC" >&2; exit 37; }
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
@@ -221,6 +220,7 @@ SANDIUM_GCLIENT_SPEC
       exit "$sync_rc"
     fi
 
+    test -s "$ROOT/.gclient_entries" || { echo "SANDIUM_GCLIENT_ENTRIES_MISSING_AFTER_SYNC" >&2; tail -n 120 "$SYNC_LOG" >&2 || true; exit 37; }
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
