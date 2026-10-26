@@ -81,8 +81,15 @@ case "$MODE" in
     python3 "$CACHE_IDENTITY_TOOL"
 
     if [[ -d "$CHROMIUM_SRC/.git" ]]; then
+      # A restored source cache is valid only when gclient's root config,
+      # DEPS and generated solution inventory survived together with src/.
+      # Never treat a partial Git checkout as a ready Android dependency tree.
+      test -s "$ROOT/.gclient" || { echo "SANDIUM_SOURCE_CACHE_INVALID=missing .gclient" >&2; exit 37; }
+      test -s "$ROOT/.gclient_entries" || { echo "SANDIUM_SOURCE_CACHE_INVALID=missing .gclient_entries" >&2; exit 37; }
+      test -s "$CHROMIUM_SRC/DEPS" || { echo "SANDIUM_SOURCE_CACHE_INVALID=missing src/DEPS" >&2; exit 37; }
+      test -d "$CHROMIUM_SRC/build" || { echo "SANDIUM_SOURCE_CACHE_INVALID=missing src/build" >&2; exit 37; }
       check_patched_source
-      echo "SANDIUM_SOURCE_CACHE=HIT_OR_PREPARED"
+      echo "SANDIUM_SOURCE_CACHE=HIT_VALIDATED"
       echo "CHROMIUM_SYNC_RUN=no"
       exit 0
     fi
@@ -163,6 +170,8 @@ SANDIUM_GCLIENT_SPEC
       exit "$fetch_rc"
     fi
     git -C "$CHROMIUM_SRC" checkout --force --detach FETCH_HEAD
+    test -s "$ROOT/.gclient_entries" || { echo "SANDIUM_GCLIENT_ENTRIES_MISSING_AFTER_SYNC" >&2; exit 37; }
+    test -s "$CHROMIUM_SRC/DEPS" || { echo "SANDIUM_CHROMIUM_DEPS_MISSING_AFTER_SYNC" >&2; exit 37; }
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
@@ -234,7 +243,8 @@ SANDIUM_GCLIENT_SPEC
     test -x "$GN"
     GN_ARGS_FILE="$CONTROL_ROOT/ci/bare/gn_args.gn"
     test -s "$GN_ARGS_FILE"
-    "$GN" gen "$OUT" --args="$(cat "$GN_ARGS_FILE")"
+    echo "SANDIUM_GN_GENERATION_CWD=$CHROMIUM_SRC"
+    (cd "$CHROMIUM_SRC" && "$GN" gen "$OUT" --args="$(cat "$GN_ARGS_FILE")")
 
     python3 "$CACHE_IDENTITY_TOOL"
     python3 "$IDENTITY_TOOL" --mode record --root "$ROOT" --output "$ROOT/sandium-output"
