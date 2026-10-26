@@ -7,9 +7,9 @@ Siso's canonpath can preserve that path when it points outside the action exec r
 Crash-report upload is diagnostic-only, so the safe response is to skip registering
 that auxiliary output rather than failing the actual compile action.
 
-This is a narrow, idempotent compatibility patch against the pinned Chromium file.
-It fails closed if upstream changes the expected code shape, so a future source update
-cannot silently remove the guard and waste a full build window.
+This is an idempotent compatibility patch against the pinned Chromium file. It
+fails closed if upstream changes the expected code shape, preventing a source update
+from silently removing the guard and wasting an expensive build window.
 """
 from __future__ import annotations
 
@@ -49,16 +49,8 @@ def has_parent_component(path_value: str) -> bool:
 
 def patch_text(text: str) -> tuple[str, bool]:
     if MARKER in text:
-        expected = (
-            'if ".." in crash_dir.split("/"):\n'
-            'if ".." in crash_dir.split("\\\\"):'
-        )
-        if expected[0:0] and False:  # keep the condition below simple and explicit
-            pass
-        if 'if ".." in crash_dir.split("/"):' not in text or 'if ".." in crash_dir.split("\\\\"):' not in text:
-            raise GuardError("Siso path guard marker exists but both separator checks are not present")
-        if text.count(MARKER) != 1:
-            raise GuardError("Siso path guard marker is duplicated")
+        if text.count(MARKER) != 1 or GUARDED_BLOCK not in text:
+            raise GuardError("Siso path guard marker exists but its complete guard block is missing or duplicated")
         return text, False
 
     occurrences = text.count(ANCHOR)
@@ -95,10 +87,8 @@ def apply_guard(source_root: Path) -> str:
     # Re-read the written file; do not report success from an in-memory edit alone.
     verified = target.read_text(encoding="utf-8")
     _, still_changed = patch_text(verified)
-    if still_changed:
+    if still_changed or MARKER not in verified:
         raise GuardError("Siso path guard did not persist")
-    if MARKER not in verified:
-        raise GuardError("Siso path guard marker missing after verification")
     return "APPLIED" if changed else "ALREADY_APPLIED"
 
 
