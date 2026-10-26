@@ -43,7 +43,9 @@ jobs:
               ci/bare/test_build_identity.py \
               ci/bare/stage_contract.py \
               ci/bare/test_stage_ledger.py \
-              ci/bare/test_state_handoff.py
+              ci/bare/test_state_handoff.py \
+              ci/bare/siso_evidence.py \
+              ci/bare/test_siso_evidence.py
             bash -n ci/bare/run_stage.sh
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
@@ -56,6 +58,7 @@ jobs:
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py
+            python3 ci/bare/test_siso_evidence.py
             python3 ci/bare/stage_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
@@ -155,6 +158,10 @@ jobs:
           name: Upload Siso metrics
           path: stage-<< parameters.stage_index >>-metrics.jsonl
           destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
+      - store_artifacts:
+          name: Upload Siso native output summary and action diagnostics
+          path: stage-<< parameters.stage_index >>-siso-output.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/siso-output.log
       - store_artifacts:
           name: Upload Chromium fetch log when present
           path: sandium-fetch.log
