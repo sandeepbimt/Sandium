@@ -83,7 +83,8 @@ jobs:
           assert "equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]" in config
           assert "- << pipeline.parameters.run_sandium_bare_apk_once >>" in config
           assert "default: true" not in config
-          assert "sandium-source-v2-" in config and "sandium-source-cache-fingerprint.txt" in config
+          assert "sandium-source-v3-" in config and "sandium-source-cache-fingerprint.txt" in config
+          assert "sandium-source-v2-" in config, "legacy source-cache prefix fallback must preserve the previously saved cache"
           assert "sandium-state-v3-" in config and "sandium-output-v3-" in config
           assert "sandium-verified-apk-v1-" in config
           assert "Save the completed or partial stage handoff after the stage actually ran" in config
@@ -140,7 +141,8 @@ jobs:
           assert ".circleci/config.yml" not in build_fingerprint, "routine pipeline config edits must not change build cache identity"
           assert ".circleci/config.yml" not in checkpoint, "routine pipeline config edits must not invalidate compatible output checkpoints"
           assert ".circleci/config.yml" not in source_fingerprint, "routine build pipeline edits must not force another Chromium sync"
-          assert "source-pin.txt" in source_fingerprint and "bootstrap_chromium.sh" in source_fingerprint
+          assert "source-pin.txt" in source_fingerprint and "bootstrap_chromium.sh" not in source_fingerprint, "source cache identity must not change for orchestration-only edits"
+          assert "SCHEMA = 2" in source_fingerprint and "PINNED_SOURCE_ONLY" in source_fingerprint
           assert "SANDIUM_STATE_HANDOFF_PREFLIGHT=PASS" in handoff
           assert "stage_ledger_sha256" in handoff
           assert "control_input_hash_mismatch" in handoff
