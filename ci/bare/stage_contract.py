@@ -11,10 +11,12 @@ STAGES = [
 def validate():
  errors=[]
  run_stage = __import__("pathlib").Path(__file__).with_name("run_stage.sh").read_text(encoding="utf-8")
- if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
-  errors.append("APK completion must fail closed without Siso remote/cache action proof")
- if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS" not in run_stage:
-  errors.append("final Siso metrics must be checked before rejecting missing early evidence")
+ if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" not in run_stage:
+  errors.append("APK completion must fail closed without final-log Siso remote action proof")
+ if 'siso_evidence.py" --require-remote --log "$LOG" --metrics "$METRICS"' not in run_stage:
+  errors.append("final Siso logs/metrics must be parsed using the reviewed evidence helper")
+ if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_LOGS" not in run_stage:
+  errors.append("positive final Siso log evidence must be recorded before build progress is accepted")
  if "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" not in run_stage:
   errors.append("fast exit must revalidate cached APK, manifest, ledger and status")
  if "cached APK differs from manifest" not in run_stage or "cached status/manifest mismatch" not in run_stage:
