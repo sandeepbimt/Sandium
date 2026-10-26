@@ -48,7 +48,8 @@ CONTROL_INPUTS = (
 )
 CRITICAL_ALWAYS = ("args.gn", "build.ninja")
 SISO_STATE_NAMES = (".siso_fs_state", ".siso_fs_state.0")
-OPTIONAL_STATE_NAMES = (".siso_fs_state.journal", ".ninja_log", ".ninja_deps")
+SISO_JOURNAL_STATE_NAMES = (".siso_fs_state.journal",)
+OPTIONAL_STATE_NAMES = (*SISO_JOURNAL_STATE_NAMES, ".ninja_log", ".ninja_deps")
 
 class CheckpointError(RuntimeError):
     pass
@@ -114,11 +115,18 @@ def output_manifest(output: Path) -> dict[str, str]:
                        and not (output / name).is_symlink()
                        and (output / name).stat().st_size > 0), None)
     if state_name is None:
-        raise CheckpointError("No nonempty regular Siso filesystem state file exists")
+        # On an interrupted first Siso build, the base file may not yet exist.
+        # Chromium Siso recovers filesystem updates from a nonempty journal on
+        # the next invocation, so preserve that journal as the filesystem state.
+        state_name = next((name for name in SISO_JOURNAL_STATE_NAMES if (output / name).is_file()
+                           and not (output / name).is_symlink()
+                           and (output / name).stat().st_size > 0), None)
+    if state_name is None:
+        raise CheckpointError("No nonempty regular Siso filesystem state or recovery journal exists")
     hashes[state_name] = sha256_file(output / state_name)
     for name in OPTIONAL_STATE_NAMES:
         path = output / name
-        if path.is_file() and not path.is_symlink() and path.stat().st_size:
+        if name not in hashes and path.is_file() and not path.is_symlink() and path.stat().st_size:
             hashes[name] = sha256_file(path)
     apk = output / "apks" / "ChromePublic.apk"
     if apk.is_file() and not apk.is_symlink() and apk.stat().st_size:
