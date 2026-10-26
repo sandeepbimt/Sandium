@@ -3,7 +3,9 @@ name: Validate Bare APK pipeline (no Chromium build)
 on:
   push:
     branches:
+      - build/bare-apk-once-20261025
       - fix/bare-stage-handoff-review
+      - fix/bare-pipeline-reuse-repair-20261026
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-bare-stage-pipeline.yml"
@@ -11,7 +13,7 @@ on:
       - "ci/siso/**"
   pull_request:
     branches:
-      - fix/bare-stage-handoff-review
+      - build/bare-apk-once-20261025
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-bare-stage-pipeline.yml"
@@ -27,11 +29,11 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate source, cache discovery and stage handoff (no build)
+    name: Validate full-output checkpoint handoff (no Chromium build)
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Checkout review branch
+      - name: Checkout repair branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -45,61 +47,99 @@ jobs:
             bash -n "$script"
             echo "BASH_SYNTAX=PASS file=$script"
           done
-          python3 -m py_compile ci/bare/*.py
+          python3 -m py_compile ci/bare/*.py ci/siso/*.py
           echo "PYTHON_SYNTAX=PASS"
 
-      - name: Run offline identity, handoff and stage-contract tests
+      - name: Run offline identity, cache, artifact and stage-contract tests
         shell: bash
         run: |
           set -euo pipefail
           python3 ci/bare/test_build_identity.py
           python3 ci/bare/test_stage_ledger.py
           python3 ci/bare/test_state_handoff.py
+          python3 ci/bare/test_output_checkpoint.py
+          python3 ci/bare/test_fast_apk.py
           python3 ci/bare/stage_contract.py
 
-      - name: Assert prior-run lookup and mandatory stage handoff are wired before sync
+      - name: Assert cache layers, fast APK exit and five-stage continuity
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import re
           from pathlib import Path
-          config = Path(".circleci/config.yml").read_text()
-          runner = Path("ci/bare/run_stage.sh").read_text()
-          bootstrap = Path("ci/bare/bootstrap_chromium.sh").read_text()
-          handoff = Path("ci/bare/state_handoff.py").read_text()
 
-          required_config = (
-              "Discover the latest useful run with matching Bare build inputs",
-              "sandium-siso-state-v1-",
-              "sandium-bare-apk-required:",
-              "APK_SIGNATURE_VERIFIED=true",
-              'checksum "sandium-control/ci/bare/state_handoff.py"',
-          )
-          for fragment in required_config:
-              assert fragment in config, "CircleCI config missing: " + fragment
+          config = Path(".circleci/config.yml").read_text(encoding="utf-8")
+          runner = Path("ci/bare/run_stage.sh").read_text(encoding="utf-8")
+          bootstrap = Path("ci/bare/bootstrap_chromium.sh").read_text(encoding="utf-8")
+          handoff = Path("ci/bare/state_handoff.py").read_text(encoding="utf-8")
+          checkpoint = Path("ci/bare/output_checkpoint.py").read_text(encoding="utf-8")
+          fast_apk = Path("ci/bare/fast_apk.py").read_text(encoding="utf-8")
+          build_fingerprint = Path("ci/bare/cache_fingerprint.py").read_text(encoding="utf-8")
+          source_fingerprint = Path("ci/bare/source_cache_fingerprint.py").read_text(encoding="utf-8")
 
-          assert "run_sandium_bare_apk_once" in config
-          assert "equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]" in config, "expensive APK workflow must be isolated to the dedicated build branch"
-          assert "equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]" not in config, "review branch must not be eligible for the expensive APK workflow"
-          assert "sandium-bare-v1-" not in config, "final APK gate still uses the obsolete cache namespace"
-          final_gate = config.split("  sandium-bare-apk-required:", 1)[1].split("\n\nworkflows:", 1)[0]
-          assert final_gate.index("- checkout:") < final_gate.index("- restore_cache:"), "final gate must checkout sandium-control before computing cache checksums"
-          for fragment in ("Sandium-debug-arm64.apk", "build-manifest.json", "hashlib.sha256", "artifact_sha256", "apksigner_verification", "archive.testzip()"):
-              assert fragment in final_gate, "final APK file verification missing: " + fragment
-          assert "python3 \"$STATE_TOOL\" preflight" in runner, "handoff preflight is not called"
-          assert runner.index(" preflight --root ") < runner.index('bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source'), "handoff preflight must happen before Chromium source sync"
+          assert "run_sandium_bare_apk_once:" in config
+          assert re.search(r"run_sandium_bare_apk_once:\s+type:\s+boolean\s+default:\s+false", config), "expensive build opt-in must default to false"
+          assert "equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]" in config
+          assert "- << pipeline.parameters.run_sandium_bare_apk_once >>" in config
+          assert "default: true" not in config
+          assert "sandium-source-v2-" in config and "sandium-source-cache-fingerprint.txt" in config
+          assert "sandium-state-v3-" in config and "sandium-output-v3-" in config
+          assert "sandium-verified-apk-v1-" in config
+          assert "Save the completed or partial stage handoff after the stage actually ran" in config
+          assert "Persist the lightweight current-stage APK and ledger state" not in config, "state cache must not be written before the stage executes"
+          assert "<<'PY'" not in config, "CircleCI config must not contain raw Python heredocs"
+          assert "sandium-build-output-checkpoint" in config
+          assert "teardown:" in config and "circleci-agent step halt" in config
+          fast_step = config.index("name: Reuse a verified APK before restoring the multi-gigabyte build output")
+          large_restore = config.index("Restore the best previous compiled-output checkpoint")
+          assert fast_step < large_restore, "APK fast-path check must precede large output restore"
+          assert config.index("Save the completed or partial stage handoff after the stage actually ran") > config.index("Build one bounded incremental window"), "stage state must be saved after build output/status is produced"
+          assert config.index("Compute the build cache fingerprint before final artifact restore") < config.index("Restore final-stage source-bound ledger"), "final gate must generate its cache key fingerprint before restore"
+          assert config.index("SANDIUM_FINAL_APK_GATE=PASS") < config.index("Publish a verified APK cache for future five-stage fast paths"), "verified APK cache must only be saved after final validation"
+          assert config.index("Save the synchronized source tree") < config.index("Build one bounded incremental window"), "source cache must be created before GN output"
+          assert config.index("Start the full stage budget clock") < config.index("restore_cache:"), "stage budget must include setup and restores"
+          assert 'sandium-state-v2-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's Stage 5 state"
+
+          assert "SANDIUM_OUTPUT_CHECKPOINT=RESTORED" in checkpoint
+          assert '"local_compiled_outputs_restored": True' in checkpoint
+          assert 'META_NAME = ".sandium-output-checkpoint.meta.json"' in checkpoint
+          assert "SANDIUM_APK_FAST_PATH=PASS" in fast_apk
+          assert "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" in fast_apk
+          assert "subprocess.run" not in fast_apk, "cached APK fast path must not claim to rerun apksigner"
+          assert "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" in runner
+          assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('bootstrap_chromium.sh" configure') < runner.index('test -s "$SDIR/.sisoenv"'), "source-only preparation must not require GN-generated Siso files"
+          assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
+          assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
+          assert "WAIT -lt 240" not in runner and 'kill -INT -- "$PID"' not in runner
+          assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" in runner
+          assert "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW" in runner
+          assert "epoch_946684800_regular_files_v1" in runner
+          assert 'find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch' in runner
+          assert 'test -s "$ROOT/.gclient_entries"' in bootstrap
+          assert "SANDIUM_SOURCE_CACHE=HIT_VALIDATED" in bootstrap
+          assert "ci/bare/source_cache_fingerprint.py" in build_fingerprint
+          assert ".circleci/config.yml" in build_fingerprint
+          assert ".circleci/config.yml" not in source_fingerprint, "routine build pipeline edits must not force another Chromium sync"
+          assert "source-pin.txt" in source_fingerprint and "bootstrap_chromium.sh" in source_fingerprint
           assert "SANDIUM_STATE_HANDOFF_PREFLIGHT=PASS" in handoff
-          assert "SANDIUM_STATE_HANDOFF=RESTORED" in handoff
-          assert "SANDIUM_STATE_HANDOFF_PACK=PASS" in handoff
           assert "stage_ledger_sha256" in handoff
           assert "control_input_hash_mismatch" in handoff
-          assert '(cd "$CHROMIUM_SRC" && sudo ./build/install-build-deps.sh --android)' in bootstrap, "Android dependency installer must run from Chromium source root"
-          assert 'test -s "$CHROMIUM_SRC/.gn"' in bootstrap, "Chromium .gn root marker must be checked before package install"
-          assert "sandium-bare-checkpoint.tar.zst" not in config, "full Chromium output checkpoint must not be stored in CircleCI cache"
-          print("PRIOR_USEFUL_RUN_DISCOVERY=WIRED")
-          print("STAGE_TO_STAGE_STATE_HANDOFF=REQUIRED")
-          print("GN_SOURCE_ROOT_FIX=WIRED")
-          print("CIRCLECI_CACHE_POLICY=SMALL_STATE_CAPSULE_AND_VERIFIED_APK_ONLY")
+          assert '(cd "$CHROMIUM_SRC" && sudo ./build/install-build-deps.sh --android)' in bootstrap
+          assert 'test -s "$CHROMIUM_SRC/.gn"' in bootstrap
+          assert 'SANDIUM_GN_GENERATION_CWD=$CHROMIUM_SRC' in bootstrap
+          assert '(cd "$CHROMIUM_SRC" && "$GN" gen "$OUT"' in bootstrap
+
+          # The verified APK is an independent cross-run cache. Output checkpoints
+          # and state handoffs use distinct immutable key generations.
+          assert config.index("sandium-verified-apk-v1-") < config.index("sandium-output-v3-")
+          assert config.index("Save the full compiled output checkpoint for stage-to-stage and cross-run reuse") < config.index("Save the completed or partial stage handoff after the stage actually ran")
+          print("SOURCE_CACHE_LAYER=PASS")
+          print("LIGHTWEIGHT_VERIFIED_APK_FAST_PATH=PASS")
+          print("FULL_COMPILED_OUTPUT_CHECKPOINT=PASS")
+          print("SISO_EVIDENCE_GATE=PASS")
+          print("EXPLICIT_EXPENSIVE_BUILD_OPT_IN=PASS")
+          print("CHROMIUM_BUILD_STARTED=no")
           PY
 
       - name: Validate CircleCI configuration schema (configuration only)
