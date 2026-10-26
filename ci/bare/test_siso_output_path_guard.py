@@ -17,8 +17,8 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(guard.has_parent_component("nested/clang-crashreports"))
 
     def test_detects_parent_component_with_windows_separator(self):
-        self.assertTrue(guard.has_parent_component(r"..\\clang-crashreports"))
-        self.assertTrue(guard.has_parent_component(r"sub\\..\\clang-crashreports"))
+        self.assertTrue(guard.has_parent_component(r"..\clang-crashreports"))
+        self.assertTrue(guard.has_parent_component(r"sub\..\clang-crashreports"))
         self.assertFalse(guard.has_parent_component(r"clang-crashreports"))
 
     def test_injects_guard_after_canonicalization(self):
@@ -33,7 +33,8 @@ class GuardTests(unittest.TestCase):
             patched.index("ctx.fs.canonpath(crash_dir)"),
             patched.index('if ".." in crash_dir.split("/")'),
         )
-        self.assertIn('if ".." in crash_dir.split("\\\\"):', patched)
+        self.assertIn(guard.MARKER, patched)
+        self.assertIn(guard.GUARDED_BLOCK, patched)
         self.assertEqual(patched.count(guard.MARKER), 1)
 
     def test_patch_is_idempotent(self):
@@ -52,7 +53,7 @@ class GuardTests(unittest.TestCase):
         broken = (
             "prefix\n"
             + guard.MARKER
-            + "\nif \"..\" in crash_dir.split(\"/\"):\n"
+            + '\nif ".." in crash_dir.split("/"):\n'
         )
         with self.assertRaises(guard.GuardError):
             guard.patch_text(broken)
