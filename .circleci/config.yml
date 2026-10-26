@@ -220,7 +220,11 @@ jobs:
       - restore_cache:
           name: Restore the pinned Chromium/Bare source and dependency cache
           keys:
-            - sandium-source-v2-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
+            # Stable key: pinned source identity only, unaffected by CI-script edits.
+            - sandium-source-v3-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
+            # Compatibility fallback for the already-saved 17 GiB v2 source cache.
+            # Bootstrap pin checks still validate restored source before use.
+            - sandium-source-v2-
       - run:
           name: Fail closed if a continuation stage lost its source cache
           command: |
@@ -250,7 +254,7 @@ jobs:
           steps:
             - save_cache:
                 name: Save the synchronized source tree before generated build output exists
-                key: sandium-source-v2-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
+                key: sandium-source-v3-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
                 paths:
                   - src
                   - .gclient
