@@ -46,6 +46,7 @@ python3 "$CONTROL/ci/bare/test_state_handoff.py"
 python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
 python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/test_manifest_preflight.py"
+python3 "$CONTROL/ci/bare/test_normalize_progress_total.py"
 python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
@@ -303,7 +304,14 @@ if pgrep -x siso >/dev/null 2>&1; then echo SISO_SHUTDOWN=FAILED >&2; pkill -TER
 
 grep -oE '\[[[:space:]]*[0-9]+/[0-9]+\]' "$LOG" 2>/dev/null | sed -E 's/\[//;s/\]//;s/[[:space:]]//g' > "$ROOT/progress-$STAGE.txt" || true
 DONE="$(awk -F/ 'BEGIN{m=0} NF==2 && $1+0>m {m=$1+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
-TOTAL="$(awk -F/ 'BEGIN{m=0} NF==2 && $2+0>m {m=$2+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
+OBSERVED_TOTAL="$(awk -F/ 'BEGIN{m=0} NF==2 && $2+0>m {m=$2+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
+if [[ "$STAGE" -eq 1 ]]; then
+  TOTAL="$(python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage "$STAGE" --observed-total "$OBSERVED_TOTAL" --control "$CONTROL" --root "$ROOT")"
+else
+  TOTAL="$(python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage "$STAGE" --observed-total "$OBSERVED_TOTAL" --previous-ledger "$PREV" --control "$CONTROL" --root "$ROOT")"
+fi
+echo "SANDIUM_OBSERVED_TOTAL_ACTION_COUNT=$OBSERVED_TOTAL"
+echo "SANDIUM_NORMALIZED_TOTAL_ACTION_COUNT=$TOTAL"
 APK="$OUT/apks/ChromePublic.apk"; COMPLETE=false
 if [[ -s "$APK" ]]; then bash "$CONTROL/ci/bare/package_artifact.sh"; COMPLETE=true; fi
 if [[ "$STAGE" -eq 1 ]]; then
