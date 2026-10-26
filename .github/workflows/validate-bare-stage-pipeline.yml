@@ -63,6 +63,7 @@ jobs:
           python3 ci/bare/test_fast_apk.py
           python3 ci/bare/test_siso_output_path_guard.py
           python3 ci/bare/test_manifest_preflight.py
+          python3 ci/bare/test_normalize_progress_total.py
           python3 ci/bare/stage_contract.py
 
       - name: Assert cache layers, fast APK exit and five-stage continuity
@@ -149,7 +150,10 @@ jobs:
           assert 'manifest_preflight.py"' in runner and runner.index('manifest_preflight.py"') < runner.index('timeout --signal=INT --kill-after=60s'), "manifest must be stabilized before timed compilation"
           assert "SANDIUM_NINJA_REGENERATION_DURING_BUILD=OBSERVED_NONFATAL" in runner
           assert '"-n"' in manifest_preflight and "two consecutive dry runs" in manifest_preflight
-          assert "MAX_GRAPH_TOTAL_DRIFT = 0.01" in Path("ci/bare/stage_ledger.py").read_text(encoding="utf-8")
+          normalizer = Path("ci/bare/normalize_progress_total.py").read_text(encoding="utf-8")
+          assert "MAX_GRAPH_TOTAL_DRIFT = 0.01" in normalizer
+          assert "build identity differs" in normalizer
+          assert 'normalize_progress_total.py"' in runner and runner.index('normalize_progress_total.py"') < runner.index('stage_ledger.py" --stage')
           assert "epoch_946684800_regular_files_v1" in runner
           assert 'find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch' in runner
           assert 'test -s "$ROOT/.gclient_entries"' in bootstrap
