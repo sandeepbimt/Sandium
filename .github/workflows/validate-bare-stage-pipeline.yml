@@ -95,7 +95,7 @@ jobs:
               marker = f"name: Restore Stage {predecessor} APK/status metadata"
               start = config.index(marker)
               ends = [
-                  index for token in ("      - when:\\n", "      - restore_cache:\\n", "      - run:\\n")
+                  index for token in ("      - when:", "      - restore_cache:", "      - run:")
                   if (index := config.find(token, start + len(marker))) >= 0
               ]
               end = min(ends)
