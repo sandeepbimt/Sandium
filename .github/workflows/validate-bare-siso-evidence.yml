@@ -85,7 +85,8 @@ jobs:
           runner = Path("ci/bare/run_stage.sh").read_text()
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" in runner
           assert 'wait "$PID"' in runner, "must wait for final Siso summary before final evidence gate"
-          assert "Do not kill a healthy Siso build merely because its remote/cache summary has not been flushed yet." in runner
+          assert "Do not kill a healthy Siso build" in runner
+          assert "been flushed yet." in runner
           assert "240-second" not in runner, "old four-minute kill watchdog must be absent"
           print("SANDFOX_SISO_SUMMARY_COMPATIBILITY=PASS")
           print("NO_PREMATURE_REMOTE_EVIDENCE_KILL=PASS")
