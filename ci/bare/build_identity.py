@@ -71,6 +71,7 @@ def read_pins(control: Path) -> dict[str, str]:
     required = {
         "schema", "bare_repository", "bare_commit", "chromium_commit",
         "chromium_version", "target_abi", "build_config", "artifact_name",
+        "toolchain_depot_tools_commit",
     }
     if required - values.keys():
         raise IdentityError("Source pin file lacks required fields: " + ",".join(sorted(required - values.keys())))
@@ -80,6 +81,8 @@ def read_pins(control: Path) -> dict[str, str]:
         raise IdentityError("Bare commit pin is not a full SHA")
     if not re.fullmatch(r"[0-9a-f]{40}", values["chromium_commit"]):
         raise IdentityError("Chromium commit pin is not a full SHA")
+    if not re.fullmatch(r"[0-9a-f]{40}", values["toolchain_depot_tools_commit"]):
+        raise IdentityError("depot_tools commit pin is not a full SHA")
     if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", values["chromium_version"]):
         raise IdentityError("Chromium version pin is invalid")
     return values
@@ -179,6 +182,13 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
     if not siso:
         raise IdentityError("Siso returned an empty version")
 
+    toolchain_commit = git(Path.home() / "depot_tools", "rev-parse", "HEAD")
+    if toolchain_commit != pins["toolchain_depot_tools_commit"]:
+        raise IdentityError(
+            "depot_tools pin mismatch: expected "
+            + pins["toolchain_depot_tools_commit"] + ", got " + toolchain_commit
+        )
+
     return {
         "schema": 1,
         "source": "Bare",
@@ -194,7 +204,7 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
         "target": TARGET,
         "target_abi": pins["target_abi"],
         "build_config": pins["build_config"],
-        "toolchain_depot_tools_commit": git(Path.home() / "depot_tools", "rev-parse", "HEAD"),
+        "toolchain_depot_tools_commit": toolchain_commit,
         "siso_version": siso.splitlines()[0][:500],
         "gn_args_sha256": args_digest.hexdigest() if effective_args else None,
         "gclient_sha256": sha256(gclient),
