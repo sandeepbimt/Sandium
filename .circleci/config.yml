@@ -1,11 +1,10 @@
 version: 2.1
 
 # SANDIUM BARE-ONLY CI CONTRACT
-# This branch intentionally exposes only a source-level preflight. The full
-# five-stage build is not ready until source/output persistence and cache handover
-# are proven. Do not copy old source-specific workflows into this config.
-# Existing CircleCI project, BuildBuddy endpoint/instance, protected secret
-# assignment and cache service are reused; no credentials or caches are recreated.
+# Five-stage Bare APK attempt; each stage is source-pinned, time-bounded and
+# publishes source-sync, Git trace, Siso, metrics and artifact diagnostics.
+# Existing CircleCI project, BuildBuddy endpoint/instance and protected secret
+# assignment are reused; no credentials are recreated or caches are deleted.
 
 parameters:
   run_sandium_bare_source_preflight:
@@ -39,10 +38,12 @@ jobs:
               ci/bare/configure_siso.py \
               ci/bare/checkpoint.py \
               ci/bare/stage_ledger.py \
+              ci/bare/state_handoff.py \
               ci/bare/write_cache_identity.py \
               ci/bare/test_build_identity.py \
               ci/bare/stage_contract.py \
-              ci/bare/test_stage_ledger.py
+              ci/bare/test_stage_ledger.py \
+              ci/bare/test_state_handoff.py
             bash -n ci/bare/run_stage.sh
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
@@ -51,8 +52,10 @@ jobs:
             python3 ci/bare/configure_siso.py --help >/dev/null
             python3 ci/bare/checkpoint.py --help >/dev/null
             python3 ci/bare/stage_ledger.py --help >/dev/null
+            python3 ci/bare/state_handoff.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
+            python3 ci/bare/test_state_handoff.py
             python3 ci/bare/stage_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
@@ -78,26 +81,12 @@ jobs:
             echo "CHROMIUM_CHECKOUT_CREATED=no"
             echo "EXISTING_CACHE_DATA_MODIFIED=no"
 
-  sandium-bare-build-not-ready:
-    docker:
-      - image: cimg/python:3.12
-    working_directory: ~/project
-    steps:
-      - run:
-          name: Fail closed until the Bare five-stage pipeline is reviewed
-          command: |
-            echo "SANDIUM_BARE_FULL_BUILD=BLOCKED"
-            echo "Reason: the five-stage workflow has not yet been wired to the Bare source identity/checkpoint adapters."
-            echo "The current CircleCI account's ability to persist the Chromium source and build output within existing limits is not proven."
-            echo "No Chromium sync, compilation, APK packaging, credential mutation or cache deletion was attempted."
-            exit 78
-
   sandium-bare-build-stage:
     parameters:
       stage_index:
         type: integer
     machine:
-      image: ubuntu-2404:current
+      image: ubuntu-2204:current
     resource_class: large
     working_directory: ~/project
     steps:
@@ -105,60 +94,96 @@ jobs:
           path: sandium-control
       - when:
           condition:
-            not:
-              equal: [1, << parameters.stage_index >>]
+            equal: [1, << parameters.stage_index >>]
           steps:
-            - attach_workspace:
-                at: .
-      - run:
-          name: Record bounded stage start time
-          command: |
-            set -euo pipefail
-            echo "export STAGE_START_TS=$(date +%s)" >> "$BASH_ENV"
-            echo "SANDIUM_STAGE_INDEX=<< parameters.stage_index >>"
+            - restore_cache:
+                name: Discover the latest useful run with matching Bare build inputs
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
       - when:
           condition:
-            not:
-              equal: [1, << parameters.stage_index >>]
+            equal: [2, << parameters.stage_index >>]
           steps:
-            - run:
-                name: Skip later stages if the APK is already verified
-                command: |
-                  set -euo pipefail
-                  STATUS="$HOME/project/ci-handoff/stage-$((<< parameters.stage_index >>-1))/status.txt"
-                  if grep -qx 'BUILD_FINISHED=true' "$STATUS"; then
-                    cat "$STATUS"
-                    echo "SANDIUM_APK_FAST_EXIT=true"
-                    circleci-agent step halt
-                  fi
+            - restore_cache:
+                name: Restore previous stage 1 ledger
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1-
+      - when:
+          condition:
+            equal: [3, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore previous stage 2 ledger
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2-
+      - when:
+          condition:
+            equal: [4, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore previous stage 3 ledger
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3-
+      - when:
+          condition:
+            equal: [5, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore previous stage 4 ledger
+                keys:
+                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4-
       - run:
-          name: Run source-pinned Siso compilation slice
+          name: Run Bare Android APK stage << parameters.stage_index >> of 5
           no_output_timeout: 50m
           command: |
             set -euo pipefail
+            export STAGE_START_TS="$(date +%s)"
             bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
-      - when:
-          condition: always
-          steps:
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-driver.log
-                destination: sandium-build/stage-<< parameters.stage_index >>/driver.log
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-siso.log
-                destination: sandium-build/stage-<< parameters.stage_index >>/siso.log
-            - store_artifacts:
-                path: stage-<< parameters.stage_index >>-metrics.jsonl
-                destination: sandium-build/stage-<< parameters.stage_index >>/siso-metrics.jsonl
-            - store_artifacts:
-                path: ci-handoff/stage-<< parameters.stage_index >>
-                destination: sandium-build/stage-<< parameters.stage_index >>/ledger-status
-            - store_artifacts:
-                path: sandium-output
-                destination: sandium-build/stage-<< parameters.stage_index >>/artifact-and-manifest
-      - persist_to_workspace:
-          root: .
+      - save_cache:
+          name: Save Siso state capsule, verified APK (if any), and stage ledger
+          key: sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>-{{ .BuildNum }}
           paths:
+            - sandium-stage-state.tar.zst
+            - sandium-stage-state.meta
             - ci-handoff/stage-<< parameters.stage_index >>
+            - sandium-output
+      - store_artifacts:
+          name: Upload stage driver and Siso logs
+          path: stage-<< parameters.stage_index >>-driver.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/driver.log
+      - store_artifacts:
+          name: Upload Siso metrics
+          path: stage-<< parameters.stage_index >>-metrics.jsonl
+          destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
+      - store_artifacts:
+          name: Upload Chromium fetch log when present
+          path: sandium-fetch.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/fetch.log
+      - store_artifacts:
+          name: Upload gclient sync log when present
+          path: sandium-gclient-sync.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/gclient-sync.log
+      - store_artifacts:
+          name: Upload gclient configuration log
+          path: sandium-gclient-config.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/gclient-config.log
+      - store_artifacts:
+          name: Upload Git subprocess trace
+          path: sandium-git-trace.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/git-trace.log
+      - store_artifacts:
+          name: Upload state handoff report
+          path: sandium-state-handoff-report.json
+          destination: diagnostics/stage-<< parameters.stage_index >>/state-handoff-report.json
+      - store_artifacts:
+          name: Upload build output and handoff ledger
+          path: ci-handoff/stage-<< parameters.stage_index >>
+          destination: diagnostics/stage-<< parameters.stage_index >>/handoff
+      - store_artifacts:
+          name: Upload packaged APK and manifest when available
+          path: sandium-output
+          destination: artifacts/stage-<< parameters.stage_index >>
+
 
   sandium-bare-apk-required:
     docker:
@@ -167,22 +192,61 @@ jobs:
     steps:
       - checkout:
           path: sandium-control
-      - attach_workspace:
-          at: .
+      - restore_cache:
+          name: Restore final-stage source-bound ledger
+          keys:
+            - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-5-
       - run:
-          name: Require a verified APK from one of the five stages
+          name: Require a verified APK from the five-stage build
           command: |
             set -euo pipefail
-            for stage in 1 2 3 4 5; do
-              STATUS="$HOME/project/ci-handoff/stage-$stage/status.txt"
-              if grep -qx 'BUILD_FINISHED=true' "$STATUS" 2>/dev/null; then
-                cat "$STATUS"
-                echo "SANDIUM_FINAL_APK_GATE=PASS stage=$stage"
-                exit 0
-              fi
-            done
-            echo "SANDIUM_FINAL_APK_GATE=FAIL no stage produced a signature-verified APK." >&2
-            exit 1
+            STATUS="$HOME/project/ci-handoff/stage-5/status.txt"
+            test -s "$STATUS" || { echo "SANDIUM_FINAL_APK_GATE=FAIL missing stage-5 status" >&2; exit 1; }
+            cat "$STATUS"
+            grep -qx "BUILD_FINISHED=true" "$STATUS" || { echo "SANDIUM_FINAL_APK_GATE=FAIL no verified APK after five stages" >&2; exit 1; }
+            grep -qx "APK_ARCHIVE_VALID=true" "$STATUS"
+            grep -qx "APK_SIGNATURE_VERIFIED=true" "$STATUS"
+            APK="$HOME/project/sandium-output/Sandium-debug-arm64.apk"
+            MANIFEST="$HOME/project/sandium-output/build-manifest.json"
+            test -s "$APK" || { echo "SANDIUM_FINAL_APK_GATE=FAIL APK file is missing" >&2; exit 1; }
+            test -s "$MANIFEST" || { echo "SANDIUM_FINAL_APK_GATE=FAIL build manifest is missing" >&2; exit 1; }
+            python3 - "$STATUS" "$APK" "$MANIFEST" <<'PY'
+            import hashlib, json, sys, zipfile
+            from pathlib import Path
+
+            status_path, apk_path, manifest_path = map(Path, sys.argv[1:4])
+            status = {}
+            for line in status_path.read_text(encoding="utf-8").splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    status[key] = value
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            digest = hashlib.sha256(apk_path.read_bytes()).hexdigest()
+            size = apk_path.stat().st_size
+            if size < 1_000_000:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK is unexpectedly small")
+            if status.get("APK_SHA256") != digest or status.get("APK_SIZE_BYTES") != str(size):
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK hash/size differs from stage status")
+            if manifest.get("artifact_sha256") != digest or manifest.get("artifact_bytes") != size:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK hash/size differs from manifest")
+            identity = manifest.get("build_identity_sha256")
+            if not identity or status.get("BUILD_IDENTITY_SHA256") != identity:
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL build identity differs between status and manifest")
+            if manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification") != "PASS":
+                raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL manifest lacks recorded APK signature verification")
+            with zipfile.ZipFile(apk_path) as archive:
+                if archive.testzip() is not None:
+                    raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK ZIP integrity check failed")
+                names = set(archive.namelist())
+                if "AndroidManifest.xml" not in names or not any(name.startswith("classes") and name.endswith(".dex") for name in names):
+                    raise SystemExit("SANDIUM_FINAL_APK_GATE=FAIL APK is missing AndroidManifest.xml or DEX")
+            print("SANDIUM_FINAL_APK_FILE=PASS")
+            print("SANDIUM_FINAL_APK_HASH_SIZE=PASS")
+            print("SANDIUM_FINAL_APK_BUILD_IDENTITY=PASS")
+            print("SANDIUM_FINAL_APK_SIGNATURE_RECORD=PASS")
+            print("SANDIUM_FINAL_APK_ZIP_STRUCTURE=PASS")
+            PY
+            echo "SANDIUM_FINAL_APK_GATE=PASS"
 
 
 workflows:
@@ -191,16 +255,8 @@ workflows:
     jobs:
       - sandium-bare-source-preflight
 
-  sandium-bare-android-apk:
-    when:
-      and:
-        - << pipeline.parameters.run_sandium_bare_source_ready >>
-        - << pipeline.parameters.run_sandium_bare_android_apk_build >>
-    jobs:
-      - sandium-bare-build-not-ready
-
-  # Explicitly isolated, single-use build lane. All ordinary branches and workflows
-  # remain fail-closed; only pushing this dedicated branch starts this APK attempt.
+  # Expensive APK builds are isolated to the dedicated build branch and require
+  # an explicit pipeline parameter; review-branch pushes cannot launch them.
   sandium-bare-apk-once:
     when:
       and:

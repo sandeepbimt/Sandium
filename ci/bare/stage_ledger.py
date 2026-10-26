@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate source-bound Siso/BuildBuddy execution and cross-stage progress."""
 from __future__ import annotations
-import argparse, hashlib, json, re, sys
+import argparse, hashlib, json, os, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_identity import IdentityError, control_and_workspace, read_pins, source_identity, verify_apk
@@ -103,6 +103,7 @@ def main() -> int:
     p.add_argument("--root", type=Path); p.add_argument("--completed-actions", type=int, required=True)
     p.add_argument("--total-actions", type=int, required=True); p.add_argument("--apk", type=Path)
     p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_full_tree_v1")
+    p.add_argument("--state-handoff-report", type=Path, required=True)
     a = p.parse_args()
     control, inferred_root = control_and_workspace(Path(__file__))
     root = a.root.resolve() if a.root else inferred_root
@@ -116,6 +117,23 @@ def main() -> int:
         if previous.get("stage") != a.stage - 1: raise IdentityError("Stage order mismatch")
         if previous.get("build_identity_sha256") != ident_hash: raise IdentityError("Source/toolchain/GN/Siso identity changed across stages")
         if previous.get("source_timestamp_policy") != a.source_timestamp_policy: raise IdentityError("Source timestamp policy changed across stages")
+    if not a.state_handoff_report.is_file() or a.state_handoff_report.is_symlink():
+        raise IdentityError("State handoff report missing/unsafe; stage continuity cannot be claimed")
+    try:
+        handoff = json.loads(a.state_handoff_report.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise IdentityError("State handoff report is invalid JSON") from exc
+    if not isinstance(handoff, dict):
+        raise IdentityError("State handoff report must be a JSON object")
+    if a.stage > 1:
+        if handoff.get("SANDIUM_STATE_HANDOFF") != "RESTORED":
+            raise IdentityError("Later stage must restore the immediately preceding stage's Siso state")
+        if handoff.get("source_stage") != a.stage - 1 or handoff.get("source_workflow_id") != os.environ.get("CIRCLE_WORKFLOW_ID", "unknown"):
+            raise IdentityError("State handoff does not originate from the immediately preceding stage in this workflow")
+        if handoff.get("build_identity_sha256") != ident_hash:
+            raise IdentityError("State handoff build identity differs from current stage")
+    elif handoff.get("SANDIUM_STATE_HANDOFF") not in ("RESTORED", "MISS"):
+        raise IdentityError("Stage 1 must explicitly record prior-run discovery outcome")
     metrics = parse_metrics(a.metrics, a.siso_log)
     artifact = {}; complete = False
     if a.apk and a.manifest and a.apk.is_file():
@@ -132,7 +150,8 @@ def main() -> int:
               "metrics": metrics, "siso_metrics_sha256": sha(a.metrics) if a.metrics.is_file() else None,
               "siso_log_sha256": sha(a.siso_log) if a.siso_log.is_file() else None,
               "max_completed_actions": a.completed_actions, "total_action_count": a.total_actions,
-              "evidence": evidence, "local_build_output_restored": False, **artifact}
+              "evidence": evidence, "local_build_output_restored": False,
+              "state_handoff": handoff, "state_handoff_report_sha256": sha(a.state_handoff_report), **artifact}
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"SANDIUM_STAGE_LEDGER=PASS stage={a.stage}")
