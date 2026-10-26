@@ -33,17 +33,7 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            python3 -m py_compile \
-              ci/bare/build_identity.py \
-              ci/bare/configure_siso.py \
-              ci/bare/checkpoint.py \
-              ci/bare/stage_ledger.py \
-              ci/bare/state_handoff.py \
-              ci/bare/write_cache_identity.py \
-              ci/bare/test_build_identity.py \
-              ci/bare/stage_contract.py \
-              ci/bare/test_stage_ledger.py \
-              ci/bare/test_state_handoff.py
+            python3 -m py_compile ci/bare/*.py ci/siso/*.py
             bash -n ci/bare/run_stage.sh
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
@@ -53,9 +43,15 @@ jobs:
             python3 ci/bare/checkpoint.py --help >/dev/null
             python3 ci/bare/stage_ledger.py --help >/dev/null
             python3 ci/bare/state_handoff.py --help >/dev/null
+            python3 ci/bare/output_checkpoint.py --help >/dev/null
+            python3 ci/bare/fast_apk.py --help >/dev/null
+            python3 ci/bare/cache_fingerprint.py --help >/dev/null
+            python3 ci/bare/source_cache_fingerprint.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py
+            python3 ci/bare/test_output_checkpoint.py
+            python3 ci/bare/test_fast_apk.py
             python3 ci/bare/stage_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
@@ -92,63 +88,249 @@ jobs:
     steps:
       - checkout:
           path: sandium-control
+      - run:
+          name: Start the full stage budget clock before any cache restore
+          command: |
+            set -euo pipefail
+            date +%s > "$HOME/project/.sandium-stage-start-epoch"
+            echo "SANDIUM_STAGE_INDEX=<< parameters.stage_index >>"
+            echo "SANDIUM_STAGE_LIMIT_SECONDS=$([[ "<< parameters.stage_index >>" == "5" ]] && echo 3300 || echo 2820)"
+            echo "SANDIUM_EXPENSIVE_APK_OPT_IN=EXPLICIT_PIPELINE_PARAMETER_REQUIRED"
+      - run:
+          name: Fingerprint source and build cache inputs
+          command: |
+            set -euo pipefail
+            cd "$HOME/project"
+            python3 sandium-control/ci/bare/source_cache_fingerprint.py --root "$HOME/project"
+            python3 sandium-control/ci/bare/cache_fingerprint.py --root "$HOME/project"
       - when:
           condition:
             equal: [1, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Discover the latest useful run with matching Bare build inputs
+                name: Prefer a saved verified APK from the most advanced compatible stage
                 keys:
-                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-
+                  - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
             equal: [2, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore previous stage 1 ledger
+                name: Restore Stage 1 APK/status metadata
                 keys:
-                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-1-
+                  - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore previous stage 2 ledger
+                name: Restore Stage 2 APK/status metadata
                 keys:
-                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-2-
+                  - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore previous stage 3 ledger
+                name: Restore Stage 3 APK/status metadata
                 keys:
-                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-3-
+                  - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore previous stage 4 ledger
+                name: Restore Stage 4 APK/status metadata
                 keys:
-                  - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-4-
+                  - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - run:
-          name: Run Bare Android APK stage << parameters.stage_index >> of 5
+          name: Reuse a verified APK before restoring the multi-gigabyte build output
+          command: |
+            set -euo pipefail
+            set +e
+            python3 "$HOME/project/sandium-control/ci/bare/fast_apk.py" \
+              --root "$HOME/project" \
+              --stage "<< parameters.stage_index >>" \
+              --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 0 ]]; then
+              echo "SANDIUM_VERIFIED_APK_FAST_EXIT=true"
+              circleci-agent step halt
+            fi
+            if [[ "$rc" -eq 1 ]]; then
+              echo "SANDIUM_VERIFIED_APK_FAST_EXIT=false"
+              exit 0
+            fi
+            echo "SANDIUM_VERIFIED_APK_FAST_EXIT=FAIL" >&2
+            exit "$rc"
+      - when:
+          condition:
+            equal: [1, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore the best previous compiled-output checkpoint, stage 5 first
+                keys:
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+      - when:
+          condition:
+            equal: [2, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore full compiled outputs from this workflow's Stage 1
+                keys:
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+      - when:
+          condition:
+            equal: [3, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore full compiled outputs from this workflow's Stage 2
+                keys:
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+      - when:
+          condition:
+            equal: [4, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore full compiled outputs from this workflow's Stage 3
+                keys:
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+      - when:
+          condition:
+            equal: [5, << parameters.stage_index >>]
+          steps:
+            - restore_cache:
+                name: Restore full compiled outputs from this workflow's Stage 4
+                keys:
+                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+      - restore_cache:
+          name: Restore the pinned Chromium/Bare source and dependency cache
+          keys:
+            - sandium-source-v2-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
+      - run:
+          name: Fail closed if a continuation stage lost its source cache
+          command: |
+            set -euo pipefail
+            if [[ "<< parameters.stage_index >>" -gt 1 ]]; then
+              test -d "$HOME/project/src/.git" || { echo "SANDIUM_SOURCE_CACHE=FAIL missing Chromium .git; refusing repeated cold sync" >&2; exit 42; }
+              test -d "$HOME/project/bare-browser/.git" || { echo "SANDIUM_SOURCE_CACHE=FAIL missing pinned Bare checkout; refusing repeated cold sync" >&2; exit 42; }
+              test -s "$HOME/project/.gclient" || { echo "SANDIUM_SOURCE_CACHE=FAIL missing .gclient; refusing repeated cold sync" >&2; exit 42; }
+              test -s "$HOME/project/.gclient_entries" || { echo "SANDIUM_SOURCE_CACHE=FAIL missing .gclient_entries; refusing repeated cold sync" >&2; exit 42; }
+              test -x "$HOME/depot_tools/gclient" || { echo "SANDIUM_SOURCE_CACHE=FAIL missing depot_tools; refusing repeated cold sync" >&2; exit 42; }
+              echo "SANDIUM_SOURCE_CACHE=PASS continuation source reuse"
+            elif [[ -d "$HOME/project/src/.git" ]]; then
+              test -s "$HOME/project/.gclient" && test -s "$HOME/project/.gclient_entries" || { echo "SANDIUM_SOURCE_CACHE=FAIL incomplete restored source cache" >&2; exit 42; }
+              echo "SANDIUM_SOURCE_CACHE=HIT stage-1"
+            else
+              echo "SANDIUM_SOURCE_CACHE=MISS stage-1 cold source sync is permitted once"
+            fi
+      - run:
+          name: Validate or prepare pinned Chromium source without configuring GN
           no_output_timeout: 50m
           command: |
             set -euo pipefail
-            export STAGE_START_TS="$(date +%s)"
+            bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" --prepare-source "<< parameters.stage_index >>"
+      - when:
+          condition:
+            equal: [1, << parameters.stage_index >>]
+          steps:
+            - save_cache:
+                name: Save the synchronized source tree before generated build output exists
+                key: sandium-source-v2-{{ checksum "sandium-control/.sandium-source-cache-fingerprint.txt" }}
+                paths:
+                  - src
+                  - .gclient
+                  - .gclient_entries
+                  - bare-browser
+                  - /home/circleci/depot_tools
+      - run:
+          name: Build one bounded incremental window of the pinned Bare APK
+          no_output_timeout: 50m
+          command: |
+            set -euo pipefail
             bash "$HOME/project/sandium-control/ci/bare/run_stage.sh" "<< parameters.stage_index >>"
-      - save_cache:
-          name: Save Siso state capsule, verified APK (if any), and stage ledger
-          key: sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-<< parameters.stage_index >>-{{ .BuildNum }}
-          paths:
-            - sandium-stage-state.tar.zst
-            - sandium-stage-state.meta
-            - ci-handoff/stage-<< parameters.stage_index >>
-            - sandium-output
+          teardown:
+            - run:
+                name: Preserve validated partial output on failure/cancel/timeout
+                command: |
+                  set +e
+                  ROOT="$HOME/project"
+                  CONTROL="$ROOT/sandium-control"
+                  export PATH="$HOME/depot_tools:$ROOT/src/buildtools/linux64:$PATH"
+                  if [[ ! -d "$ROOT/sandium-build-output-checkpoint" && -d "$ROOT/src/out/android_Debug_arm64" ]]; then
+                    python3 "$CONTROL/ci/bare/output_checkpoint.py" pack-partial \
+                      --root "$ROOT" --stage "<< parameters.stage_index >>" \
+                      --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" \
+                      > "$ROOT/stage-<< parameters.stage_index >>-partial-checkpoint.log" 2>&1
+                    rc=$?
+                    echo "SANDIUM_PARTIAL_CHECKPOINT_EXIT_CODE=$rc"
+                    cat "$ROOT/stage-<< parameters.stage_index >>-partial-checkpoint.log" 2>/dev/null || true
+                  fi
+                  exit 0
+            - save_cache:
+                name: Save the full compiled output checkpoint for stage-to-stage and cross-run reuse
+                when: always
+                key: sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                paths:
+                  - sandium-build-output-checkpoint
+            - save_cache:
+                name: Save the completed or partial stage handoff after the stage actually ran
+                when: always
+                key: sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                paths:
+                  - ci-handoff/stage-<< parameters.stage_index >>
+                  - sandium-output
+                  - sandium-stage-state.tar.zst
+                  - sandium-stage-state.meta
+                  - sandium-state-handoff-report.json
+            - store_artifacts:
+                path: stage-<< parameters.stage_index >>-driver.log
+                destination: diagnostics/stage-<< parameters.stage_index >>/driver.log
+            - store_artifacts:
+                path: stage-<< parameters.stage_index >>-siso.log
+                destination: diagnostics/stage-<< parameters.stage_index >>/siso.log
+            - store_artifacts:
+                path: stage-<< parameters.stage_index >>-metrics.jsonl
+                destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
+            - store_artifacts:
+                path: stage-<< parameters.stage_index >>-partial-checkpoint.log
+                destination: diagnostics/stage-<< parameters.stage_index >>/partial-checkpoint.log
       - store_artifacts:
-          name: Upload stage driver and Siso logs
+          name: Upload stage driver and Siso diagnostics
           path: stage-<< parameters.stage_index >>-driver.log
           destination: diagnostics/stage-<< parameters.stage_index >>/driver.log
       - store_artifacts:
@@ -176,11 +358,11 @@ jobs:
           path: sandium-state-handoff-report.json
           destination: diagnostics/stage-<< parameters.stage_index >>/state-handoff-report.json
       - store_artifacts:
-          name: Upload build output and handoff ledger
+          name: Upload stage ledger/status
           path: ci-handoff/stage-<< parameters.stage_index >>
           destination: diagnostics/stage-<< parameters.stage_index >>/handoff
       - store_artifacts:
-          name: Upload packaged APK and manifest when available
+          name: Upload APK and manifest when available
           path: sandium-output
           destination: artifacts/stage-<< parameters.stage_index >>
 
@@ -192,10 +374,21 @@ jobs:
     steps:
       - checkout:
           path: sandium-control
+      - run:
+          name: Compute the build cache fingerprint before final artifact restore
+          command: |
+            set -euo pipefail
+            python3 "$HOME/project/sandium-control/ci/bare/cache_fingerprint.py" --root "$HOME/project"
       - restore_cache:
           name: Restore final-stage source-bound ledger
           keys:
-            - sandium-siso-state-v1-{{ checksum "sandium-control/ci/bare/source-pin.txt" }}-{{ checksum "sandium-control/ci/bare/gn_args.gn" }}-{{ checksum "sandium-control/ci/bare/prepare_source.sh" }}-{{ checksum "sandium-control/ci/bare/configure_siso.py" }}-{{ checksum "sandium-control/ci/bare/build_identity.py" }}-{{ checksum "sandium-control/ci/bare/stage_ledger.py" }}-{{ checksum "sandium-control/ci/bare/state_handoff.py" }}-{{ checksum "sandium-control/ci/bare/package_artifact.sh" }}-{{ checksum "sandium-control/ci/bare/bootstrap_chromium.sh" }}-{{ checksum "sandium-control/ci/siso/buildbuddy_backend.star" }}-{{ checksum "sandium-control/ci/siso/buildbuddy-credential-helper.py" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-stage-5-
+            - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - run:
           name: Require a verified APK from the five-stage build
           command: |
@@ -212,6 +405,13 @@ jobs:
             test -s "$MANIFEST" || { echo "SANDIUM_FINAL_APK_GATE=FAIL build manifest is missing" >&2; exit 1; }
             python3 "$HOME/project/sandium-control/ci/bare/verify_final_apk.py" "$STATUS" "$APK" "$MANIFEST"
             echo "SANDIUM_FINAL_APK_GATE=PASS"
+      - save_cache:
+          name: Publish a verified APK cache for future five-stage fast paths
+          key: sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+          paths:
+            - sandium-output
+            - ci-handoff/stage-5
+            - sandium-state-handoff-report.json
 
 
 workflows:
