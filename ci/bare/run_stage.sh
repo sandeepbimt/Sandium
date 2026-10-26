@@ -191,7 +191,6 @@ echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_RE
 # Compiled objects are never archived here; Siso must prove BuildBuddy cache hits.
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
 SRC="$ROOT/src"; OUT="$SRC/out/android_Debug_arm64"; SDIR="$SRC/build/config/siso"
-test -s "$SDIR/.sisoenv"; printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
 # Normalize regular source files only. Avoid changing directory and .git
 # timestamps; this mirrors the known-good Sandfox/Afterbird build procedure.
 find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch -h -d "@$TS_EPOCH" {} +
@@ -208,6 +207,11 @@ if [[ "$MODE" == "prepare-source" ]]; then
   exit 0
 fi
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
+# configure_siso.py creates .sisoenv during GN setup. Validate it only after
+# that setup has completed; source-only preparation must not require generated
+# build files or write a Siso runtime config into the source cache.
+test -s "$SDIR/.sisoenv" || { echo "SANDIUM_SISO_ENV_MISSING_AFTER_CONFIGURE=$SDIR/.sisoenv" >&2; exit 46; }
+printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
 test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
