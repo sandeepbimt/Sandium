@@ -10,6 +10,11 @@ STAGES = [
 ]
 def validate():
  errors=[]
+ run_stage = __import__("pathlib").Path(__file__).with_name("run_stage.sh").read_text(encoding="utf-8")
+ if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
+  errors.append("APK completion must fail closed without Siso remote/cache action proof")
+ if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS" not in run_stage:
+  errors.append("final Siso metrics must be checked before rejecting missing early evidence")
  if [x["stage"] for x in STAGES] != [1,2,3,4,5]: errors.append("stages must be exactly 1..5")
  for i,x in enumerate(STAGES):
   expected=[] if i==0 else [i]
