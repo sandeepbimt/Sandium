@@ -102,7 +102,7 @@ def main() -> int:
     p.add_argument("--output", type=Path, required=True); p.add_argument("--previous", type=Path)
     p.add_argument("--root", type=Path); p.add_argument("--completed-actions", type=int, required=True)
     p.add_argument("--total-actions", type=int, required=True); p.add_argument("--apk", type=Path)
-    p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_full_tree_v1")
+    p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_regular_files_v1")
     p.add_argument("--state-handoff-report", type=Path, required=True)
     a = p.parse_args()
     control, inferred_root = control_and_workspace(Path(__file__))
