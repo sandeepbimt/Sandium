@@ -77,6 +77,12 @@ jobs:
           fast_apk = Path("ci/bare/fast_apk.py").read_text(encoding="utf-8")
           build_fingerprint = Path("ci/bare/cache_fingerprint.py").read_text(encoding="utf-8")
           source_fingerprint = Path("ci/bare/source_cache_fingerprint.py").read_text(encoding="utf-8")
+          credential_helper = Path("ci/siso/buildbuddy-credential-helper.py")
+
+          assert credential_helper.exists(), "BuildBuddy credential helper must be present"
+          assert credential_helper.stat().st_mode & 0o111, "BuildBuddy credential helper must be tracked executable (mode 100755)"
+          assert "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=PASS" in config
+          assert "not executable" in Path("ci/bare/configure_siso.py").read_text(encoding="utf-8")
 
           assert "run_sandium_bare_apk_once:" in config
           assert re.search(r"run_sandium_bare_apk_once:\s+type:\s+boolean\s+default:\s+false", config), "expensive build opt-in must default to false"
