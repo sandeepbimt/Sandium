@@ -255,6 +255,14 @@ SANDIUM_GCLIENT_SPEC
     echo "SANDIUM_GN_GENERATION_CWD=$CHROMIUM_SRC"
     (cd "$CHROMIUM_SRC" && "$GN" gen "$OUT" --args="$(cat "$GN_ARGS_FILE")")
 
+    # The identity gate requires both generated Siso files. Create the project
+    # rc before recording identity; run_stage.sh also writes this file later,
+    # but that is too late because this gate runs inside configure.
+    SDIR="$CHROMIUM_SRC/build/config/siso"
+    test -s "$SDIR/.sisoenv" || { echo "SANDIUM_SISO_ENV_MISSING_AFTER_GN=$SDIR/.sisoenv" >&2; exit 46; }
+    printf "%s\n" "ninja -re_cache_enable_write=true" > "$SDIR/.sisorc"
+    test -s "$SDIR/.sisorc" || { echo "SANDIUM_SISO_RC_WRITE_FAILED=$SDIR/.sisorc" >&2; exit 46; }
+    echo "SANDIUM_SISO_CONFIG_FILES=PASS"
     python3 "$CACHE_IDENTITY_TOOL"
     python3 "$IDENTITY_TOOL" --mode record --root "$ROOT" --output "$ROOT/sandium-output"
     echo "SANDIUM_GN_GENERATION=PASS"
