@@ -190,6 +190,8 @@ jobs:
       - image: cimg/python:3.12
     working_directory: ~/project
     steps:
+      - checkout:
+          path: sandium-control
       - restore_cache:
           name: Restore final-stage source-bound ledger
           keys:
