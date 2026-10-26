@@ -88,7 +88,12 @@ def read_pins(control: Path) -> dict[str, str]:
     return values
 
 
-def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> dict[str, Any]:
+def source_identity(
+    control: Path,
+    workspace: Path,
+    require_gn: bool = True,
+    output_dir_override: Path | None = None,
+) -> dict[str, Any]:
     pins = read_pins(control)
     bare = workspace / "bare-browser"
     chromium = workspace / "src"
@@ -159,7 +164,12 @@ def source_identity(control: Path, workspace: Path, require_gn: bool = True) -> 
     if require_gn and (not siso_env.is_file() or not siso_rc.is_file()):
         raise IdentityError("Generated Siso .sisoenv/.sisorc configuration is missing")
 
-    out = chromium / "out" / "android_Debug_arm64"
+    # A completed output checkpoint is temporarily moved out of src/out while
+    # its publication gate runs. Allow that gate to inspect the candidate tree
+    # without pretending the active src/out directory still exists.
+    out = output_dir_override if output_dir_override is not None else chromium / "out" / "android_Debug_arm64"
+    if require_gn and (not out.is_dir() or out.is_symlink()):
+        raise IdentityError(f"Generated GN output directory is missing/unsafe: {out}")
     args_files = [out / "args.gn", out / "args_generated.gni"]
     args_digest = hashlib.sha256()
     effective_args = ""

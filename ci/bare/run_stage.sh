@@ -339,6 +339,18 @@ if [[ "$COMPLETE" == true ]]; then
 else
   python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
 fi
+CUMULATIVE_DONE="$(python3 - "$LEDGER" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8")).get("max_completed_actions",0)))
+PY
+)"
+REMAINING_ESTIMATE="$(python3 - "$LEDGER" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8")).get("estimated_remaining_actions",0)))
+PY
+)"
+echo "SANDIUM_CUMULATIVE_COMPLETED_ACTIONS=$CUMULATIVE_DONE"
+echo "SANDIUM_ESTIMATED_REMAINING_ACTIONS=$REMAINING_ESTIMATE"
 if [[ "$COMPLETE" == true ]]; then
   HASH="$(sha256sum "$ROOT/sandium-output/Sandium-debug-arm64.apk" | awk '{print $1}')"; BYTES="$(stat -c %s "$ROOT/sandium-output/Sandium-debug-arm64.apk")"
   ID="$(python3 - "$ROOT/sandium-output/build-manifest.json" <<'PY'
@@ -346,10 +358,10 @@ import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_identity_sha256"])
 PY
 )"
-  printf 'BUILD_FINISHED=true\nAPK_ARCHIVE_VALID=true\nAPK_SIGNATURE_VERIFIED=true\nAPK_SHA256=%s\nAPK_SIZE_BYTES=%s\nBUILD_IDENTITY_SHA256=%s\nSTAGE=%s\n' "$HASH" "$BYTES" "$ID" "$STAGE" > "$STATUS"
+  printf 'BUILD_FINISHED=true\nAPK_ARCHIVE_VALID=true\nAPK_SIGNATURE_VERIFIED=true\nAPK_SHA256=%s\nAPK_SIZE_BYTES=%s\nBUILD_IDENTITY_SHA256=%s\nSTAGE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$HASH" "$BYTES" "$ID" "$STAGE" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$TOTAL" > "$STATUS"
   echo "SANDIUM_APK_READY=true"; echo "SANDIUM_APK_SHA256=$HASH"; echo "SANDIUM_APK_BYTES=$BYTES"
 else
-  printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$DONE" "$TOTAL" > "$STATUS"
+  printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$TOTAL" > "$STATUS"
   echo SANDIUM_APK_READY=false
 fi
 echo "DIAG_SISO_STATE_FILES_BEGIN"

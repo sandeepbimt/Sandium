@@ -85,6 +85,19 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertTrue(result["stage_record_valid"])
         self.assertGreaterEqual(result["output_bytes"], 100)
 
+    def test_produced_checkpoint_validates_after_pack_moves_src_out(self):
+        checkpoint = make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
+        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \
+             patch.object(M, "source_identity", return_value=IDENTITY) as identity:
+            result = M.validate_candidate(
+                root=self.root, control=self.control, stage=1,
+                workflow_id="current-workflow", min_output_bytes=100, produced=True,
+            )
+        self.assertEqual(result["source_stage"], 1)
+        identity.assert_called_once_with(
+            self.control, self.root, require_gn=True, output_dir_override=checkpoint
+        )
+
     def test_rejects_metadata_only_16_byte_checkpoint(self):
         make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=1)
         with self.assertRaisesRegex(M.CheckpointQualityError, "too_small"):

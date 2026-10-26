@@ -131,7 +131,16 @@ def validate_candidate(
         raise CheckpointQualityError("embedded_build_identity_digest_mismatch")
     if meta.get("control_inputs") != OC.control_inputs(control):
         raise CheckpointQualityError("checkpoint_control_inputs_mismatch")
-    current_identity = source_identity(control, root, require_gn=True)
+    # Before restore, compare the candidate against the freshly generated src/out
+    # identity. After pack, output_checkpoint.py has atomically moved src/out into
+    # the candidate directory, so validate GN args from that directory instead.
+    active_output = root / OC.OUT_RELATIVE
+    if active_output.is_dir() and not active_output.is_symlink():
+        current_identity = source_identity(control, root, require_gn=True)
+    else:
+        current_identity = source_identity(
+            control, root, require_gn=True, output_dir_override=checkpoint
+        )
     if OC.identity_digest(current_identity) != meta.get("build_identity_sha256"):
         raise CheckpointQualityError("checkpoint_source_toolchain_or_gn_identity_mismatch")
 

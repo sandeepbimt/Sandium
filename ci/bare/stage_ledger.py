@@ -81,18 +81,73 @@ def verify_artifact(apk: Path, manifest_path: Path, identity: dict, identity_has
     return {"artifact_sha256": result["artifact_sha256"], "artifact_bytes": result["artifact_bytes"],
             "artifact_verified": True, "manifest_sha256": sha(manifest_path)}
 
-def validate_progress(stage: int, metrics: dict, done: int, total: int, previous: dict | None) -> str:
-    if done <= 0 or total <= 0: raise IdentityError("No parseable completed-action progress in current build log")
+def cumulative_progress(stage: int, done: int, total: int, previous: dict | None,
+                        handoff: dict) -> int:
+    """Return a monotonic estimate across bounded stage invocations.
+
+    Siso's progress numerator resets to zero for each autoninja invocation.
+    Therefore it must be added to a compatible restored checkpoint's completed
+    count, rather than compared directly with the previous invocation's count.
+    """
+    if done < 0 or total <= 0:
+        raise IdentityError("Invalid completed-action or graph-total count")
+
+    if stage == 1:
+        # Stage 1 may resume from a compatible checkpoint saved by an earlier
+        # workflow. A Siso-state capsule alone is not compiled-output reuse.
+        baseline = 0
+        if handoff.get("local_compiled_outputs_restored") is True:
+            baseline = int(handoff.get("source_max_completed_actions", 0) or 0)
+    else:
+        if previous is None:
+            raise IdentityError("Continuation stage requires previous ledger")
+        prior_total = int(previous.get("total_action_count", 0) or 0)
+        if prior_total and prior_total != total:
+            raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
+        if handoff.get("local_compiled_outputs_restored") is not True:
+            raise IdentityError("Continuation stage did not restore a full compiled-output checkpoint")
+        baseline = int(previous.get("max_completed_actions",
+                                    previous.get("cumulative_completed_actions", 0)) or 0)
+        handoff_baseline = int(handoff.get("source_max_completed_actions", baseline) or 0)
+        if handoff_baseline != baseline:
+            raise IdentityError(
+                f"Restored checkpoint progress mismatch: ledger={baseline} checkpoint={handoff_baseline}"
+            )
+
+    if baseline < 0:
+        raise IdentityError("Restored checkpoint completed-action baseline is negative")
+    cumulative = baseline + done
+    if cumulative > total:
+        raise IdentityError(
+            f"Cumulative completed-action estimate exceeds graph total: "
+            f"baseline={baseline} current_stage={done} total={total}"
+        )
+    return cumulative
+
+
+def validate_progress(stage: int, metrics: dict, done: int, total: int,
+                      previous: dict | None, handoff: dict) -> str:
+    if done <= 0 or total <= 0:
+        raise IdentityError("No parseable completed-action progress in current build log")
     evidence = metrics.get("remote_execution_proven") or metrics.get("remote_action_cache_reuse_proven")
-    if not evidence: raise IdentityError("No actual remote-execution or remote-action-cache evidence in this stage")
-    if stage == 1: return "REMOTE_EXECUTION_OR_CACHE_WITH_PROGRESS"
-    if previous is None: raise IdentityError("Continuation stage requires previous ledger")
+    if not evidence:
+        raise IdentityError("No actual remote-execution or remote-action-cache evidence in this stage")
+    if stage == 1:
+        if previous is not None:
+            raise IdentityError("Stage 1 cannot consume a previous stage ledger")
+        cumulative_progress(stage, done, total, previous, handoff)
+        return "REMOTE_EXECUTION_OR_CACHE_WITH_PROGRESS"
+    if previous is None:
+        raise IdentityError("Continuation stage requires previous ledger")
     prior_total = int(previous.get("total_action_count", 0))
-    prior_done = int(previous.get("max_completed_actions", 0))
     if prior_total and prior_total != total:
         raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
-    if done <= prior_done: raise IdentityError(f"No forward progress: prior={prior_done} current={done}")
-    if metrics.get("remote_action_cache_reuse_proven"): return "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS"
+    # In an incremental continuation the remaining slice should get smaller,
+    # so per-invocation done may be lower than the prior slice. Validate the
+    # cumulative count instead of requiring done > previous stage's raw count.
+    cumulative_progress(stage, done, total, previous, handoff)
+    if metrics.get("remote_action_cache_reuse_proven"):
+        return "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS"
     return "REMOTE_EXECUTION_WITH_FORWARD_PROGRESS"
 
 def main() -> int:
@@ -139,7 +194,13 @@ def main() -> int:
     if a.apk and a.manifest and a.apk.is_file():
         artifact = verify_artifact(a.apk, a.manifest, ident, ident_hash, root, control)
         complete = artifact.get("artifact_verified") is True
-    evidence = "VERIFIED_APK_COMPLETE" if complete else validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous)
+    if complete:
+        cumulative_done = a.total_actions
+        evidence = "VERIFIED_APK_COMPLETE"
+    else:
+        cumulative_done = cumulative_progress(a.stage, a.completed_actions, a.total_actions, previous, handoff)
+        evidence = validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous, handoff)
+    remaining_estimate = max(0, a.total_actions - cumulative_done)
     ledger = {"schema": SCHEMA, "stage": a.stage, "build_identity": ident, "build_identity_sha256": ident_hash,
               "previous_stage_ledger_sha256": sha(a.previous) if a.previous else None,
               "source_timestamp_policy": a.source_timestamp_policy,
@@ -149,8 +210,13 @@ def main() -> int:
               "current_stage_remote_action_cache_reuse_proven": metrics["remote_action_cache_reuse_proven"],
               "metrics": metrics, "siso_metrics_sha256": sha(a.metrics) if a.metrics.is_file() else None,
               "siso_log_sha256": sha(a.siso_log) if a.siso_log.is_file() else None,
-              "max_completed_actions": a.completed_actions, "total_action_count": a.total_actions,
-              "evidence": evidence, "local_build_output_restored": False,
+              "stage_completed_actions": a.completed_actions,
+              "max_completed_actions": cumulative_done,
+              "cumulative_completed_actions": cumulative_done,
+              "estimated_remaining_actions": remaining_estimate,
+              "total_action_count": a.total_actions,
+              "evidence": evidence,
+              "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
               "state_handoff": handoff, "state_handoff_report_sha256": sha(a.state_handoff_report), **artifact}
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -159,7 +225,10 @@ def main() -> int:
     print("SANDIUM_BUILD_IDENTITY_SHA256="+ident_hash)
     print("SISO_REMOTE_EXECUTED_ACTIONS="+str(metrics["remote_executed_action_records"]))
     print("SISO_REMOTE_ACTION_CACHE_HITS="+str(metrics["cached_action_records"]))
-    print("SANDIUM_MAX_COMPLETED_ACTIONS="+str(a.completed_actions))
+    print("SANDIUM_STAGE_COMPLETED_ACTIONS="+str(a.completed_actions))
+    print("SANDIUM_MAX_COMPLETED_ACTIONS="+str(cumulative_done))
+    print("SANDIUM_CUMULATIVE_COMPLETED_ACTIONS="+str(cumulative_done))
+    print("SANDIUM_ESTIMATED_REMAINING_ACTIONS="+str(remaining_estimate))
     print("SANDIUM_TOTAL_ACTION_COUNT="+str(a.total_actions))
     return 0
 
