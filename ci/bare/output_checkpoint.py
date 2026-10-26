@@ -142,7 +142,7 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
     checkpoint = root / CHECKPOINT_NAME
     meta_path = checkpoint / META_NAME
 
-    def miss(reason: str) -> None
+    def miss(reason: str) -> None:
         print(f"SANDIUM_OUTPUT_CHECKPOINT=MISS reason={reason}")
         if required:
             raise CheckpointError(reason)
