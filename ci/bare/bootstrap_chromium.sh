@@ -23,9 +23,11 @@ read_pin() {
 CHROMIUM_COMMIT="$(read_pin chromium_commit)"
 CHROMIUM_VERSION="$(read_pin chromium_version)"
 EXPECTED_BARE="$(read_pin bare_commit)"
+TOOLCHAIN_COMMIT="$(read_pin toolchain_depot_tools_commit)"
 test -n "$CHROMIUM_COMMIT"
 test -n "$CHROMIUM_VERSION"
 test -n "$EXPECTED_BARE"
+[[ "$TOOLCHAIN_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "SANDIUM_DEPOT_TOOLS_PIN_INVALID=$TOOLCHAIN_COMMIT" >&2; exit 30; }
 
 DEPOT_TOOLS="$HOME/depot_tools"
 CHROMIUM_SRC="$ROOT/src"
@@ -37,6 +39,13 @@ check_toolchain() {
     echo "SANDIUM_DEPOT_TOOLS=NOT_READY; restore/install the existing toolchain cache first." >&2
     exit 31
   fi
+  local actual_toolchain
+  actual_toolchain="$(git -C "$DEPOT_TOOLS" rev-parse HEAD)"
+  if [[ "$actual_toolchain" != "$TOOLCHAIN_COMMIT" ]]; then
+    echo "SANDIUM_DEPOT_TOOLS_PIN_MISMATCH expected=$TOOLCHAIN_COMMIT actual=$actual_toolchain" >&2
+    exit 32
+  fi
+  echo "SANDIUM_DEPOT_TOOLS_PIN=$actual_toolchain"
   export PATH="$DEPOT_TOOLS:$CHROMIUM_SRC/buildtools/linux64:$PATH"
 }
 
