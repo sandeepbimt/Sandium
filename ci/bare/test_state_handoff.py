@@ -52,6 +52,14 @@ class StateHandoffTests(unittest.TestCase):
         self.assertNotIn("obj", M.VALID_NAMES)
         self.assertEqual(str(M.OUT_RELATIVE), "src/out/android_Debug_arm64")
 
+    def test_nonempty_siso_journal_is_valid_recovery_state_when_base_is_absent(self):
+        self.assertTrue(M.has_resumable_siso_state([{"name": ".siso_fs_state", "size": 12}]))
+        self.assertTrue(M.has_resumable_siso_state([{"name": ".siso_fs_state.journal", "size": 128}]))
+        self.assertTrue(M.has_resumable_siso_state([{"name": ".siso_fs_state.0", "size": 8}]))
+        self.assertFalse(M.has_resumable_siso_state([{"name": ".siso_fs_state.journal", "size": 0}]))
+        self.assertFalse(M.has_resumable_siso_state([{"name": ".ninja_log", "size": 100}]))
+        self.assertFalse(M.has_resumable_siso_state([]))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
