@@ -115,13 +115,15 @@ jobs:
             equal: [1, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Prefer a saved verified APK from the most advanced compatible stage
+                name: Prefer a verified APK, then the highest green stage state; ignore failed legacy stages
                 keys:
                   - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+                  # One-time migration fallback: use only legacy Stage 1 state, never old failed Stage 2-5 entries.
                   - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
@@ -131,7 +133,7 @@ jobs:
                 name: Restore Stage 1 APK/status metadata
                 keys:
                   - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
@@ -140,7 +142,7 @@ jobs:
                 name: Restore Stage 2 APK/status metadata
                 keys:
                   - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
@@ -149,7 +151,7 @@ jobs:
                 name: Restore Stage 3 APK/status metadata
                 keys:
                   - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
@@ -158,7 +160,7 @@ jobs:
                 name: Restore Stage 4 APK/status metadata
                 keys:
                   - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-                  - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - run:
           name: Reuse a verified APK before restoring the multi-gigabyte build output
           command: |
@@ -185,12 +187,15 @@ jobs:
             equal: [1, << parameters.stage_index >>]
           steps:
             - restore_cache:
-                name: Restore the best previous compiled-output checkpoint, stage 5 first
+                name: Restore the best green validated compiled-output checkpoint, stage 5 first
                 keys:
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+                  # One-time migration fallback keeps the known-good legacy Stage 1 checkpoint.
+                  # Legacy Stage 2-5 keys are excluded because failed jobs wrote tiny unusable archives.
                   - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - when:
           condition:
@@ -199,7 +204,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 1
                 keys:
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
@@ -207,7 +212,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 2
                 keys:
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
@@ -215,7 +220,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 3
                 keys:
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
@@ -223,7 +228,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 4
                 keys:
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - restore_cache:
           name: Restore the pinned Chromium/Bare source and dependency cache
           keys:
@@ -293,15 +298,15 @@ jobs:
                   fi
                   exit 0
             - save_cache:
-                name: Save the full compiled output checkpoint for stage-to-stage and cross-run reuse
-                when: always
-                key: sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                name: Save only a quality-validated green compiled-output checkpoint for reuse
+                when: on_success
+                key: sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
                 paths:
                   - sandium-build-output-checkpoint
             - save_cache:
-                name: Save the completed or partial stage handoff after the stage actually ran
-                when: always
-                key: sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                name: Save only successful stage metadata and state capsule for future selection
+                when: on_success
+                key: sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
                 paths:
                   - ci-handoff/stage-<< parameters.stage_index >>
                   - sandium-output
@@ -378,11 +383,13 @@ jobs:
           name: Restore final-stage source-bound ledger
           keys:
             - sandium-verified-apk-v1-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-
-            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
-            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
-            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
-            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
-            - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
+            - sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+            # Legacy migration fallback is restricted to the known-good Stage 1 candidate.
             - sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
       - run:
           name: Require a verified APK from the five-stage build

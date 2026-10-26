@@ -8,6 +8,7 @@ on:
       - fix/bare-pipeline-reuse-repair-20261026
       - fix/bare-credential-helper-exec-20261026
       - fix/manifest-regeneration-continuation-20261026
+      - fix/green-checkpoint-cache-selection-20261026
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-bare-stage-pipeline.yml"
@@ -64,6 +65,7 @@ jobs:
           python3 ci/bare/test_siso_output_path_guard.py
           python3 ci/bare/test_manifest_preflight.py
           python3 ci/bare/test_normalize_progress_total.py
+          python3 ci/bare/test_checkpoint_quality.py
           python3 ci/bare/stage_contract.py
 
       - name: Assert cache layers, fast APK exit and five-stage continuity
@@ -77,6 +79,7 @@ jobs:
           config = Path(".circleci/config.yml").read_text(encoding="utf-8")
           runner = Path("ci/bare/run_stage.sh").read_text(encoding="utf-8")
           manifest_preflight = Path("ci/bare/manifest_preflight.py").read_text(encoding="utf-8")
+          checkpoint_quality = Path("ci/bare/checkpoint_quality.py").read_text(encoding="utf-8")
           bootstrap = Path("ci/bare/bootstrap_chromium.sh").read_text(encoding="utf-8")
           handoff = Path("ci/bare/state_handoff.py").read_text(encoding="utf-8")
           checkpoint = Path("ci/bare/output_checkpoint.py").read_text(encoding="utf-8")
@@ -98,9 +101,15 @@ jobs:
           assert "default: true" not in config
           assert "sandium-source-v3-" in config and "sandium-source-cache-fingerprint.txt" in config
           assert "sandium-source-v2-" in config, "legacy source-cache prefix fallback must preserve the previously saved cache"
-          assert "sandium-state-v3-" in config and "sandium-output-v3-" in config
+          assert "sandium-state-good-v4-" in config and "sandium-output-good-v4-" in config
           assert "sandium-verified-apk-v1-" in config
-          assert "Save the completed or partial stage handoff after the stage actually ran" in config
+          assert "sandium-state-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
+          assert "sandium-output-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
+          for failed_stage in (2, 3, 4, 5):
+              assert f"sandium-output-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
+              assert f"sandium-state-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
+          assert "Save only a quality-validated green compiled-output checkpoint for reuse" in config
+          assert "Save only successful stage metadata and state capsule for future selection" in config
 
           # A later stage must only read its immediate predecessor's per-workflow
           # ledger. Do not allow an unrelated previous-run stage ledger to win the
@@ -114,7 +123,7 @@ jobs:
               ]
               end = min(ends)
               block = config[start:end]
-              state_keys = [line for line in block.splitlines() if "sandium-state-v3-" in line]
+              state_keys = [line for line in block.splitlines() if "sandium-state-good-v4-" in line]
               expected = f"-stage-{predecessor}-{{{{ .Environment.CIRCLE_WORKFLOW_ID }}}}-"
               assert len(state_keys) == 1 and expected in state_keys[0], (
                   f"stage {predecessor + 1} must restore only its immediate prior stage state"
@@ -124,17 +133,24 @@ jobs:
           assert "sandium-build-output-checkpoint" in config
           assert "teardown:" in config and "circleci-agent step halt" in config
           fast_step = config.index("name: Reuse a verified APK before restoring the multi-gigabyte build output")
-          large_restore = config.index("Restore the best previous compiled-output checkpoint")
+          large_restore = config.index("Restore the best green validated compiled-output checkpoint")
           assert fast_step < large_restore, "APK fast-path check must precede large output restore"
-          assert config.index("Save the completed or partial stage handoff after the stage actually ran") > config.index("Build one bounded incremental window"), "stage state must be saved after build output/status is produced"
+          build_step = config.index("Build one bounded incremental window")
+          good_output_save = config.index("Save only a quality-validated green compiled-output checkpoint for reuse")
+          good_state_save = config.index("Save only successful stage metadata and state capsule for future selection")
+          assert good_output_save > build_step and good_state_save > build_step, "successful-stage caches must be written only after the build"
+          for save_name in (good_output_save, good_state_save):
+              assert "when: on_success" in config[save_name:save_name+350], "failed stages must not publish reusable cache keys"
           assert config.index("Compute the build cache fingerprint before final artifact restore") < config.index("Restore final-stage source-bound ledger"), "final gate must generate its cache key fingerprint before restore"
           assert config.index("SANDIUM_FINAL_APK_GATE=PASS") < config.index("Publish a verified APK cache for future five-stage fast paths"), "verified APK cache must only be saved after final validation"
           assert config.index("Save the synchronized source tree") < config.index("Build one bounded incremental window"), "source cache must be created before GN output"
           assert config.index("Start the full stage budget clock") < config.index("restore_cache:"), "stage budget must include setup and restores"
-          assert 'sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's Stage 5 state"
+          assert 'sandium-state-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's successful Stage 5 state"
 
           assert "SANDIUM_OUTPUT_CHECKPOINT=RESTORED" in checkpoint
           assert '"local_compiled_outputs_restored": True' in checkpoint
+          assert "checkpoint_quality.py" not in build_fingerprint, "quality policy edits must keep the legacy known-good stage-1 cache reachable"
+          assert "checkpoint_quality.py" not in checkpoint, "quality policy changes must not alter old checkpoint compatibility"
           assert 'META_NAME = ".sandium-output-checkpoint.meta.json"' in checkpoint
           assert "SANDIUM_APK_FAST_PATH=PASS" in fast_apk
           assert "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" in fast_apk
@@ -143,13 +159,21 @@ jobs:
           assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('bootstrap_chromium.sh" configure') < runner.index('test -s "$SDIR/.sisoenv"'), "source-only preparation must not require GN-generated Siso files"
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
           assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
+          assert 'checkpoint_quality.py" --root "$ROOT"' in runner
+          assert 'checkpoint_quality.py" --root "$ROOT"' in runner and "--produced" in runner
+          assert "MIN_GOOD_OUTPUT_BYTES = 512 * 1024 * 1024" in checkpoint_quality
+          assert "candidate_is_not_a_green_completed_stage" in checkpoint_quality
+          assert "checkpoint_size_mismatch" in checkpoint_quality
           assert "WAIT -lt 240" not in runner and 'kill -INT -- "$PID"' not in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW" in runner
           assert "NINJA_REGEN_GATE=FAIL" not in runner, "a handled Siso manifest regeneration must not discard a full stage window"
-          assert 'manifest_preflight.py"' in runner and runner.index('manifest_preflight.py"') < runner.index('timeout --signal=INT --kill-after=60s'), "manifest must be stabilized before timed compilation"
+          assert 'manifest_preflight.py"' in runner and runner.index('manifest_preflight.py"') < runner.index('timeout --signal=INT --kill-after=60s'), "filesystem-only manifest checks must run before timed compilation"
           assert "SANDIUM_NINJA_REGENERATION_DURING_BUILD=OBSERVED_NONFATAL" in runner
-          assert '"-n"' in manifest_preflight and "two consecutive dry runs" in manifest_preflight
+          assert "mode=filesystem-only" in manifest_preflight
+          assert "siso_dry_run_in_preflight=no" in manifest_preflight
+          assert "handled_by_real_siso_build" in manifest_preflight
+          assert "subprocess.run(" not in manifest_preflight, "preflight must not spend minutes in repeated Siso dry runs"
           normalizer = Path("ci/bare/normalize_progress_total.py").read_text(encoding="utf-8")
           assert "MAX_GRAPH_TOTAL_DRIFT = 0.01" in normalizer
           assert "build identity differs" in normalizer
@@ -173,10 +197,10 @@ jobs:
           assert 'SANDIUM_GN_GENERATION_CWD=$CHROMIUM_SRC' in bootstrap
           assert '(cd "$CHROMIUM_SRC" && "$GN" gen "$OUT"' in bootstrap
 
-          # The verified APK is an independent cross-run cache. Output checkpoints
-          # and state handoffs use distinct immutable key generations.
-          assert config.index("sandium-verified-apk-v1-") < config.index("sandium-output-v3-")
-          assert config.index("Save the full compiled output checkpoint for stage-to-stage and cross-run reuse") < config.index("Save the completed or partial stage handoff after the stage actually ran")
+          # The verified APK is independent. Failed output/state entries use legacy v3
+          # namespaces and are never selected except for Stage 1 migration fallback.
+          assert config.index("sandium-verified-apk-v1-") < config.index("sandium-output-good-v4-")
+          assert config.index("Save only a quality-validated green compiled-output checkpoint for reuse") < config.index("Save only successful stage metadata and state capsule for future selection")
           print("SOURCE_CACHE_LAYER=PASS")
           print("LIGHTWEIGHT_VERIFIED_APK_FAST_PATH=PASS")
           print("FULL_COMPILED_OUTPUT_CHECKPOINT=PASS")

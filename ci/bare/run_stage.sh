@@ -47,6 +47,7 @@ python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
 python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/test_manifest_preflight.py"
 python3 "$CONTROL/ci/bare/test_normalize_progress_total.py"
+python3 "$CONTROL/ci/bare/test_checkpoint_quality.py"
 python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
@@ -229,6 +230,20 @@ grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 python3 "$CONTROL/ci/bare/write_cache_identity.py"
+# CircleCI restores only the first cache key that matches. Reject and quarantine
+# failed/partial/tiny legacy candidates before the authoritative restore check.
+# Stage 1 can fall back to Siso/action-cache work when no good output candidate
+# survives. Continuation stages must have a green predecessor checkpoint.
+set +e
+python3 "$CONTROL/ci/bare/checkpoint_quality.py" --root "$ROOT" --control "$CONTROL" \
+  --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+CHECKPOINT_QUALITY_RC=$?
+set -e
+echo "SANDIUM_OUTPUT_CHECKPOINT_QUALITY_EXIT_CODE=$CHECKPOINT_QUALITY_RC"
+if [[ "$CHECKPOINT_QUALITY_RC" -ne 0 && "$STAGE" -gt 1 ]]; then
+  echo "SANDIUM_OUTPUT_CHECKPOINT_QUALITY=FAIL continuation stage cannot consume an invalid/missing predecessor checkpoint" >&2
+  exit 54
+fi
 # Prefer the complete, identity-validated output checkpoint. Only stage 1 may
 # proceed cold or fall back to the small Siso state capsule; later stages require
 # the preceding stage's full output tree so they cannot silently restart from zero.
@@ -352,6 +367,11 @@ if [[ "$STATE_PACK_RC" -ne 0 ]]; then
 fi
 echo "DIAG_SISO_STATE_CAPSULE_SIZE=$(stat -c %s "$STATE_ARCHIVE" 2>/dev/null || echo 0)"
 python3 "$CONTROL/ci/bare/output_checkpoint.py" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER"
+# Never publish a cache candidate unless it contains a substantial, validated,
+# current-stage output tree with a green stage ledger and matching build identity.
+python3 "$CONTROL/ci/bare/checkpoint_quality.py" --root "$ROOT" --control "$CONTROL" \
+  --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --produced
+echo "SANDIUM_OUTPUT_CHECKPOINT_PUBLISH_ELIGIBLE=PASS"
 echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
 trap - EXIT
 exit 0
