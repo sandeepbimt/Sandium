@@ -329,6 +329,10 @@ jobs:
           path: stage-<< parameters.stage_index >>-metrics.jsonl
           destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
       - store_artifacts:
+          name: Upload Siso manifest preflight log when present
+          path: stage-<< parameters.stage_index >>-manifest-preflight.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/manifest-preflight.log
+      - store_artifacts:
           name: Upload Chromium fetch log when present
           path: sandium-fetch.log
           destination: diagnostics/stage-<< parameters.stage_index >>/fetch.log
