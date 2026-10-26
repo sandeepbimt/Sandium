@@ -6,6 +6,7 @@ on:
       - build/bare-apk-once-20261025
       - fix/bare-stage-handoff-review
       - fix/bare-pipeline-reuse-repair-20261026
+      - fix/bare-credential-helper-exec-20261026
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-bare-stage-pipeline.yml"
@@ -80,7 +81,8 @@ jobs:
           credential_helper = Path("ci/siso/buildbuddy-credential-helper.py")
 
           assert credential_helper.exists(), "BuildBuddy credential helper must be present"
-          assert credential_helper.stat().st_mode & 0o111, "BuildBuddy credential helper must be tracked executable (mode 100755)"
+          assert "chmod 0755 \"$CREDENTIAL_HELPER\"" in bootstrap, "bootstrap must normalize helper permissions before Siso configuration"
+          assert "chmod 0755 ci/siso/buildbuddy-credential-helper.py" in config, "preflight must normalize helper permissions before checking them"
           assert "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=PASS" in config
           assert "not executable" in Path("ci/bare/configure_siso.py").read_text(encoding="utf-8")
 
