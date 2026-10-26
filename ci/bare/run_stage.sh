@@ -182,6 +182,17 @@ if [[ "$EVIDENCE" != true ]] && kill -0 "$PID" 2>/dev/null; then
   echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL >&2; kill -INT -- "-$PID" 2>/dev/null || true; sleep 5; kill -TERM -- "-$PID" 2>/dev/null || true; sleep 5; kill -KILL -- "-$PID" 2>/dev/null || true
 fi
 set +e; wait "$PID"; RET=$?; set -e; echo AUTONINJA_EXIT_CODE=$RET
+# The build can finish before the polling loop observes evidence, or Siso may
+# flush its final metrics only at shutdown. Recheck the completed logs, then
+# fail closed: an APK alone must never bypass the remote/cache execution gate.
+if [[ "$EVIDENCE" != true ]] && grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute' "$LOG" "$METRICS" 2>/dev/null; then
+  EVIDENCE=true
+  echo SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS
+fi
+if [[ "$EVIDENCE" != true ]]; then
+  echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF >&2
+  exit 50
+fi
 echo "DIAG_METRICS_LINES=$(wc -l < "$METRICS" 2>/dev/null || echo 0)"
 echo "DIAG_METRICS_HEAD_BEGIN"; head -n 10 "$METRICS" 2>/dev/null || true; echo "DIAG_METRICS_HEAD_END"
 echo "DIAG_SISO_LOG_TAIL_BEGIN"; tail -n 160 "$LOG" 2>/dev/null || true; echo "DIAG_SISO_LOG_TAIL_END"
