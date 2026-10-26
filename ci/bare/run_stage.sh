@@ -237,6 +237,19 @@ if [[ "$NINJA_REGEN_FAIL" == true ]]; then
   echo "SISO_REMOTE_OR_CACHE_EVIDENCE=NOT_CHECKED_NINJA_REGENERATION_FAILURE" >&2
   exit 51
 fi
+# Chromium/Siso writes its final summary to OUT/siso_output on supported
+# versions; SANDFOX verified remote/cache counts from this exact file. Preserve
+# it in the stage log before the evidence gate and the stage ledger parse it.
+if [[ -f "$OUT/siso_output" && ! -L "$OUT/siso_output" ]]; then
+  {
+    echo "SANDIUM_SISO_OUTPUT_FILE_BEGIN=$OUT/siso_output"
+    cat "$OUT/siso_output"
+    echo "SANDIUM_SISO_OUTPUT_FILE_END=$OUT/siso_output"
+  } >> "$LOG"
+  echo "SANDIUM_SISO_OUTPUT_CAPTURE=PASS"
+elif [[ -e "$OUT/siso_output" || -L "$OUT/siso_output" ]]; then
+  echo "SANDIUM_SISO_OUTPUT_CAPTURE=UNSAFE_FILE_TYPE" >&2
+fi
 # Final Siso output is authoritative when it contains explicit action counts.
 # The helper recognizes structured action records and the proven Afterbird
 # summary format; source flags alone never satisfy this gate.
