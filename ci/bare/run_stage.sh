@@ -207,27 +207,44 @@ set +e
 setsid -w timeout --signal=INT --kill-after=60s "$REMAIN"s bash -c 'set -o pipefail; cd "$1"; autoninja -strict_remote -metrics_json "$2" -C "$3" -j80 chrome_public_apk 2>&1 | tee "$4"' _ "$SRC" "$METRICS" "$OUT" "$LOG" &
 PID=$!
 set -e
-WAIT=0; EVIDENCE=false
-while [[ "$WAIT" -lt 240 ]]; do
-  grep -Fq 'Regenerating ninja files' "$LOG" 2>/dev/null && { echo NINJA_REGEN_GATE=FAIL >&2; break; }
-  if grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute' "$LOG" "$METRICS" 2>/dev/null; then EVIDENCE=true; echo SISO_REMOTE_OR_CACHE_EVIDENCE=PASS; break; fi
-  kill -0 "$PID" 2>/dev/null || break; sleep 15; WAIT=$((WAIT+15))
+EVIDENCE=false
+NINJA_REGEN_FAIL=false
+# Do not kill a healthy Siso build merely because its remote/cache summary has
+# not been flushed yet. The successful SANDFOX/Afterbird build emitted its
+# decisive "local:N remote:N cache:N" evidence at shutdown, not in early action
+# records. Keep the stage's hard wall-clock timeout, fail fast only on Ninja
+# regeneration, and verify the completed log/metrics after autoninja exits.
+while kill -0 "$PID" 2>/dev/null; do
+  if grep -Fq 'Regenerating ninja files' "$LOG" 2>/dev/null; then
+    echo "NINJA_REGEN_GATE=FAIL; refusing to spend the remaining stage budget" >&2
+    NINJA_REGEN_FAIL=true
+    kill -INT -- "-$PID" 2>/dev/null || true
+    sleep 5
+    kill -TERM -- "-$PID" 2>/dev/null || true
+    sleep 5
+    kill -KILL -- "-$PID" 2>/dev/null || true
+    break
+  fi
+  if [[ "$EVIDENCE" != true ]] && grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute|local:[[:space:]]*[0-9]+[[:space:]]+remote:[[:space:]]*[1-9][0-9]*[[:space:]]+cache:[[:space:]]*[0-9]+' "$LOG" "$METRICS" 2>/dev/null; then
+    EVIDENCE=true
+    echo "SISO_REMOTE_OR_CACHE_EVIDENCE=OBSERVED_DURING_BUILD"
+  fi
+  sleep 15
 done
-if [[ "$EVIDENCE" != true ]] && kill -0 "$PID" 2>/dev/null; then
-  echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL >&2; kill -INT -- "-$PID" 2>/dev/null || true; sleep 5; kill -TERM -- "-$PID" 2>/dev/null || true; sleep 5; kill -KILL -- "-$PID" 2>/dev/null || true
-fi
 set +e; wait "$PID"; RET=$?; set -e; echo AUTONINJA_EXIT_CODE=$RET
-# The build can finish before the polling loop observes evidence, or Siso may
-# flush its final metrics only at shutdown. Recheck the completed logs, then
-# fail closed: an APK alone must never bypass the remote/cache execution gate.
-if [[ "$EVIDENCE" != true ]] && grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute' "$LOG" "$METRICS" 2>/dev/null; then
-  EVIDENCE=true
-  echo SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS
+if [[ "$NINJA_REGEN_FAIL" == true ]]; then
+  echo "SISO_REMOTE_OR_CACHE_EVIDENCE=NOT_CHECKED_NINJA_REGENERATION_FAILURE" >&2
+  exit 51
 fi
-if [[ "$EVIDENCE" != true ]]; then
-  echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF >&2
+# Final Siso output is authoritative when it contains explicit action counts.
+# The helper recognizes structured action records and the proven Afterbird
+# summary format; source flags alone never satisfy this gate.
+if ! python3 "$CONTROL/ci/bare/siso_evidence.py" --require-remote --log "$LOG" --metrics "$METRICS"; then
+  echo "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" >&2
   exit 50
 fi
+echo "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_LOGS"
+
 echo "DIAG_METRICS_LINES=$(wc -l < "$METRICS" 2>/dev/null || echo 0)"
 echo "DIAG_METRICS_HEAD_BEGIN"; head -n 10 "$METRICS" 2>/dev/null || true; echo "DIAG_METRICS_HEAD_END"
 echo "DIAG_SISO_LOG_TAIL_BEGIN"; tail -n 160 "$LOG" 2>/dev/null || true; echo "DIAG_SISO_LOG_TAIL_END"
