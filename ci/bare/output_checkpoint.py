@@ -26,7 +26,7 @@ from build_identity import IdentityError, source_identity
 SCHEMA = 2
 OUT_RELATIVE = Path("src/out/android_Debug_arm64")
 CHECKPOINT_NAME = "sandium-build-output-checkpoint"
-META_NAME = "sandium-build-output-checkpoint.meta.json"
+META_NAME = ".sandium-output-checkpoint.meta.json"
 REPORT_NAME = "sandium-state-handoff-report.json"
 CONTROL_INPUTS = (
     ".circleci/config.yml",
@@ -139,24 +139,22 @@ def verify_manifest_files(output: Path, entries: Any) -> None:
 def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
                        *, pre_source: bool, required: bool) -> dict[str, Any] | None:
     checkpoint = root / CHECKPOINT_NAME
-    meta_path = root / META_NAME
+    meta_path = checkpoint / META_NAME
 
-    def miss(reason: str) -> None:
+    def miss(reason: str) -> None
         print(f"SANDIUM_OUTPUT_CHECKPOINT=MISS reason={reason}")
         if required:
             raise CheckpointError(reason)
         # Quarantine only the restored working-copy candidate. CircleCI's remote
         # immutable cache remains untouched. This lets a later useful checkpoint
         # be saved under the same schema without overwriting the rejected directory.
-        if checkpoint.exists() or checkpoint.is_symlink() or meta_path.exists() or meta_path.is_symlink():
+        if checkpoint.exists() or checkpoint.is_symlink():
             quarantine = root / "sandium-rejected-output-checkpoints"
             quarantine.mkdir(parents=True, exist_ok=True)
-            for path in (checkpoint, meta_path):
-                if path.exists() or path.is_symlink():
-                    target = quarantine / (path.name + f".stage-{stage}.rejected")
-                    if target.exists() or target.is_symlink():
-                        target = quarantine / (path.name + f".stage-{stage}.{int(datetime.now().timestamp())}.rejected")
-                    os.replace(path, target)
+            target = quarantine / (checkpoint.name + f".stage-{stage}.rejected")
+            if target.exists() or target.is_symlink():
+                target = quarantine / (checkpoint.name + f".stage-{stage}.{int(datetime.now().timestamp())}.rejected")
+            os.replace(checkpoint, target)
         return None
 
     if not checkpoint.is_dir() or checkpoint.is_symlink() or not meta_path.is_file() or meta_path.is_symlink():
@@ -221,6 +219,10 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         restored_identity = source_identity(control, root, require_gn=True)
         if identity_digest(restored_identity) != meta["build_identity_sha256"]:
             raise CheckpointError("Restored source/toolchain/GN identity differs from checkpoint")
+        # The cache metadata is stored inside the cached directory so a save
+        # cannot publish metadata without the matching output tree. Remove it
+        # only after every validation passes; it is not a Chromium build input.
+        (output / META_NAME).unlink()
     except Exception:
         if output.exists() or output.is_symlink():
             # Keep a failed candidate for forensics instead of deleting a restored tree.
@@ -261,7 +263,7 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
                  ledger_path: Path | None, *, partial: bool) -> int:
     output = root / OUT_RELATIVE
     checkpoint = root / CHECKPOINT_NAME
-    meta_path = root / META_NAME
+    meta_path = checkpoint / META_NAME
     if checkpoint.is_dir() and not checkpoint.is_symlink() and meta_path.is_file() and not meta_path.is_symlink():
         print("SANDIUM_OUTPUT_CHECKPOINT=ALREADY_PACKED")
         return 0
@@ -312,13 +314,14 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "local_compiled_outputs_archived": True,
             "checkpoint_transport": "CircleCI cache of full output directory; no extra tar/zstd archive",
         }
-        # Publish metadata before moving. If a move fails, no checkpoint is advertised.
-        temp_meta = root / (META_NAME + ".tmp")
-        write_json_atomic(temp_meta, payload)
+        # Store metadata inside the checkpoint directory. CircleCI can then
+        # save one atomic cache path; an absent output tree cannot leave a
+        # misleading metadata-only cache entry behind.
         os.replace(output, checkpoint)
         try:
-            os.replace(temp_meta, meta_path)
+            write_json_atomic(meta_path, payload)
         except Exception:
+            (checkpoint / META_NAME).unlink(missing_ok=True)
             os.replace(checkpoint, output)
             raise
         print("SANDIUM_OUTPUT_CHECKPOINT_PACK=PASS")
