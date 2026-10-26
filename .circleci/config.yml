@@ -195,10 +195,8 @@ jobs:
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-
-                  # One-time migration fallback keeps the known-good legacy Stage 1 checkpoint.
-                  # Legacy Stage 2-5 keys are excluded because failed jobs wrote tiny unusable archives.
-                  - # One-time migration fallback for the known substantial legacy Stage 1 checkpoint.
-                  # Its old full-CI fingerprint is fixed here; it must not follow the rotating orchestration hash.
+                  # One-time migration fallback; only the known-good legacy Stage 1 key is eligible.
+                  # Its old full-CI fingerprint is fixed here so orchestration edits do not orphan it.
                   - sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-
       - when:
           condition:

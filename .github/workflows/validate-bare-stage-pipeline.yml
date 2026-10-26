@@ -106,7 +106,8 @@ jobs:
           assert "sandium-state-good-v4-" in config and "sandium-output-good-v5-" in config
           assert "sandium-verified-apk-v1-" in config
           assert "sandium-state-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
-          assert "sandium-output-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
+          legacy_output_key = "sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-"
+          assert legacy_output_key in config, "the known-good legacy Stage 1 output checkpoint must remain reachable"
           for failed_stage in (2, 3, 4, 5):
               assert f"sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-{failed_stage}-" not in config
               assert f"sandium-state-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
