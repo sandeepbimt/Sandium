@@ -174,16 +174,22 @@ echo "SANDIUM_DEPOT_TOOLS_PIN=$PIN"
 export PATH="$DEPOT:$PATH"
 if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
   echo "DEPOT_TOOLS_BOOTSTRAP_BEGIN=$(date -u +%FT%TZ)"
-  if [[ -x "$DEPOT/update_depot_tools" ]]; then
-    (cd "$DEPOT" && ./update_depot_tools)
-  elif [[ -x "$DEPOT/ensure_bootstrap" ]]; then
-    (cd "$DEPOT" && ./ensure_bootstrap)
+  # ensure_bootstrap initializes the pinned checkout without updating its Git revision.
+  if [[ -x "$DEPOT/ensure_bootstrap" ]]; then
+    (cd "$DEPOT" && DEPOT_TOOLS_UPDATE=0 ./ensure_bootstrap)
+  elif [[ -x "$DEPOT/update_depot_tools" ]]; then
+    (cd "$DEPOT" && DEPOT_TOOLS_UPDATE=0 ./update_depot_tools)
   else
     echo "DEPOT_TOOLS_BOOTSTRAP_HELPER_MISSING" >&2
     find "$DEPOT" -maxdepth 2 \( -iname "*bootstrap*" -o -iname "*update*depot*" \) -print | head -n 80 >&2 || true
     exit 46
   fi
   test -s "$DEPOT/python3_bin_reldir.txt" || { echo "DEPOT_TOOLS_BOOTSTRAP_MARKER_MISSING" >&2; exit 46; }
+  ACTUAL_DEPOT_TOOLS_PIN="$(git -C "$DEPOT" rev-parse HEAD)"
+  if [[ "$ACTUAL_DEPOT_TOOLS_PIN" != "$PIN" ]]; then
+    echo "SANDIUM_DEPOT_TOOLS_BOOTSTRAP_CHANGED_PIN expected=$PIN actual=$ACTUAL_DEPOT_TOOLS_PIN" >&2
+    exit 46
+  fi
   echo "DEPOT_TOOLS_BOOTSTRAP=PASS"
   echo "DEPOT_TOOLS_BOOTSTRAP_END=$(date -u +%FT%TZ)"
 fi
