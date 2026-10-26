@@ -21,9 +21,9 @@ IDENTITY = {
 }
 CONTROL_HASHES = {name: hashlib.sha256(name.encode()).hexdigest() for name in M.CONTROL_INPUTS}
 
-def make_output(path: Path) -> dict[str, str]:
+def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str]:
     path.mkdir(parents=True)
-    files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", ".siso_fs_state": "siso state\n"}
+    files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", state_name: "siso resumable state\n"}
     for name, contents in files.items():
         (path / name).write_text(contents, encoding="utf-8")
     return {name: M.sha256_file(path / name) for name in files}
@@ -100,6 +100,14 @@ class OutputCheckpointTests(unittest.TestCase):
             with self.assertRaises(M.CheckpointError):
                 M.output_manifest(output)
 
+    def test_output_accepts_nonempty_journal_when_base_state_is_absent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "out"
+            make_output(output, state_name=".siso_fs_state.journal")
+            manifest = M.output_manifest(output)
+            self.assertIn(".siso_fs_state.journal", manifest)
+            self.assertNotIn(".siso_fs_state", manifest)
+
     def test_pack_and_restore_full_output_checkpoint_end_to_end(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -139,6 +147,35 @@ class OutputCheckpointTests(unittest.TestCase):
                 report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
                 self.assertTrue(report["local_compiled_outputs_restored"])
                 self.assertEqual(report["source_stage"], 1)
+
+    def test_pack_and_restore_full_output_checkpoint_from_journal_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            make_output(output, state_name=".siso_fs_state.journal")
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 51781,
+                "total_action_count": 108992,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": False,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+                checkpoint = root / M.CHECKPOINT_NAME
+                self.assertTrue((checkpoint / ".siso_fs_state.journal").is_file())
+                output.mkdir(parents=True)
+                (output / "args.gn").write_text("fresh args\n", encoding="utf-8")
+                (output / "build.ninja").write_text("fresh graph\n", encoding="utf-8")
+                self.assertEqual(M.command_restore(root, control, 2, "wf-1", required=True), 0)
+                self.assertTrue((output / ".siso_fs_state.journal").is_file())
+                self.assertFalse((output / ".siso_fs_state").exists())
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
