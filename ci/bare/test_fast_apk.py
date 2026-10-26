@@ -31,6 +31,7 @@ class FastApkTests(unittest.TestCase):
         with zipfile.ZipFile(apk, "w") as archive:
             archive.writestr("AndroidManifest.xml", "binary-manifest")
             archive.writestr("classes.dex", "dex")
+            archive.writestr("assets/padding.bin", b"x" * 1_000_100)
         digest = hashlib.sha256(apk.read_bytes()).hexdigest()
         identity = "e" * 64
         manifest = {
