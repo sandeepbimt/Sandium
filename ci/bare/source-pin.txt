@@ -7,3 +7,4 @@ target_abi=arm64
 android_min_sdk=29
 build_config=Debug
 artifact_name=Sandium-debug-arm64.apk
+toolchain_depot_tools_commit=faceefec3fab70643e950caad40fded806877988
