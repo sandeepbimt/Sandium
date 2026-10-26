@@ -15,7 +15,7 @@ def validate():
   errors.append("APK completion must fail closed without required final-log Siso remote/cache proof")
  if "EVIDENCE_REQUIREMENTS+=(--require-cache)" not in run_stage:
   errors.append("stages 2-5 must require remote action-cache hits to prove reuse")
- if 'siso_evidence.py" --require-remote --log "$LOG" --metrics "$METRICS"' not in run_stage:
+ if 'siso_evidence.py" "${EVIDENCE_REQUIREMENTS[@]}" --log "$LOG" --log "$SISO_OUTPUT_CAPTURE" --metrics "$METRICS"' not in run_stage:
   errors.append("final Siso logs/metrics must be parsed using the reviewed evidence helper")
  if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_LOGS" not in run_stage:
   errors.append("positive final Siso log evidence must be recorded before build progress is accepted")
