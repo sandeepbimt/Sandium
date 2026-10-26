@@ -42,6 +42,7 @@ CONTROL_INPUTS = (
     "ci/bare/output_checkpoint.py",
     "ci/bare/fast_apk.py",
     "ci/bare/cache_fingerprint.py",
+    "ci/bare/source_cache_fingerprint.py",
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )
