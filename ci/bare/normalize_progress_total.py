@@ -17,6 +17,7 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_identity import IdentityError, source_identity
 
 MAX_GRAPH_TOTAL_DRIFT = 0.01
@@ -86,7 +87,7 @@ def main() -> int:
         total = normalize_total(
             stage=args.stage,
             observed_total=args.observed_total,
-            previous_ledger=args.previous_ledger.resolve() if args.previous_ledger else None,
+            previous_ledger=args.previous_ledger.absolute() if args.previous_ledger else None,
             control=args.control.resolve(),
             root=args.root.resolve(),
         )
