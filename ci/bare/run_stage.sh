@@ -48,6 +48,39 @@ echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
 if [[ "$STAGE" -gt 1 ]]; then
   test -s "$PREV" || { echo "PREVIOUS_LEDGER_MISSING=$PREV" >&2; exit 41; }
   if grep -qx BUILD_FINISHED=true "$PREV_STATUS" 2>/dev/null; then
+    # A green prior status alone is insufficient: the cache must contain the
+    # exact verified APK/manifest and the matching identity-bound ledger.
+    python3 - "$PREV" "$PREV_STATUS" "$ROOT/sandium-output/Sandium-debug-arm64.apk" "$ROOT/sandium-output/build-manifest.json" <<'PY'
+import hashlib,json,sys,zipfile
+from pathlib import Path
+ledger_path,status_path,apk_path,manifest_path=map(Path,sys.argv[1:5])
+ledger=json.loads(ledger_path.read_text(encoding="utf-8"))
+status={}
+for line in status_path.read_text(encoding="utf-8").splitlines():
+ if "=" in line:
+  k,v=line.split("=",1); status[k]=v
+if not apk_path.is_file() or apk_path.is_symlink() or not manifest_path.is_file() or manifest_path.is_symlink():
+ raise SystemExit("APK_FAST_PATH=FAIL cached APK or manifest missing/unsafe")
+manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+h=hashlib.sha256()
+with apk_path.open("rb") as f:
+ for block in iter(lambda:f.read(1024*1024),b""): h.update(block)
+digest=h.hexdigest(); size=apk_path.stat().st_size
+with zipfile.ZipFile(apk_path) as z:
+ if z.testzip() is not None or "AndroidManifest.xml" not in z.namelist() or not any(n.startswith("classes") and n.endswith(".dex") for n in z.namelist()):
+  raise SystemExit("APK_FAST_PATH=FAIL cached APK ZIP/content invalid")
+if size < 1_000_000 or manifest.get("artifact_verified") is not True or manifest.get("apksigner_verification")!="PASS":
+ raise SystemExit("APK_FAST_PATH=FAIL cached manifest lacks verified artifact proof")
+if manifest.get("artifact_sha256")!=digest or manifest.get("artifact_bytes")!=size:
+ raise SystemExit("APK_FAST_PATH=FAIL cached APK differs from manifest")
+if ledger.get("artifact_verified") is not True or ledger.get("build_identity_sha256")!=manifest.get("build_identity_sha256"):
+ raise SystemExit("APK_FAST_PATH=FAIL cached ledger/manifest identity mismatch")
+if status.get("APK_SHA256")!=digest or status.get("APK_SIZE_BYTES")!=str(size) or status.get("BUILD_IDENTITY_SHA256")!=manifest.get("build_identity_sha256"):
+ raise SystemExit("APK_FAST_PATH=FAIL cached status/manifest mismatch")
+if status.get("APK_ARCHIVE_VALID")!="true" or status.get("APK_SIGNATURE_VERIFIED")!="true":
+ raise SystemExit("APK_FAST_PATH=FAIL cached status lacks archive/signature proof")
+print("APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS")
+PY
     python3 - "$PREV" "$LEDGER" "$PREV_STATUS" "$STATUS" "$STATE_REPORT" "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
@@ -68,7 +101,7 @@ ledger["state_handoff"]={
  "current_stage":stage,"current_workflow_id":workflow,
  "build_identity_sha256":identity_hash,
  "local_compiled_outputs_restored":False,
- "reason":"A verified APK already exists; no compilation work remains"
+ "reason":"Cached APK, manifest, status and ledger revalidated; no compilation work remains"
 }
 ledger_out.write_text(json.dumps(ledger,indent=2,sort_keys=True)+"\n",encoding="utf-8")
 prior_status["STAGE"]=str(stage)
@@ -78,9 +111,7 @@ PY
     echo "APK_FAST_PATH=PASS propagated_previous_stage=$((STAGE-1))"
     echo "SANDIUM_BUILD_WORK_REMAINING=no"
     exit 0
-  fi
-fi
-# A compatible prior useful run may already contain a verified APK. Validate the
+  # A compatible prior useful run may already contain a verified APK. Validate the
 # cache identity, saved manifest, SHA-256, ZIP structure, and recorded signature
 # verification before skipping any source/build work.
 if [[ "$STAGE" -eq 1 && -s "$STATE_ARCHIVE" && -s "$STATE_META" && -s "$ROOT/sandium-output/Sandium-debug-arm64.apk" && -s "$ROOT/sandium-output/build-manifest.json" ]]; then
