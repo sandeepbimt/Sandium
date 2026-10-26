@@ -99,7 +99,7 @@ jobs:
           assert config.index("SANDIUM_FINAL_APK_GATE=PASS") < config.index("Publish a verified APK cache for future five-stage fast paths"), "verified APK cache must only be saved after final validation"
           assert config.index("Save the synchronized source tree") < config.index("Build one bounded incremental window"), "source cache must be created before GN output"
           assert config.index("Start the full stage budget clock") < config.index("restore_cache:"), "stage budget must include setup and restores"
-          assert 'sandium-state-v2-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's Stage 5 state"
+          assert 'sandium-state-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-{{ .Environment.CIRCLE_WORKFLOW_ID }}-' in config, "final gate must restore the current workflow's Stage 5 state"
 
           assert "SANDIUM_OUTPUT_CHECKPOINT=RESTORED" in checkpoint
           assert '"local_compiled_outputs_restored": True' in checkpoint
@@ -119,7 +119,8 @@ jobs:
           assert 'test -s "$ROOT/.gclient_entries"' in bootstrap
           assert "SANDIUM_SOURCE_CACHE=HIT_VALIDATED" in bootstrap
           assert "ci/bare/source_cache_fingerprint.py" in build_fingerprint
-          assert ".circleci/config.yml" in build_fingerprint
+          assert ".circleci/config.yml" not in build_fingerprint, "routine pipeline config edits must not change build cache identity"
+          assert ".circleci/config.yml" not in checkpoint, "routine pipeline config edits must not invalidate compatible output checkpoints"
           assert ".circleci/config.yml" not in source_fingerprint, "routine build pipeline edits must not force another Chromium sync"
           assert "source-pin.txt" in source_fingerprint and "bootstrap_chromium.sh" in source_fingerprint
           assert "SANDIUM_STATE_HANDOFF_PREFLIGHT=PASS" in handoff
