@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
-STAGE="$1"; [[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
+MODE=build
+if [[ "${1:-}" == "--prepare-source" ]]; then MODE=prepare-source; STAGE="${2:-}"; else STAGE="${1:-}"; fi
+[[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
 ROOT="${CIRCLE_WORKING_DIRECTORY:-$HOME/project}"; ROOT="${ROOT/#\~/$HOME}"; CONTROL="$ROOT/sandium-control"; TS_EPOCH=946684800; TS_POLICY=epoch_946684800_regular_files_v1
-STAGE_START_TS="$(date +%s)"
+STAGE_START_TS="${STAGE_START_TS:-$(cat "$ROOT/.sandium-stage-start-epoch" 2>/dev/null || date +%s)}"
 HANDOFF="$ROOT/ci-handoff/stage-$STAGE"; LEDGER="$HANDOFF/ledger.json"; STATUS="$HANDOFF/status.txt"
 PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"
 mkdir -p "$ROOT/sandium-output"
-: > "$ROOT/sandium-fetch.log"
-: > "$ROOT/sandium-gclient-sync.log"
-: > "$ROOT/sandium-gclient-config.log"
-: > "$ROOT/sandium-git-trace.log"
+touch "$ROOT/sandium-fetch.log" "$ROOT/sandium-gclient-sync.log" "$ROOT/sandium-gclient-config.log" "$ROOT/sandium-git-trace.log"
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
 STATE_TOOL="$CONTROL/ci/bare/state_handoff.py"
@@ -33,15 +32,19 @@ echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 # Never let stale status suppress this stage's failure status.
 rm -f "$LEDGER" "$STATUS" "$STATE_REPORT"
 printf '{"schema":1,"SANDIUM_STATE_HANDOFF":"NOT_RUN","current_stage":%s,"current_workflow_id":"%s","reason":"runner exited before state validation"}\n' "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" > "$STATE_REPORT"
-trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+if [[ "$MODE" == "build" ]]; then
+  trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+fi
 echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
 done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py"
+python3 -m py_compile "$CONTROL/ci/bare/"*.py
 python3 "$CONTROL/ci/bare/test_build_identity.py"
 python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
+python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
+python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
@@ -196,6 +199,14 @@ for f in "$SRC/DEPS" "$SRC/chrome/VERSION" "$SRC/build/config/compiler/compiler.
   test -f "$f" && test "$(stat -c %Y "$f")" = "$TS_EPOCH" || { echo "SOURCE_TIMESTAMP_VERIFY=FAIL $f" >&2; exit 45; }
 done
 echo "SOURCE_TIMESTAMP_POLICY=$TS_POLICY"; echo SOURCE_TIMESTAMP_VERIFY=PASS
+if [[ "$MODE" == "prepare-source" ]]; then
+  echo "SANDIUM_SOURCE_PREPARATION=PASS"
+  echo "SANDIUM_SOURCE_CACHE_READY=PASS"
+  echo "CHROMIUM_SYNC_OR_CACHE_CHECK=PASS"
+  echo "GN_GENERATION_RUN=no"
+  echo "COMPILATION_RUN=no"
+  exit 0
+fi
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
 test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
