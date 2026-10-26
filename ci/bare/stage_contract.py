@@ -19,6 +19,8 @@ def validate():
     fast_apk = (here / "fast_apk.py").read_text(encoding="utf-8")
     manifest_preflight_path = here / "manifest_preflight.py"
     manifest_preflight = manifest_preflight_path.read_text(encoding="utf-8") if manifest_preflight_path.is_file() else ""
+    progress_normalizer_path = here / "normalize_progress_total.py"
+    progress_normalizer = progress_normalizer_path.read_text(encoding="utf-8") if progress_normalizer_path.is_file() else ""
     timestamp = "epoch_946684800_regular_files_v1"
 
     if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
@@ -43,6 +45,14 @@ def validate():
         errors.append("one supported Siso manifest regeneration must not discard a completed stage window")
     if "two consecutive dry runs" not in manifest_preflight or '"-n"' not in manifest_preflight:
         errors.append("manifest preflight must be a no-op dry run with a bounded stability check")
+    if not progress_normalizer:
+        errors.append("small action-count variance helper is missing")
+    if 'normalize_progress_total.py"' not in run_stage:
+        errors.append("runner must normalize progress count only with the identity-bound helper")
+    elif run_stage.index('normalize_progress_total.py"') > run_stage.index('stage_ledger.py" --stage'):
+        errors.append("progress denominator must be normalized before strict stage-ledger validation")
+    if "build identity differs" not in progress_normalizer or "MAX_GRAPH_TOTAL_DRIFT = 0.01" not in progress_normalizer:
+        errors.append("progress normalization must require exact build identity and a 1% maximum drift")
     if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("full output checkpoint must write explicit handoff evidence")
     if "SANDIUM_APK_FAST_PATH=PASS" not in fast_apk:
