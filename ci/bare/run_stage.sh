@@ -12,11 +12,11 @@ mkdir -p "$ROOT/sandium-output"
 : > "$ROOT/sandium-gclient-config.log"
 : > "$ROOT/sandium-git-trace.log"
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
-DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
+DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"; SISO_OUTPUT_CAPTURE="$ROOT/stage-$STAGE-siso-output.log"
 STATE_TOOL="$CONTROL/ci/bare/state_handoff.py"
 STATE_ARCHIVE="$ROOT/sandium-stage-state.tar.zst"; STATE_META="$ROOT/sandium-stage-state.meta"
 STATE_REPORT="$ROOT/sandium-state-handoff-report.json"
-: > "$LOG"; : > "$METRICS"
+: > "$LOG"; : > "$METRICS"; : > "$SISO_OUTPUT_CAPTURE"
 WALL=2820; [[ "$STAGE" -eq 5 ]] && WALL=3300
 exec > >(tee -a "$DRIVER") 2>&1
 echo "DIAG_STAGE_START_UTC=$(date -u +%FT%TZ)"
@@ -246,14 +246,18 @@ if [[ -f "$OUT/siso_output" && ! -L "$OUT/siso_output" ]]; then
     cat "$OUT/siso_output"
     echo "SANDIUM_SISO_OUTPUT_FILE_END=$OUT/siso_output"
   } >> "$LOG"
+  cp -- "$OUT/siso_output" "$SISO_OUTPUT_CAPTURE"
   echo "SANDIUM_SISO_OUTPUT_CAPTURE=PASS"
 elif [[ -e "$OUT/siso_output" || -L "$OUT/siso_output" ]]; then
+  printf "SANDIUM_SISO_OUTPUT_CAPTURE=UNSAFE_FILE_TYPE\n" > "$SISO_OUTPUT_CAPTURE"
   echo "SANDIUM_SISO_OUTPUT_CAPTURE=UNSAFE_FILE_TYPE" >&2
+else
+  printf "SANDIUM_SISO_OUTPUT_CAPTURE=NOT_PRESENT\n" > "$SISO_OUTPUT_CAPTURE"
 fi
 # Final Siso output is authoritative when it contains explicit action counts.
 # The helper recognizes structured action records and the proven Afterbird
 # summary format; source flags alone never satisfy this gate.
-if ! python3 "$CONTROL/ci/bare/siso_evidence.py" --require-remote --log "$LOG" --metrics "$METRICS"; then
+if ! python3 "$CONTROL/ci/bare/siso_evidence.py" --require-remote --log "$LOG" --log "$SISO_OUTPUT_CAPTURE" --metrics "$METRICS"; then
   echo "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" >&2
   exit 50
 fi
