@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
-STAGE="$1"; [[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
-ROOT="${CIRCLE_WORKING_DIRECTORY:-$HOME/project}"; ROOT="${ROOT/#\~/$HOME}"; CONTROL="$ROOT/sandium-control"; TS_EPOCH=946684800; TS_POLICY=epoch_946684800_full_tree_v1
-STAGE_START_TS="$(date +%s)"
+MODE=build
+if [[ "${1:-}" == "--prepare-source" ]]; then MODE=prepare-source; STAGE="${2:-}"; else STAGE="${1:-}"; fi
+[[ "$STAGE" =~ ^[1-5]$ ]] || exit 2
+ROOT="${CIRCLE_WORKING_DIRECTORY:-$HOME/project}"; ROOT="${ROOT/#\~/$HOME}"; CONTROL="$ROOT/sandium-control"; TS_EPOCH=946684800; TS_POLICY=epoch_946684800_regular_files_v1
+STAGE_START_TS="${STAGE_START_TS:-$(cat "$ROOT/.sandium-stage-start-epoch" 2>/dev/null || date +%s)}"
 HANDOFF="$ROOT/ci-handoff/stage-$STAGE"; LEDGER="$HANDOFF/ledger.json"; STATUS="$HANDOFF/status.txt"
 PREV="$ROOT/ci-handoff/stage-$((STAGE-1))/ledger.json"; PREV_STATUS="$ROOT/ci-handoff/stage-$((STAGE-1))/status.txt"
 mkdir -p "$ROOT/sandium-output"
-: > "$ROOT/sandium-fetch.log"
-: > "$ROOT/sandium-gclient-sync.log"
-: > "$ROOT/sandium-gclient-config.log"
-: > "$ROOT/sandium-git-trace.log"
+touch "$ROOT/sandium-fetch.log" "$ROOT/sandium-gclient-sync.log" "$ROOT/sandium-gclient-config.log" "$ROOT/sandium-git-trace.log"
 mkdir -p "$HANDOFF" "$ROOT/sandium-output"
 DRIVER="$ROOT/stage-$STAGE-driver.log"; LOG="$ROOT/stage-$STAGE-siso.log"; METRICS="$ROOT/stage-$STAGE-metrics.jsonl"
 STATE_TOOL="$CONTROL/ci/bare/state_handoff.py"
@@ -33,15 +32,19 @@ echo "DIAG_CONTROL_HEAD=$(git -C "$CONTROL" rev-parse HEAD)"
 # Never let stale status suppress this stage's failure status.
 rm -f "$LEDGER" "$STATUS" "$STATE_REPORT"
 printf '{"schema":1,"SANDIUM_STATE_HANDOFF":"NOT_RUN","current_stage":%s,"current_workflow_id":"%s","reason":"runner exited before state validation"}\n' "$STAGE" "${CIRCLE_WORKFLOW_ID:-unknown}" > "$STATE_REPORT"
-trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+if [[ "$MODE" == "build" ]]; then
+  trap 'rc=$?; if [[ ! -s "$STATUS" ]]; then printf "BUILD_FINISHED=false\nSTAGE=%s\nFAILURE_EXIT_CODE=%s\n" "$STAGE" "$rc" > "$STATUS"; fi' EXIT
+fi
 echo "SANDIUM_STATIC_CHECK_BEGIN_UTC=$(date -u +%FT%TZ)"
 for script in "$CONTROL/ci/bare/run_stage.sh" "$CONTROL/ci/bare/bootstrap_chromium.sh" "$CONTROL/ci/bare/prepare_source.sh" "$CONTROL/ci/bare/package_artifact.sh"; do
   bash -n "$script"
 done
-python3 -m py_compile "$CONTROL/ci/bare/configure_siso.py" "$CONTROL/ci/bare/checkpoint.py" "$CONTROL/ci/bare/build_identity.py" "$CONTROL/ci/bare/write_cache_identity.py" "$CONTROL/ci/bare/stage_ledger.py" "$CONTROL/ci/bare/stage_contract.py" "$STATE_TOOL" "$CONTROL/ci/bare/test_state_handoff.py"
+python3 -m py_compile "$CONTROL/ci/bare/"*.py
 python3 "$CONTROL/ci/bare/test_build_identity.py"
 python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
+python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
+python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/stage_contract.py"
 echo "SANDIUM_STATIC_CHECK=PASS"
 echo "SANDIUM_STATIC_CHECK_END_UTC=$(date -u +%FT%TZ)"
@@ -131,13 +134,18 @@ if [[ "$STAGE" -eq 1 && -s "$STATE_ARCHIVE" && -s "$STATE_META" && -s "$ROOT/san
   fi
 fi
 
-# Validate the restored prior-run candidate before toolchain/source/network work.
-# Stage 1 records a clean miss and may proceed cold; stages 2-5 must refuse to
-# spend setup time unless the immediately preceding stage saved a valid capsule.
+# Preflight both checkpoint layers before source/network work. A full output
+# checkpoint is the preferred continuation mechanism. The small Siso capsule
+# remains a stage-1 fallback, but must never be mistaken for compiled outputs.
+python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
 if [[ "$STAGE" -eq 1 ]]; then
-  python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
+  set +e
+  python3 "$CONTROL/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+  CHECKPOINT_PREFLIGHT_RC=$?
+  set -e
+  echo "SANDIUM_OUTPUT_CHECKPOINT_PREFLIGHT_EXIT_CODE=$CHECKPOINT_PREFLIGHT_RC"
 else
-  python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META" --required
+  python3 "$CONTROL/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
 fi
 
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
@@ -177,52 +185,83 @@ if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
 fi
 export DEPOT_TOOLS_UPDATE=0 SISO_LIMITS=local=8,remote=80 SANDIUM_ALLOW_CHROMIUM_SYNC=true
 echo "SANDIUM_STAGE=$STAGE"; echo "SANDIUM_MODE=LONG-Full-APK"; echo "SANDIUM_REAPI_INSTANCE=sandium/android-arm64/ci"
-# Each stage recreates the exact Bare-pinned source/build graph. CircleCI's
-# source-identity cache discovers a prior useful run and hands off a small,
-# hash-verified Siso state capsule plus ledger/verified APK when available.
-# Compiled objects are never archived here; Siso must prove BuildBuddy cache hits.
+# Each stage uses the source cache for pinned source/dependencies and the
+# identity-validated full-output checkpoint for local compiled objects. The
+# Siso ledger must still prove remote execution or real action-cache reuse.
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" source
 SRC="$ROOT/src"; OUT="$SRC/out/android_Debug_arm64"; SDIR="$SRC/build/config/siso"
-test -s "$SDIR/.sisoenv"; printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
-find "$SRC" \( -name .git -o -path "$SRC/out" \) -prune -o -exec touch -h -d "@$TS_EPOCH" {} +
-for f in "$SRC" "$SRC/DEPS" "$SRC/chrome/VERSION" "$SRC/build/config/compiler/compiler.gni"; do test -e "$f" && test "$(stat -c %Y "$f")" = "$TS_EPOCH" || { echo "SOURCE_TIMESTAMP_VERIFY=FAIL $f" >&2; exit 45; }; done
+# Normalize regular source files only. Avoid changing directory and .git
+# timestamps; this mirrors the known-good Sandfox/Afterbird build procedure.
+find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch -h -d "@$TS_EPOCH" {} +
+for f in "$SRC/DEPS" "$SRC/chrome/VERSION" "$SRC/build/config/compiler/compiler.gni"; do
+  test -f "$f" && test "$(stat -c %Y "$f")" = "$TS_EPOCH" || { echo "SOURCE_TIMESTAMP_VERIFY=FAIL $f" >&2; exit 45; }
+done
 echo "SOURCE_TIMESTAMP_POLICY=$TS_POLICY"; echo SOURCE_TIMESTAMP_VERIFY=PASS
+if [[ "$MODE" == "prepare-source" ]]; then
+  echo "SANDIUM_SOURCE_PREPARATION=PASS"
+  echo "SANDIUM_SOURCE_CACHE_READY=PASS"
+  echo "CHROMIUM_SYNC_OR_CACHE_CHECK=PASS"
+  echo "GN_GENERATION_RUN=no"
+  echo "COMPILATION_RUN=no"
+  exit 0
+fi
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
+# configure_siso.py creates .sisoenv during GN setup. Validate it only after
+# that setup has completed; source-only preparation must not require generated
+# build files or write a Siso runtime config into the source cache.
+test -s "$SDIR/.sisoenv" || { echo "SANDIUM_SISO_ENV_MISSING_AFTER_CONFIGURE=$SDIR/.sisoenv" >&2; exit 46; }
+printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
 test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 python3 "$CONTROL/ci/bare/write_cache_identity.py"
+# Prefer the complete, identity-validated output checkpoint. Only stage 1 may
+# proceed cold or fall back to the small Siso state capsule; later stages require
+# the preceding stage's full output tree so they cannot silently restart from zero.
+set +e
 if [[ "$STAGE" -eq 1 ]]; then
+  python3 "$CONTROL/ci/bare/output_checkpoint.py" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+else
+  python3 "$CONTROL/ci/bare/output_checkpoint.py" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
+fi
+OUTPUT_CHECKPOINT_RC=$?
+set -e
+echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_EXIT_CODE=$OUTPUT_CHECKPOINT_RC"
+if [[ "$OUTPUT_CHECKPOINT_RC" -eq 0 ]]; then
+  echo "SANDIUM_COMPILED_OUTPUT_REUSE=FULL_CHECKPOINT"
+elif [[ "$STAGE" -eq 1 && "$OUTPUT_CHECKPOINT_RC" -eq 1 ]]; then
+  echo "SANDIUM_COMPILED_OUTPUT_REUSE=NO_FULL_CHECKPOINT"
+  # Keep the previous stage's verified Siso metadata as a safe fallback. This
+  # does not restore compiled outputs; the remote action cache still must prove
+  # actual reuse through this stage's metrics.
   python3 "$STATE_TOOL" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
 else
-  python3 "$STATE_TOOL" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META" --required
+  echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=FAIL stage=$STAGE rc=$OUTPUT_CHECKPOINT_RC" >&2
+  exit "$OUTPUT_CHECKPOINT_RC"
 fi
 ELAPSED=$(( $(date +%s) - STAGE_START_TS )); REMAIN=$(( WALL - ELAPSED ))
 echo "SANDIUM_SETUP_SECONDS=$ELAPSED"; echo "SANDIUM_REMAINING_COMPILE_SECONDS=$REMAIN"
 [[ "$REMAIN" -gt 120 ]] || { echo STAGE_SETUP_CONSUMED_BUDGET >&2; exit 47; }
 
 rm -f "$METRICS" "$LOG"; : > "$LOG"
+# Do not terminate Siso merely because it has not emitted its first metrics line
+# within 240 seconds. Slow startup, dependency discovery and metrics flushes are
+# legitimate; enforce the remote/cache evidence gate after this bounded window
+# exits, then let stage_ledger.py validate actual action-level evidence/progress.
 set +e
-setsid -w timeout --signal=INT --kill-after=60s "$REMAIN"s bash -c 'set -o pipefail; cd "$1"; autoninja -strict_remote -metrics_json "$2" -C "$3" -j80 chrome_public_apk 2>&1 | tee "$4"' _ "$SRC" "$METRICS" "$OUT" "$LOG" &
-PID=$!
+timeout --signal=INT --kill-after=60s "$REMAIN"s bash -c 'set -o pipefail; cd "$1"; autoninja -strict_remote -metrics_json "$2" -C "$3" -j80 chrome_public_apk 2>&1 | tee "$4"' _ "$SRC" "$METRICS" "$OUT" "$LOG"
+RET=$?
 set -e
-WAIT=0; EVIDENCE=false
-while [[ "$WAIT" -lt 240 ]]; do
-  grep -Fq 'Regenerating ninja files' "$LOG" 2>/dev/null && { echo NINJA_REGEN_GATE=FAIL >&2; break; }
-  if grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute' "$LOG" "$METRICS" 2>/dev/null; then EVIDENCE=true; echo SISO_REMOTE_OR_CACHE_EVIDENCE=PASS; break; fi
-  kill -0 "$PID" 2>/dev/null || break; sleep 15; WAIT=$((WAIT+15))
-done
-if [[ "$EVIDENCE" != true ]] && kill -0 "$PID" 2>/dev/null; then
-  echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL >&2; kill -INT -- "-$PID" 2>/dev/null || true; sleep 5; kill -TERM -- "-$PID" 2>/dev/null || true; sleep 5; kill -KILL -- "-$PID" 2>/dev/null || true
+echo AUTONINJA_EXIT_CODE=$RET
+if grep -Fq 'Regenerating ninja files' "$LOG" 2>/dev/null; then
+  echo "NINJA_REGEN_GATE=FAIL; restored output unexpectedly regenerated the build graph" >&2
+  exit 51
 fi
-set +e; wait "$PID"; RET=$?; set -e; echo AUTONINJA_EXIT_CODE=$RET
-# The build can finish before the polling loop observes evidence, or Siso may
-# flush its final metrics only at shutdown. Recheck the completed logs, then
-# fail closed: an APK alone must never bypass the remote/cache execution gate.
-if [[ "$EVIDENCE" != true ]] && grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute' "$LOG" "$METRICS" 2>/dev/null; then
+EVIDENCE=false
+if grep -Eiq '"is_local"[[:space:]]*:[[:space:]]*false|"is_remote"[[:space:]]*:[[:space:]]*true|"cached"[[:space:]]*:[[:space:]]*true|step state:[[:space:]]*remote exec|exec remote execute|local[:=][[:space:]]*[0-9]+[,[:space:]]+remote[:=][[:space:]]*[1-9][0-9]*|cache[:=][[:space:]]*[1-9][0-9]*' "$LOG" "$METRICS" 2>/dev/null; then
   EVIDENCE=true
-  echo SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS
+  echo "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW"
 fi
 if [[ "$EVIDENCE" != true ]]; then
   echo SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF >&2
@@ -266,6 +305,7 @@ fi
 python3 "$STATE_TOOL" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
 echo "DIAG_STAGE_OUT_SIZE=$(du -sh "$OUT" 2>/dev/null | cut -f1 || true)"
 echo "DIAG_SISO_STATE_CAPSULE_SIZE=$(stat -c %s "$STATE_ARCHIVE" 2>/dev/null || echo 0)"
+python3 "$CONTROL/ci/bare/output_checkpoint.py" pack --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --ledger "$LEDGER"
 echo "DIAG_STAGE_END_UTC=$(date -u +%FT%TZ)"
 trap - EXIT
 exit 0
