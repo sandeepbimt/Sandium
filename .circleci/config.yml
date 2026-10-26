@@ -351,6 +351,11 @@ jobs:
     steps:
       - checkout:
           path: sandium-control
+      - run:
+          name: Compute the build cache fingerprint before final artifact restore
+          command: |
+            set -euo pipefail
+            python3 "$HOME/project/sandium-control/ci/bare/cache_fingerprint.py" --root "$HOME/project"
       - restore_cache:
           name: Restore final-stage source-bound ledger
           keys:
