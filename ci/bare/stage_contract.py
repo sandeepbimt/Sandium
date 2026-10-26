@@ -1,39 +1,66 @@
 #!/usr/bin/env python3
 """Static five-stage contract. This validator never syncs or builds Chromium."""
 import json, sys
+from pathlib import Path
+
 STAGES = [
- {"stage":1,"requires":[],"proof":["pinned_bare_chromium_identity","discover_prior_useful_run_or_record_miss","identity_checked_siso_state_restore_or_record_miss","remote_or_cache_evidence","forward_progress_or_verified_apk"]},
- {"stage":2,"requires":[1],"proof":["same_build_identity","same_timestamp_policy","restore_stage_1_siso_state","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
- {"stage":3,"requires":[2],"proof":["same_build_identity","same_timestamp_policy","restore_stage_2_siso_state","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
- {"stage":4,"requires":[3],"proof":["same_build_identity","same_timestamp_policy","restore_stage_3_siso_state","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
- {"stage":5,"requires":[4],"proof":["same_build_identity","same_timestamp_policy","restore_stage_4_siso_state","apk_zip_integrity","apk_signature","sha256"]},
+ {"stage":1,"requires":[],"proof":["pinned_bare_chromium_identity","discover_prior_useful_run_or_record_miss","full_output_checkpoint_or_safe_siso_fallback","remote_or_cache_evidence","forward_progress_or_verified_apk"]},
+ {"stage":2,"requires":[1],"proof":["same_build_identity","same_timestamp_policy","restore_stage_1_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
+ {"stage":3,"requires":[2],"proof":["same_build_identity","same_timestamp_policy","restore_stage_2_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
+ {"stage":4,"requires":[3],"proof":["same_build_identity","same_timestamp_policy","restore_stage_3_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
+ {"stage":5,"requires":[4],"proof":["same_build_identity","same_timestamp_policy","restore_stage_4_full_output_checkpoint","apk_zip_integrity","apk_signature","sha256"]},
 ]
+
 def validate():
- errors=[]
- run_stage = __import__("pathlib").Path(__file__).with_name("run_stage.sh").read_text(encoding="utf-8")
- if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
-  errors.append("APK completion must fail closed without Siso remote/cache action proof")
- if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_METRICS" not in run_stage:
-  errors.append("final Siso metrics must be checked before rejecting missing early evidence")
- if "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" not in run_stage:
-  errors.append("fast exit must revalidate cached APK, manifest, ledger and status")
- if "cached APK differs from manifest" not in run_stage or "cached status/manifest mismatch" not in run_stage:
-  errors.append("fast exit must compare cached APK hash/size and identity against saved proof")
- if [x["stage"] for x in STAGES] != [1,2,3,4,5]: errors.append("stages must be exactly 1..5")
- for i,x in enumerate(STAGES):
-  expected=[] if i==0 else [i]
-  if x["requires"] != expected: errors.append("stage dependency mismatch at "+str(x["stage"]))
-  if not x["proof"]: errors.append("stage has no proof requirements: "+str(x["stage"]))
- if not any("remote_or_cache_evidence" in x["proof"] for x in STAGES): errors.append("no remote evidence gate")
- if "discover_prior_useful_run_or_record_miss" not in STAGES[0]["proof"]: errors.append("stage 1 must discover a prior useful run or record an explicit miss")
- if "identity_checked_siso_state_restore_or_record_miss" not in STAGES[0]["proof"]: errors.append("stage 1 must validate prior Siso state or record an explicit miss")
- for x in STAGES[1:]:
-  required = f"restore_stage_{x['stage']-1}_siso_state"
-  if required not in x["proof"]: errors.append(f"stage {x['stage']} must restore stage {x['stage']-1} Siso state")
- return errors
-if __name__=="__main__":
- e=validate()
- if e:
-  print("\n".join("SANDIUM_STAGE_CONTRACT_ERROR="+x for x in e)); sys.exit(1)
- if "--json" in sys.argv: print(json.dumps({"schema":3,"stages":STAGES},indent=2))
- else: print("SANDIUM_STAGE_CONTRACT=PASS\nSANDIUM_STAGE_COUNT=5\nSANDIUM_BUILD_STARTED=no")
+    errors = []
+    here = Path(__file__).resolve().parent
+    run_stage = (here / "run_stage.sh").read_text(encoding="utf-8")
+    output_checkpoint = (here / "output_checkpoint.py").read_text(encoding="utf-8")
+    fast_apk = (here / "fast_apk.py").read_text(encoding="utf-8")
+    timestamp = "epoch_946684800_regular_files_v1"
+
+    if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
+        errors.append("APK build must fail closed without Siso remote/cache action proof")
+    if "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW" not in run_stage:
+        errors.append("Siso evidence must be evaluated after the bounded build window, not by an early watchdog")
+    if "WAIT -lt 240" in run_stage or "kill -INT -- \"$PID\"" in run_stage:
+        errors.append("the 240-second remote-evidence watchdog must not kill slow-starting Siso")
+    if "find \"$SRC\" -path \"$SRC/.git\" -prune -o -path \"$SRC/out\" -prune -o -type f -exec touch" not in run_stage:
+        errors.append("timestamp normalization must touch regular source files only, excluding .git and out")
+    if timestamp not in run_stage:
+        errors.append("runner must record the regular-files-only timestamp policy")
+    if 'output_checkpoint.py" restore' not in run_stage or 'output_checkpoint.py" pack' not in run_stage:
+        errors.append("runner must restore and pack the full GN output tree")
+    if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
+        errors.append("full output checkpoint must write explicit handoff evidence")
+    if "SANDIUM_APK_FAST_PATH=PASS" not in fast_apk:
+        errors.append("cached APK fast path must verify and propagate the current stage")
+    if "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" not in fast_apk:
+        errors.append("APK fast path must distinguish saved signature evidence from a fresh apksigner run")
+    if [x["stage"] for x in STAGES] != [1,2,3,4,5]:
+        errors.append("stages must be exactly 1..5")
+    for i, x in enumerate(STAGES):
+        expected = [] if i == 0 else [i]
+        if x["requires"] != expected:
+            errors.append("stage dependency mismatch at " + str(x["stage"]))
+        if not x["proof"]:
+            errors.append("stage has no proof requirements: " + str(x["stage"]))
+    if not any("remote_or_cache_evidence" in x["proof"] for x in STAGES):
+        errors.append("no remote evidence gate")
+    if "discover_prior_useful_run_or_record_miss" not in STAGES[0]["proof"]:
+        errors.append("stage 1 must discover a prior useful run or record an explicit miss")
+    for x in STAGES[1:]:
+        required = f"restore_stage_{x['stage']-1}_full_output_checkpoint"
+        if required not in x["proof"]:
+            errors.append(f"stage {x['stage']} must restore the prior full output checkpoint")
+    return errors
+
+if __name__ == "__main__":
+    e = validate()
+    if e:
+        print("\n".join("SANDIUM_STAGE_CONTRACT_ERROR=" + x for x in e))
+        sys.exit(1)
+    if "--json" in sys.argv:
+        print(json.dumps({"schema": 4, "stages": STAGES}, indent=2))
+    else:
+        print("SANDIUM_STAGE_CONTRACT=PASS\nSANDIUM_STAGE_COUNT=5\nSANDIUM_BUILD_STARTED=no")
