@@ -26,14 +26,14 @@ ANCHOR = (
 )
 MARKER = "SANDIUM_REAPI_OUTPUT_PATH_GUARD"
 GUARDED_BLOCK = (
-    "        crash_dir = ctx.fs.canonpath(crash_dir)\n"
-    "        # " + MARKER + ": REAPI output paths must not contain parent components.\n"
+    "        # " + MARKER + ": inspect the raw path before canonpath normalizes it.\n"
     "        # Clang may request ../clang-crashreports, outside the action exec root.\n"
     "        # Crash-report capture is best-effort; never let it invalidate compilation.\n"
     "        if \"..\" in crash_dir.split(\"/\"):\n"
     "            return\n"
     "        if \"..\" in crash_dir.split(\"\\\\\"):\n"
     "            return\n"
+    "        crash_dir = ctx.fs.canonpath(crash_dir)\n"
     "        ctx.actions.fix(auxiliary_log_output_dirs = [crash_dir])"
 )
 
