@@ -87,6 +87,24 @@ jobs:
           assert "sandium-state-v3-" in config and "sandium-output-v3-" in config
           assert "sandium-verified-apk-v1-" in config
           assert "Save the completed or partial stage handoff after the stage actually ran" in config
+
+          # A later stage must only read its immediate predecessor's per-workflow
+          # ledger. Do not allow an unrelated previous-run stage ledger to win the
+          # prefix search and leave PREV_LEDGER missing/wrong for run_stage.sh.
+          for predecessor in range(1, 5):
+              marker = f"name: Restore Stage {predecessor} APK/status metadata"
+              start = config.index(marker)
+              ends = [
+                  index for token in ("      - when:\\n", "      - restore_cache:\\n", "      - run:\\n")
+                  if (index := config.find(token, start + len(marker))) >= 0
+              ]
+              end = min(ends)
+              block = config[start:end]
+              state_keys = [line for line in block.splitlines() if "sandium-state-v3-" in line]
+              expected = f"-stage-{predecessor}-{{{{ .Environment.CIRCLE_WORKFLOW_ID }}}}-"
+              assert len(state_keys) == 1 and expected in state_keys[0], (
+                  f"stage {predecessor + 1} must restore only its immediate prior stage state"
+              )
           assert "Persist the lightweight current-stage APK and ledger state" not in config, "state cache must not be written before the stage executes"
           assert "<<'PY'" not in config, "CircleCI config must not contain raw Python heredocs"
           assert "sandium-build-output-checkpoint" in config
