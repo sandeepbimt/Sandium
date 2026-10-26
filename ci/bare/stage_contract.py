@@ -49,7 +49,7 @@ def validate():
         errors.append("small action-count variance helper is missing")
     if 'normalize_progress_total.py"' not in run_stage:
         errors.append("runner must normalize progress count only with the identity-bound helper")
-    elif run_stage.index('normalize_progress_total.py"') > run_stage.index('stage_ledger.py" --stage'):
+    elif run_stage.index('python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage') > run_stage.index('stage_ledger.py" --stage'):
         errors.append("progress denominator must be normalized before strict stage-ledger validation")
     if "build identity differs" not in progress_normalizer or "MAX_GRAPH_TOTAL_DRIFT = 0.01" not in progress_normalizer:
         errors.append("progress normalization must require exact build identity and a 1% maximum drift")
