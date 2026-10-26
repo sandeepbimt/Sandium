@@ -40,7 +40,7 @@ class OutputCheckpointTests(unittest.TestCase):
             control.mkdir()
             checkpoint = root / M.CHECKPOINT_NAME
             files = make_output(checkpoint)
-            (root / M.META_NAME).write_text(json.dumps({
+            (checkpoint / M.META_NAME).write_text(json.dumps({
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
@@ -59,7 +59,7 @@ class OutputCheckpointTests(unittest.TestCase):
             control.mkdir()
             checkpoint = root / M.CHECKPOINT_NAME
             files = make_output(checkpoint)
-            (root / M.META_NAME).write_text(json.dumps({
+            (checkpoint / M.META_NAME).write_text(json.dumps({
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
@@ -78,7 +78,7 @@ class OutputCheckpointTests(unittest.TestCase):
             checkpoint = root / M.CHECKPOINT_NAME
             files = make_output(checkpoint)
             files["build.ninja"] = "0" * 64
-            (root / M.META_NAME).write_text(json.dumps({
+            (checkpoint / M.META_NAME).write_text(json.dumps({
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
