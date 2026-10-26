@@ -150,22 +150,26 @@ fi
 
 test -n "$(printenv BUILDBUDDY_API_KEY 2>/dev/null || true)" || { echo MISSING_REQUIRED_SECRET=BUILDBUDDY_API_KEY >&2; exit 42; }
 
-DEPOT="$HOME/depot_tools"; PIN=""
+DEPOT="$HOME/depot_tools"
+PIN="$(sed -n 's/^toolchain_depot_tools_commit=//p' "$CONTROL/ci/bare/source-pin.txt")"
+[[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo "SANDIUM_DEPOT_TOOLS_PIN_INVALID=$PIN" >&2; exit 43; }
 if [[ "$STAGE" -gt 1 ]]; then
-  PIN="$(python3 - "$PREV" <<'PY'
+  PREVIOUS_PIN="$(python3 - "$PREV" <<'PY'
 import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8")).get("build_identity",{}).get("toolchain_depot_tools_commit",""))
 PY
 )"
-  [[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo PREVIOUS_DEPOT_TOOLS_PIN_INVALID >&2; exit 43; }
-elif [[ -s "$STATE_META" ]]; then
-  # A prior useful run's manifest pins depot_tools before the state capsule is
-  # validated against the current source/GN identity.
-  PIN="$(python3 "$STATE_TOOL" toolchain-pin --meta "$STATE_META" 2>/dev/null || true)"
-  if [[ ! "$PIN" =~ ^[0-9a-f]{40}$ ]]; then PIN=""; echo "SANDIUM_PRIOR_TOOLCHAIN_PIN=UNAVAILABLE"; else echo "SANDIUM_PRIOR_TOOLCHAIN_PIN=$PIN"; fi
+  [[ "$PREVIOUS_PIN" == "$PIN" ]] || {
+    echo "PREVIOUS_DEPOT_TOOLS_PIN_MISMATCH expected=$PIN actual=$PREVIOUS_PIN" >&2
+    exit 43
+  }
 fi
 if [[ ! -d "$DEPOT/.git" ]]; then git clone --no-tags --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$DEPOT"; fi
-if [[ -n "$PIN" && "$(git -C "$DEPOT" rev-parse HEAD)" != "$PIN" ]]; then git -C "$DEPOT" fetch --depth=1 origin "$PIN"; git -C "$DEPOT" checkout --force --detach "$PIN"; fi
+if [[ "$(git -C "$DEPOT" rev-parse HEAD)" != "$PIN" ]]; then
+  git -C "$DEPOT" fetch --depth=1 origin "$PIN"
+  git -C "$DEPOT" checkout --force --detach "$PIN"
+fi
+echo "SANDIUM_DEPOT_TOOLS_PIN=$PIN"
 # Bootstrap a fresh depot_tools clone before disabling its updater.
 export PATH="$DEPOT:$PATH"
 if [[ ! -s "$DEPOT/python3_bin_reldir.txt" ]]; then
