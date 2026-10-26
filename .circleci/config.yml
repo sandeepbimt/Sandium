@@ -33,7 +33,11 @@ jobs:
           command: |
             set -euo pipefail
             cd "$HOME/project/sandium-control"
-            test -x ci/siso/buildbuddy-credential-helper.py || { echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=FAIL; repository mode must be 100755" >&2; exit 1; }
+            # GitHub/CircleCI checkouts may materialize this script without its executable bit.
+            # Normalize the checked-out working-tree mode before validating the helper.
+            test -f ci/siso/buildbuddy-credential-helper.py
+            chmod 0755 ci/siso/buildbuddy-credential-helper.py
+            test -x ci/siso/buildbuddy-credential-helper.py || { echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=FAIL" >&2; exit 1; }
             echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=PASS"
             python3 -m py_compile ci/bare/*.py ci/siso/*.py
             bash -n ci/bare/run_stage.sh
