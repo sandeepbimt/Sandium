@@ -91,6 +91,11 @@ def expected_values(control: Path) -> dict[str, str]:
         raise ConfigError(f"Existing Sandium BuildBuddy backend file is missing: {backend}")
     if not helper.is_file():
         raise ConfigError(f"Existing Sandium credential helper is missing: {helper}")
+    if not os.access(helper, os.X_OK):
+        raise ConfigError(
+            f"Existing Sandium credential helper is not executable: {helper}; "
+            "the repository file mode must be 100755"
+        )
     return {
         **CUSTOM_VAR_VALUES,
         "reapi_backend_config_path": str(backend),
