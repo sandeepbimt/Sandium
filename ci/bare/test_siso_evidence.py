@@ -3,12 +3,14 @@
 import importlib.util
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("siso_evidence", HERE / "siso_evidence.py")
 assert SPEC and SPEC.loader
 M = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = M
 SPEC.loader.exec_module(M)
 
 
