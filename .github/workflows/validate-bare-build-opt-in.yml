@@ -27,8 +27,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Parse and assert fail-closed workflow gate
-        shell: ruby
+        shell: bash
         run: |
+          ruby <<'RUBY'
           require "yaml"
           config = YAML.load_file(".circleci/config.yml")
           param = config.fetch("parameters").fetch("run_sandium_bare_apk_once")
@@ -49,3 +50,4 @@ jobs:
           puts "APK_BUILD_EXPLICIT_OPT_IN_GUARD=PASS"
           puts "FIVE_STAGE_SEQUENCE=PASS"
           puts "NO_CHROMIUM_BUILD_EXECUTED=true"
+          RUBY
