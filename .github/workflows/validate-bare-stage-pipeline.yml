@@ -60,6 +60,7 @@ jobs:
           python3 ci/bare/test_state_handoff.py
           python3 ci/bare/test_output_checkpoint.py
           python3 ci/bare/test_fast_apk.py
+          python3 ci/bare/test_siso_output_path_guard.py
           python3 ci/bare/stage_contract.py
 
       - name: Assert cache layers, fast APK exit and five-stage continuity

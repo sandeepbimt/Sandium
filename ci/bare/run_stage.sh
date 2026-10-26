@@ -216,6 +216,7 @@ if [[ "$MODE" == "prepare-source" ]]; then
   exit 0
 fi
 bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
+python3 "$CONTROL/ci/bare/guard_siso_output_paths.py" --source-root "$SRC"
 # configure_siso.py creates .sisoenv during GN setup. Validate it only after
 # that setup has completed; source-only preparation must not require generated
 # build files or write a Siso runtime config into the source cache.

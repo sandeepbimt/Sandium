@@ -40,6 +40,7 @@ jobs:
             test -x ci/siso/buildbuddy-credential-helper.py || { echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=FAIL" >&2; exit 1; }
             echo "SANDIUM_CREDENTIAL_HELPER_EXECUTABLE=PASS"
             python3 -m py_compile ci/bare/*.py ci/siso/*.py
+            python3 ci/bare/test_siso_output_path_guard.py
             bash -n ci/bare/run_stage.sh
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
