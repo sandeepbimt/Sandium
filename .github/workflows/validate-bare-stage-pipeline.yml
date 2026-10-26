@@ -7,6 +7,7 @@ on:
       - fix/bare-stage-handoff-review
       - fix/bare-pipeline-reuse-repair-20261026
       - fix/bare-credential-helper-exec-20261026
+      - fix/manifest-regeneration-continuation-20261026
     paths:
       - ".circleci/config.yml"
       - ".github/workflows/validate-bare-stage-pipeline.yml"
@@ -61,6 +62,8 @@ jobs:
           python3 ci/bare/test_output_checkpoint.py
           python3 ci/bare/test_fast_apk.py
           python3 ci/bare/test_siso_output_path_guard.py
+          python3 ci/bare/test_manifest_preflight.py
+          python3 ci/bare/test_normalize_progress_total.py
           python3 ci/bare/stage_contract.py
 
       - name: Assert cache layers, fast APK exit and five-stage continuity
@@ -73,6 +76,7 @@ jobs:
 
           config = Path(".circleci/config.yml").read_text(encoding="utf-8")
           runner = Path("ci/bare/run_stage.sh").read_text(encoding="utf-8")
+          manifest_preflight = Path("ci/bare/manifest_preflight.py").read_text(encoding="utf-8")
           bootstrap = Path("ci/bare/bootstrap_chromium.sh").read_text(encoding="utf-8")
           handoff = Path("ci/bare/state_handoff.py").read_text(encoding="utf-8")
           checkpoint = Path("ci/bare/output_checkpoint.py").read_text(encoding="utf-8")
@@ -142,6 +146,15 @@ jobs:
           assert "WAIT -lt 240" not in runner and 'kill -INT -- "$PID"' not in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" in runner
           assert "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_AFTER_BUILD_WINDOW" in runner
+          assert "NINJA_REGEN_GATE=FAIL" not in runner, "a handled Siso manifest regeneration must not discard a full stage window"
+          assert 'manifest_preflight.py"' in runner and runner.index('manifest_preflight.py"') < runner.index('timeout --signal=INT --kill-after=60s'), "manifest must be stabilized before timed compilation"
+          assert "SANDIUM_NINJA_REGENERATION_DURING_BUILD=OBSERVED_NONFATAL" in runner
+          assert '"-n"' in manifest_preflight and "two consecutive dry runs" in manifest_preflight
+          normalizer = Path("ci/bare/normalize_progress_total.py").read_text(encoding="utf-8")
+          assert "MAX_GRAPH_TOTAL_DRIFT = 0.01" in normalizer
+          assert "build identity differs" in normalizer
+          assert 'python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage' in runner
+          assert runner.index('python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage') < runner.index('stage_ledger.py" --stage')
           assert "epoch_946684800_regular_files_v1" in runner
           assert 'find "$SRC" -path "$SRC/.git" -prune -o -path "$SRC/out" -prune -o -type f -exec touch' in runner
           assert 'test -s "$ROOT/.gclient_entries"' in bootstrap
