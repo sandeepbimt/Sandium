@@ -213,11 +213,12 @@ workflows:
     jobs:
       - sandium-bare-source-preflight
 
-  # Explicitly approved five-stage APK attempt on the isolated review branch.
+  # Expensive APK builds are isolated to the dedicated build branch and require
+  # an explicit pipeline parameter; review-branch pushes cannot launch them.
   sandium-bare-apk-once:
     when:
       and:
-        - equal: [fix/bare-stage-handoff-review, << pipeline.git.branch >>]
+        - equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]
         - << pipeline.parameters.run_sandium_bare_apk_once >>
     jobs:
       - sandium-bare-build-stage:
