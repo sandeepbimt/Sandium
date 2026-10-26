@@ -12,7 +12,6 @@ import argparse
 
 SCHEMA = 2
 INPUTS = (
-    ".circleci/config.yml",
     "ci/bare/source-pin.txt",
     "ci/bare/gn_args.gn",
     "ci/bare/prepare_source.sh",
