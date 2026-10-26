@@ -19,6 +19,28 @@ STATE_NAMES = (
     ".siso_config", ".siso_deps", ".siso_filegroups", ".siso_failed_targets",
 )
 VALID_NAMES = set(STATE_NAMES)
+BASE_SISO_STATE_NAMES = {".siso_fs_state", ".siso_fs_state.0"}
+JOURNAL_SISO_STATE_NAMES = {".siso_fs_state.journal"}
+
+
+def has_resumable_siso_state(entries: list[dict[str, Any]]) -> bool:
+    """Accept a base state or nonempty Siso journal from an interrupted build.
+
+    Siso replays .siso_fs_state.journal when a prior run exits before the base
+    .siso_fs_state file is persisted. The journal must be nonempty; unrelated
+    log files are not a substitute for filesystem state.
+    """
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", ""))
+        try:
+            size = int(item.get("size", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if size > 0 and name in (BASE_SISO_STATE_NAMES | JOURNAL_SISO_STATE_NAMES):
+            return True
+    return False
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -112,8 +134,8 @@ def pack(root: Path, control: Path, stage: int, workflow_id: str, ledger_path: P
         path = out / name
         if path.is_file() and not path.is_symlink():
             files.append({"name": name, "size": path.stat().st_size, "sha256": sha256(path)})
-    if not any(f["name"] in (".siso_fs_state", ".siso_fs_state.0") for f in files):
-        raise IdentityError("Siso filesystem state file missing; cannot hand off stage state")
+    if not has_resumable_siso_state(files):
+        raise IdentityError("No nonempty Siso filesystem state or recoverable journal; cannot hand off stage state")
     archive.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=".sandium-state.", suffix=".tar.zst", dir=str(archive.parent))
     os.close(fd)
@@ -212,7 +234,7 @@ def preflight(root: Path, control: Path, archive: Path, meta_path: Path,
         entries = meta.get("state_files")
         if not isinstance(entries, list) or not entries:
             return miss("state_file_manifest_missing")
-        names, expected = [], {}
+        names, expected, expected_sizes = [], {}, {}
         for item in entries:
             if not isinstance(item, dict):
                 return miss("invalid_state_file_manifest_entry")
@@ -221,8 +243,12 @@ def preflight(root: Path, control: Path, archive: Path, meta_path: Path,
                 return miss("unsafe_or_duplicate_state_file_name")
             names.append(name)
             expected[name] = str(item.get("sha256", ""))
-        if not any(name in (".siso_fs_state", ".siso_fs_state.0") for name in names):
-            return miss("state_manifest_has_no_siso_state")
+            try:
+                expected_sizes[name] = int(item.get("size", 0) or 0)
+            except (TypeError, ValueError):
+                return miss("invalid_state_file_manifest_size")
+        if not has_resumable_siso_state(entries):
+            return miss("state_manifest_has_no_resumable_siso_state")
 
         with tempfile.TemporaryDirectory(prefix="sandium-state-preflight.", dir=str(root)) as temp:
             tmp_root = Path(temp)
@@ -238,8 +264,10 @@ def preflight(root: Path, control: Path, archive: Path, meta_path: Path,
             )
             for name in names:
                 member = tmp_root / name
-                if not member.is_file() or member.is_symlink() or sha256(member) != expected[name]:
-                    return miss("state_file_hash_mismatch:" + name)
+                if (not member.is_file() or member.is_symlink()
+                        or member.stat().st_size != expected_sizes[name]
+                        or sha256(member) != expected[name]):
+                    return miss("state_file_hash_or_size_mismatch:" + name)
 
         payload = {
             "schema": SCHEMA,
@@ -330,7 +358,7 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
         entries = meta.get("state_files")
         if not isinstance(entries, list) or not entries:
             return miss("state_file_manifest_missing")
-        names, expected = [], {}
+        names, expected, expected_sizes = [], {}, {}
         for item in entries:
             if not isinstance(item, dict):
                 return miss("invalid_state_file_manifest_entry")
@@ -339,8 +367,12 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
                 return miss("unsafe_or_duplicate_state_file_name")
             names.append(name)
             expected[name] = str(item.get("sha256", ""))
-        if not any(n in (".siso_fs_state", ".siso_fs_state.0") for n in names):
-            return miss("state_manifest_has_no_siso_state")
+            try:
+                expected_sizes[name] = int(item.get("size", 0) or 0)
+            except (TypeError, ValueError):
+                return miss("invalid_state_file_manifest_size")
+        if not has_resumable_siso_state(entries):
+            return miss("state_manifest_has_no_resumable_siso_state")
 
         out = root / OUT_RELATIVE
         out.mkdir(parents=True, exist_ok=True)
@@ -355,8 +387,10 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
             subprocess.run(["tar", "--use-compress-program=zstd", "-xf", str(archive), "-C", str(tmp_root)], check=True)
             for name in names:
                 source = tmp_root / name
-                if not source.is_file() or source.is_symlink() or sha256(source) != expected[name]:
-                    return miss("state_file_hash_mismatch:" + name)
+                if (not source.is_file() or source.is_symlink()
+                        or source.stat().st_size != expected_sizes[name]
+                        or sha256(source) != expected[name]):
+                    return miss("state_file_hash_or_size_mismatch:" + name)
             restored = []
             for name in names:
                 source, dest = tmp_root / name, out / name
