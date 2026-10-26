@@ -17,6 +17,9 @@ parameters:
   run_sandium_bare_android_apk_build:
     type: boolean
     default: false
+  run_sandium_bare_apk_once:
+    type: boolean
+    default: false
 
 jobs:
   sandium-bare-source-preflight:
@@ -200,7 +203,9 @@ workflows:
   # remain fail-closed; only pushing this dedicated branch starts this APK attempt.
   sandium-bare-apk-once:
     when:
-      equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]
+      and:
+        - equal: [build/bare-apk-once-20261025, << pipeline.git.branch >>]
+        - << pipeline.parameters.run_sandium_bare_apk_once >>
     jobs:
       - sandium-bare-build-stage:
           name: sandium-bare-stage-1
