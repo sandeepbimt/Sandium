@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import tempfile
+import sys
 import unittest
 import zipfile
 from pathlib import Path
@@ -68,6 +69,29 @@ class FastApkTests(unittest.TestCase):
             with patch.object(M, "read_pins", return_value=PINS):
                 with self.assertRaisesRegex(ValueError, "SHA-256/size"):
                     M.verify_apk(root, root / "control", stage)
+
+    def test_later_stage_accepts_verified_apk_from_another_completed_stage(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            apk, stage = self.fixture(root)
+            status_path = stage / "status.txt"
+            status = M.read_status(status_path)
+            status["STAGE"] = "5"
+            status_path.write_text("".join(f"{k}={v}\n" for k, v in status.items()))
+            ledger_path = stage / "ledger.json"
+            ledger = json.loads(ledger_path.read_text())
+            ledger["stage"] = 5
+            ledger_path.write_text(json.dumps(ledger))
+            stage.rename(root / "ci-handoff" / "stage-5")
+            with patch.object(M, "read_pins", return_value=PINS), patch.object(
+                sys, "argv", ["fast_apk.py", "--root", str(root), "--stage", "2", "--workflow-id", "wf-current"]
+            ):
+                rc = M.main()
+            self.assertEqual(rc, 0)
+            propagated = M.read_status(root / "ci-handoff" / "stage-2" / "status.txt")
+            self.assertEqual(propagated["BUILD_FINISHED"], "true")
+            self.assertEqual(propagated["STAGE"], "2")
+            self.assertEqual(propagated["WORKFLOW_ID"], "wf-current")
 
     def test_manifest_pin_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
