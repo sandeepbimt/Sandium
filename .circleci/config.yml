@@ -291,6 +291,7 @@ jobs:
                   exit 0
             - save_cache:
                 name: Save the full compiled output checkpoint for stage-to-stage and cross-run reuse
+                when: always
                 key: sandium-output-v2-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
                 paths:
                   - sandium-build-output-checkpoint
