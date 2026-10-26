@@ -29,20 +29,15 @@ OUT_RELATIVE = Path("src/out/android_Debug_arm64")
 CHECKPOINT_NAME = "sandium-build-output-checkpoint"
 META_NAME = ".sandium-output-checkpoint.meta.json"
 REPORT_NAME = "sandium-state-handoff-report.json"
+# Only source, GN, Siso and packaging inputs that affect build compatibility.
+# CI orchestration/ledger implementation changes must not invalidate compatible output.
 CONTROL_INPUTS = (
     "ci/bare/source-pin.txt",
     "ci/bare/gn_args.gn",
     "ci/bare/prepare_source.sh",
     "ci/bare/configure_siso.py",
-    "ci/bare/build_identity.py",
-    "ci/bare/stage_ledger.py",
-    "ci/bare/state_handoff.py",
-    "ci/bare/package_artifact.sh",
     "ci/bare/bootstrap_chromium.sh",
-    "ci/bare/output_checkpoint.py",
-    "ci/bare/fast_apk.py",
-    "ci/bare/cache_fingerprint.py",
-    "ci/bare/source_cache_fingerprint.py",
+    "ci/bare/package_artifact.sh",
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )
@@ -95,9 +90,24 @@ def control_inputs(control: Path) -> dict[str, str]:
     for relative in CONTROL_INPUTS:
         path = control / relative
         if not path.is_file() or path.is_symlink():
-            raise CheckpointError(f"Build control input missing/unsafe: {relative}")
+            raise CheckpointError(f"Build compatibility input missing/unsafe: {relative}")
         result[relative] = sha256_file(path)
     return result
+
+
+def verify_control_inputs(saved: Any, control: Path) -> None:
+    """Validate build-affecting hashes while tolerating legacy extra CI-code hashes."""
+    if not isinstance(saved, dict) or not saved:
+        raise CheckpointError("Checkpoint build compatibility input manifest is missing")
+    expected = control_inputs(control)
+    mismatches = [
+        relative for relative, digest in expected.items()
+        if saved.get(relative) != digest
+    ]
+    if mismatches:
+        raise CheckpointError(
+            "Build compatibility input hash mismatch: " + ",".join(sorted(mismatches))
+        )
 
 def require_regular_nonempty(path: Path) -> None:
     if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
@@ -176,8 +186,7 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             return miss("checkpoint_name_mismatch")
         if meta.get("build_identity_sha256") != identity_digest(meta.get("build_identity", {})):
             return miss("build_identity_digest_mismatch")
-        if meta.get("control_inputs") != control_inputs(control):
-            return miss("control_input_fingerprint_mismatch")
+        verify_control_inputs(meta.get("control_inputs"), control)
         verify_manifest_files(checkpoint, meta.get("output_files"))
         if pre_source:
             if stage > 1 and (

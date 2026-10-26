@@ -129,8 +129,10 @@ def validate_candidate(
         raise CheckpointQualityError("build_identity_missing")
     if meta.get("build_identity_sha256") != OC.identity_digest(embedded_identity):
         raise CheckpointQualityError("embedded_build_identity_digest_mismatch")
-    if meta.get("control_inputs") != OC.control_inputs(control):
-        raise CheckpointQualityError("checkpoint_control_inputs_mismatch")
+    try:
+        OC.verify_control_inputs(meta.get("control_inputs"), control)
+    except OC.CheckpointError as exc:
+        raise CheckpointQualityError("checkpoint_control_inputs_mismatch:" + str(exc)) from exc
     # Before restore, compare the candidate against the freshly generated src/out
     # identity. After pack, output_checkpoint.py has atomically moved src/out into
     # the candidate directory, so validate GN args from that directory instead.

@@ -110,6 +110,7 @@ jobs:
             cd "$HOME/project"
             python3 sandium-control/ci/bare/source_cache_fingerprint.py --root "$HOME/project"
             python3 sandium-control/ci/bare/cache_fingerprint.py --root "$HOME/project"
+            python3 sandium-control/ci/bare/output_cache_fingerprint.py --root "$HOME/project"
       - when:
           condition:
             equal: [1, << parameters.stage_index >>]
@@ -189,14 +190,16 @@ jobs:
             - restore_cache:
                 name: Restore the best green validated compiled-output checkpoint, stage 5 first
                 keys:
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-5-
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-
                   # One-time migration fallback keeps the known-good legacy Stage 1 checkpoint.
                   # Legacy Stage 2-5 keys are excluded because failed jobs wrote tiny unusable archives.
-                  - sandium-output-v3-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-
+                  - # One-time migration fallback for the known substantial legacy Stage 1 checkpoint.
+                  # Its old full-CI fingerprint is fixed here; it must not follow the rotating orchestration hash.
+                  - sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-
       - when:
           condition:
             equal: [2, << parameters.stage_index >>]
@@ -204,7 +207,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 1
                 keys:
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [3, << parameters.stage_index >>]
@@ -212,7 +215,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 2
                 keys:
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [4, << parameters.stage_index >>]
@@ -220,7 +223,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 3
                 keys:
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - when:
           condition:
             equal: [5, << parameters.stage_index >>]
@@ -228,7 +231,7 @@ jobs:
             - restore_cache:
                 name: Restore full compiled outputs from this workflow's Stage 4
                 keys:
-                  - sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+                  - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
       - restore_cache:
           name: Restore the pinned Chromium/Bare source and dependency cache
           keys:
@@ -300,7 +303,7 @@ jobs:
             - save_cache:
                 name: Save only a quality-validated green compiled-output checkpoint for reuse
                 when: on_success
-                key: sandium-output-good-v4-{{ checksum "sandium-control/.sandium-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                key: sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
                 paths:
                   - sandium-build-output-checkpoint
             - save_cache:

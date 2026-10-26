@@ -66,6 +66,7 @@ jobs:
           python3 ci/bare/test_manifest_preflight.py
           python3 ci/bare/test_normalize_progress_total.py
           python3 ci/bare/test_checkpoint_quality.py
+          python3 ci/bare/test_output_cache_fingerprint.py
           python3 ci/bare/stage_contract.py
 
       - name: Assert cache layers, fast APK exit and five-stage continuity
@@ -85,6 +86,7 @@ jobs:
           checkpoint = Path("ci/bare/output_checkpoint.py").read_text(encoding="utf-8")
           fast_apk = Path("ci/bare/fast_apk.py").read_text(encoding="utf-8")
           build_fingerprint = Path("ci/bare/cache_fingerprint.py").read_text(encoding="utf-8")
+          output_fingerprint = Path("ci/bare/output_cache_fingerprint.py").read_text(encoding="utf-8")
           source_fingerprint = Path("ci/bare/source_cache_fingerprint.py").read_text(encoding="utf-8")
           credential_helper = Path("ci/siso/buildbuddy-credential-helper.py")
 
@@ -101,12 +103,12 @@ jobs:
           assert "default: true" not in config
           assert "sandium-source-v3-" in config and "sandium-source-cache-fingerprint.txt" in config
           assert "sandium-source-v2-" in config, "legacy source-cache prefix fallback must preserve the previously saved cache"
-          assert "sandium-state-good-v4-" in config and "sandium-output-good-v4-" in config
+          assert "sandium-state-good-v4-" in config and "sandium-output-good-v5-" in config
           assert "sandium-verified-apk-v1-" in config
           assert "sandium-state-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
           assert "sandium-output-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
           for failed_stage in (2, 3, 4, 5):
-              assert f"sandium-output-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
+              assert f"sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-{failed_stage}-" not in config
               assert f"sandium-state-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
           assert "Save only a quality-validated green compiled-output checkpoint for reuse" in config
           assert "Save only successful stage metadata and state capsule for future selection" in config
@@ -185,6 +187,10 @@ jobs:
           assert "SANDIUM_SOURCE_CACHE=HIT_VALIDATED" in bootstrap
           assert "ci/bare/source_cache_fingerprint.py" in build_fingerprint
           assert ".circleci/config.yml" not in build_fingerprint, "routine pipeline config edits must not change build cache identity"
+          assert "ci/bare/gn_args.gn" in output_fingerprint and "ci/bare/source-pin.txt" in output_fingerprint
+          for orchestration_file in ("build_identity.py", "stage_ledger.py", "state_handoff.py", "output_checkpoint.py", "cache_fingerprint.py", "source_cache_fingerprint.py", "checkpoint_quality.py"):
+              assert orchestration_file not in output_fingerprint, f"output cache identity must not rotate for CI implementation changes: {orchestration_file}"
+          assert ".circleci/config.yml" not in output_fingerprint
           assert ".circleci/config.yml" not in checkpoint, "routine pipeline config edits must not invalidate compatible output checkpoints"
           assert ".circleci/config.yml" not in source_fingerprint, "routine build pipeline edits must not force another Chromium sync"
           assert "source-pin.txt" in source_fingerprint and "bootstrap_chromium.sh" not in source_fingerprint, "source cache identity must not change for orchestration-only edits"
@@ -199,7 +205,7 @@ jobs:
 
           # The verified APK is independent. Failed output/state entries use legacy v3
           # namespaces and are never selected except for Stage 1 migration fallback.
-          assert config.index("sandium-verified-apk-v1-") < config.index("sandium-output-good-v4-")
+          assert config.index("sandium-verified-apk-v1-") < config.index("sandium-output-good-v5-")
           assert config.index("Save only a quality-validated green compiled-output checkpoint for reuse") < config.index("Save only successful stage metadata and state capsule for future selection")
           print("SOURCE_CACHE_LAYER=PASS")
           print("LIGHTWEIGHT_VERIFIED_APK_FAST_PATH=PASS")
