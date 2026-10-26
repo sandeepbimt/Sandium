@@ -257,8 +257,14 @@ fi
 # Final Siso output is authoritative when it contains explicit action counts.
 # The helper recognizes structured action records and the proven Afterbird
 # summary format; source flags alone never satisfy this gate.
-if ! python3 "$CONTROL/ci/bare/siso_evidence.py" --require-remote --log "$LOG" --log "$SISO_OUTPUT_CAPTURE" --metrics "$METRICS"; then
-  echo "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_REMOTE_ACTION_PROOF" >&2
+EVIDENCE_REQUIREMENTS=(--require-remote)
+if [[ "$STAGE" -gt 1 ]]; then
+  # Each later stage must demonstrate that previously executed actions are
+  # being reused from the remote action cache, not merely dispatched remotely.
+  EVIDENCE_REQUIREMENTS+=(--require-cache)
+fi
+if ! python3 "$CONTROL/ci/bare/siso_evidence.py" "${EVIDENCE_REQUIREMENTS[@]}" --log "$LOG" --log "$SISO_OUTPUT_CAPTURE" --metrics "$METRICS"; then
+  echo "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_REQUIRED_REMOTE_OR_CACHE_PROOF" >&2
   exit 50
 fi
 echo "SISO_REMOTE_OR_CACHE_EVIDENCE=PASS_FINAL_LOGS"
