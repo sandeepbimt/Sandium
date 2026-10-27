@@ -103,6 +103,28 @@ class LedgerTests(unittest.TestCase):
         handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 95}
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 95)
 
+    def test_required_work_estimate_tracks_watermark_without_claiming_unique_compile_count(self):
+        first = M.required_work_accounting(100, 40, None, {})
+        self.assertEqual(first["required_actions_at_start"], 100)
+        self.assertEqual(first["remaining_actions_after_window"], 60)
+        self.assertEqual(first["required_work_reduction_vs_predecessor_remaining"], 40)
+        self.assertFalse(first["required_work_is_unique_compiled_action_count"])
+
+        previous = {"estimated_remaining_actions": 60}
+        next_stage = M.required_work_accounting(
+            100, 65, previous,
+            {"local_compiled_outputs_restored": True,
+             "local_compiled_outputs_reuse_verified": True,
+             "source_max_completed_actions": 40},
+        )
+        self.assertEqual(next_stage["required_actions_at_start"], 60)
+        self.assertEqual(next_stage["remaining_actions_after_window"], 35)
+        self.assertEqual(next_stage["required_work_reduction_vs_predecessor_remaining"], 25)
+
+    def test_required_work_estimate_rejects_invalid_watermark(self):
+        with self.assertRaisesRegex(M.IdentityError, "Invalid graph total or progress watermark"):
+            M.required_work_accounting(100, 101, None, {})
+
     def test_progress_fields_disclose_non_additive_watermark_semantics(self):
         fields = M.progress_accounting_fields(55453, 55453, 109040)
         self.assertEqual(fields["progress_accounting_mode"], "NON_ADDITIVE_WATERMARK")
