@@ -72,7 +72,7 @@ class Tests(unittest.TestCase):
             fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\n", None)
             with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
                  patch.object(M.subprocess, "run", return_value=fake):
-                with self.assertRaisesRegex(ReusePreflightError, "too few verified leaf-object"):
+                with self.assertRaisesRegex(M.ReusePreflightError, "too few verified leaf-object"):
                     M.verify_restored_output_reuse(
                         root=root, source_root=source, stage=2, report_path=report, epoch=946684800
                     )
