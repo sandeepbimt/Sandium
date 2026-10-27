@@ -90,6 +90,17 @@ class LedgerTests(unittest.TestCase):
         handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 95}
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 95)
 
+    def test_progress_fields_disclose_non_additive_watermark_semantics(self):
+        fields = M.progress_accounting_fields(55453, 55453, 109040)
+        self.assertEqual(fields["progress_accounting_mode"], "NON_ADDITIVE_WATERMARK")
+        self.assertEqual(fields["progress_watermark"], 55453)
+        self.assertEqual(fields["estimated_remaining_actions"], 53587)
+        self.assertFalse(fields["progress_is_unique_cumulative_action_count"])
+        self.assertEqual(
+            fields["remaining_estimate_basis"],
+            "total_graph_edges_minus_non_additive_progress_watermark",
+        )
+
     def test_legacy_additive_ledger_is_repaired_for_stage_continuation(self):
         # Reproduce the actual failure: Stage 1 added 51,734 checkpoint actions
         # to 52,001 current-stage actions. Stage 2 then tried to add another
