@@ -257,7 +257,18 @@ OUTPUT_CHECKPOINT_RC=$?
 set -e
 echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_EXIT_CODE=$OUTPUT_CHECKPOINT_RC"
 if [[ "$OUTPUT_CHECKPOINT_RC" -eq 0 ]]; then
-  echo "SANDIUM_COMPILED_OUTPUT_REUSE=FULL_CHECKPOINT"
+  INVENTORY_STATUS="$(python3 - "$STATE_REPORT" <<'PY'
+import json,sys
+from pathlib import Path
+try:
+    report=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError,json.JSONDecodeError):
+    report={}
+print(report.get("compiled_output_inventory_status","LEGACY_UNVERIFIED"))
+PY
+)"
+  echo "SANDIUM_OUTPUT_CHECKPOINT_COMPILED_INVENTORY=$INVENTORY_STATUS"
+  echo "SANDIUM_COMPILED_OUTPUT_REUSE=FULL_CHECKPOINT_RESTORED_NOT_YET_PROVEN"
 elif [[ "$STAGE" -eq 1 && "$OUTPUT_CHECKPOINT_RC" -eq 1 ]]; then
   echo "SANDIUM_COMPILED_OUTPUT_REUSE=NO_FULL_CHECKPOINT"
   # Keep the previous stage's verified Siso metadata as a safe fallback. This
@@ -316,6 +327,12 @@ echo "DIAG_SISO_LOG_TAIL_BEGIN"; tail -n 160 "$LOG" 2>/dev/null || true; echo "D
 for i in $(seq 1 30); do pgrep -x siso >/dev/null 2>&1 || break; sleep 2; done
 if pgrep -x siso >/dev/null 2>&1; then echo SISO_SHUTDOWN=FAILED >&2; pkill -TERM -x siso 2>/dev/null || true; sleep 5; pkill -KILL -x siso 2>/dev/null || true; exit 48; fi
 [[ "$RET" -eq 0 || "$RET" -eq 124 ]] || { echo "BUILD_SLICE_FAILED=$RET" >&2; exit 49; }
+
+# A cache extraction is not proof of local compiled-output reuse. Compare
+# identity-bound object samples from the restored predecessor against this
+# invocation's Siso outputs; continuation stages fail closed without evidence.
+python3 "$CONTROL/ci/bare/output_checkpoint.py" verify-reuse \
+  --root "$ROOT" --stage "$STAGE" --metrics "$METRICS" --report "$STATE_REPORT"
 
 grep -oE '\[[[:space:]]*[0-9]+/[0-9]+\]' "$LOG" 2>/dev/null | sed -E 's/\[//;s/\]//;s/[[:space:]]//g' > "$ROOT/progress-$STAGE.txt" || true
 DONE="$(awk -F/ 'BEGIN{m=0} NF==2 && $1+0>m {m=$1+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
