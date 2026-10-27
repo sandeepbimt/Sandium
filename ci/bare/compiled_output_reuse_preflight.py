@@ -160,6 +160,16 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
     if scheduled:
         details = "; ".join(f"{target}: {lines[0]}" for target, lines in list(scheduled.items())[:5])
         raise ReusePreflightError(f"Restored outputs are scheduled for rebuild ({len(scheduled)}/{len(targets)} samples); full build was not started: {details}; see {log_path}")
+    # No matching target row is not proof of a no-op. Siso may emit wrapper or
+    # summary output that the target matcher cannot interpret. Only accept an
+    # explicit no-work response; otherwise stop before the compile window.
+    if not re.search(r"(?:ninja: no work to do\\.|no work to do)", log, re.IGNORECASE):
+        preview = " | ".join(line.strip()[:220] for line in log.splitlines()[:8] if line.strip())
+        raise ReusePreflightError(
+            "Targeted dry-run had no matching rebuild rows and no explicit no-work marker; "
+            f"output format is unverified, full build was not started (sample: {preview or '<empty>'}); "
+            f"see {log_path}"
+        )
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=PASS")
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_SAMPLES=" + str(len(targets)))
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_after[0])
