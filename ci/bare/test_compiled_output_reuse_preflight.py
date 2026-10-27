@@ -52,9 +52,16 @@ class Tests(unittest.TestCase):
                     f"-re_cache_enable_write=true -n -C {out} " + " ".join(targets) + "\n")
             fake=subprocess.CompletedProcess(["autoninja"],0,echoed,None)
             with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",return_value=fake):
-                result=M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
-            self.assertEqual(result["status"],"PASS")
-            self.assertEqual(result["sample_count"],8)
+                with self.assertRaisesRegex(M.ReusePreflightError,"no explicit no-work marker"):
+                    M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
+
+    def test_unrecognized_dry_run_summary_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source,out,report=fixture(root)
+            fake=subprocess.CompletedProcess(["autoninja"],0,"ninja: Entering directory 'out'\\nSiso finished successfully\\n",None)
+            with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",return_value=fake):
+                with self.assertRaisesRegex(M.ReusePreflightError,"no explicit no-work marker"):
+                    M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
 
     def test_dirty_sample_fails_before_expensive_window(self):
         with tempfile.TemporaryDirectory() as tmp:
