@@ -6,6 +6,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -205,6 +206,7 @@ class StageLedgerTests(unittest.TestCase):
             identity = {"source": "Bare", "gn_args_sha256": "gn-fingerprint"}
             manifest = {
                 "build_identity_sha256": MODULE.digest(identity),
+                "artifact_name": "Sandium-debug-arm64.apk",
                 "artifact_verified": True,
                 "apksigner_verification": "PASS",
                 "apk_zip_integrity": "PASS",
@@ -213,9 +215,18 @@ class StageLedgerTests(unittest.TestCase):
                 "artifact_sha256": MODULE.sha256(apk),
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            result = MODULE.validate_artifact(apk, manifest_path, identity)
+            verified_evidence = {
+                "artifact_verified": True,
+                "apksigner_verification": "PASS",
+                "artifact_bytes": apk.stat().st_size,
+                "artifact_sha256": MODULE.sha256(apk),
+            }
+            with patch.object(MODULE, "verify_apk", return_value=verified_evidence) as verify:
+                result = MODULE.validate_artifact(apk, manifest_path, identity, root)
+                verify.assert_called_once()
             self.assertEqual(result["artifact_sha256"], MODULE.sha256(apk))
             self.assertEqual(result["apksigner_verification"], "PASS")
+            self.assertEqual(result["direct_apk_verification"], "PASS")
             manifest["apksigner_verification"] = "NOT_REQUESTED"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(IdentityError, "apksigner verification"):
