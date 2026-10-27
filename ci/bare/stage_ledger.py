@@ -81,15 +81,50 @@ def verify_artifact(apk: Path, manifest_path: Path, identity: dict, identity_has
     return {"artifact_sha256": result["artifact_sha256"], "artifact_bytes": result["artifact_bytes"],
             "artifact_verified": True, "manifest_sha256": sha(manifest_path)}
 
+def progress_watermark(ledger: dict) -> int:
+    """Read a monotonic, non-additive progress watermark from a stage ledger.
+
+    Older ledgers added the preceding checkpoint's progress to the current
+    invocation's Siso numerator. Those counts overlap: the current invocation
+    can include actions already represented by the checkpoint, especially
+    remote-cache hits and no-exec actions. Detect that exact legacy shape and
+    normalize it so the next stage can continue instead of failing above 100%.
+    """
+    raw = int(ledger.get("max_completed_actions",
+                         ledger.get("cumulative_completed_actions", 0)) or 0)
+    current = int(ledger.get("stage_completed_actions", 0) or 0)
+    handoff = ledger.get("state_handoff")
+    if not isinstance(handoff, dict):
+        return raw
+    source = int(handoff.get("source_max_completed_actions", 0) or 0)
+    if (
+        handoff.get("local_compiled_outputs_restored") is True
+        and source > 0
+        and current > 0
+        and raw == source + current
+    ):
+        normalized = max(source, current)
+        print(
+            "SANDIUM_PROGRESS_WATERMARK_NORMALIZED=LEGACY_ADDITIVE_SUM "
+            f"raw={raw} source_checkpoint={source} stage_actions={current} "
+            f"effective={normalized}",
+            file=sys.stderr,
+        )
+        return normalized
+    return raw
+
+
 def cumulative_progress(stage: int, done: int, total: int, previous: dict | None,
                         handoff: dict) -> int:
-    """Return a monotonic estimate across bounded stage invocations.
+    """Return a conservative progress watermark across bounded invocations.
 
-    Siso's progress numerator resets to zero for each autoninja invocation.
-    Therefore it must be added to a compatible restored checkpoint's completed
-    count, rather than compared directly with the previous invocation's count.
+    Siso's per-invocation completed-action numerator is not a disjoint delta
+    from the prior checkpoint: actions can overlap through local outputs,
+    remote-cache hits and no-exec actions. Never add the two counters. Keep a
+    monotonic watermark (the maximum observed count), and retain the stage-local
+    action count separately in the ledger as evidence of work in this window.
     """
-    if done < 0 or total <= 0:
+    if done < 0 or total <= 0 or done > total:
         raise IdentityError("Invalid completed-action or graph-total count")
 
     if stage == 1:
@@ -106,23 +141,27 @@ def cumulative_progress(stage: int, done: int, total: int, previous: dict | None
             raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
         if handoff.get("local_compiled_outputs_restored") is not True:
             raise IdentityError("Continuation stage did not restore a full compiled-output checkpoint")
-        baseline = int(previous.get("max_completed_actions",
-                                    previous.get("cumulative_completed_actions", 0)) or 0)
-        handoff_baseline = int(handoff.get("source_max_completed_actions", baseline) or 0)
-        if handoff_baseline != baseline:
+        raw_baseline = int(previous.get("max_completed_actions",
+                                        previous.get("cumulative_completed_actions", 0)) or 0)
+        handoff_baseline = int(handoff.get("source_max_completed_actions", raw_baseline) or 0)
+        if handoff_baseline != raw_baseline:
             raise IdentityError(
-                f"Restored checkpoint progress mismatch: ledger={baseline} checkpoint={handoff_baseline}"
+                f"Restored checkpoint progress mismatch: ledger={raw_baseline} checkpoint={handoff_baseline}"
             )
+        # Repair ledgers produced by the former additive implementation. The
+        # handoff equality check above validates artifact lineage against the
+        # original persisted ledger value; only then normalize the estimate.
+        baseline = progress_watermark(previous)
 
     if baseline < 0:
         raise IdentityError("Restored checkpoint completed-action baseline is negative")
-    cumulative = baseline + done
-    if cumulative > total:
+    watermark = max(baseline, done)
+    if watermark > total:
         raise IdentityError(
-            f"Cumulative completed-action estimate exceeds graph total: "
+            f"Completed-action watermark exceeds graph total: "
             f"baseline={baseline} current_stage={done} total={total}"
         )
-    return cumulative
+    return watermark
 
 
 def validate_progress(stage: int, metrics: dict, done: int, total: int,
