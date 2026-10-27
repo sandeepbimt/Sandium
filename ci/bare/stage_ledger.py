@@ -97,25 +97,35 @@ def progress_accounting_fields(stage_done: int, watermark: int, total: int) -> d
 
 
 def required_work_accounting(total: int, watermark: int, previous: dict | None,
-                            handoff: dict) -> dict:
-    """Return graph-edge-based remaining-work estimates, not unique compile counts."""
+                            handoff: dict, measured_start: int | None = None,
+                            measured_end: int | None = None) -> dict:
+    """Return measured pending build actions when supplied; never confuse them with graph size."""
     if total <= 0 or watermark < 0 or watermark > total:
         raise IdentityError("Invalid graph total or progress watermark for remaining-work estimate")
-    if previous is not None:
-        prior_remaining = previous.get("estimated_remaining_actions")
-        required_at_start = int(prior_remaining) if prior_remaining is not None else total
+    if (measured_start is None) != (measured_end is None):
+        raise IdentityError("Pending-work measurement must supply both stage-start and stage-end values")
+    if measured_start is not None:
+        if measured_start < 0 or measured_end < 0 or measured_end > measured_start:
+            raise IdentityError("Pending build actions must be nonnegative and cannot increase within a stage")
+        required_at_start, remaining = measured_start, measured_end
+        basis = "autoninja_dry_run_pending_action_rows_before_and_after_stage"
     else:
-        source_watermark = 0
-        if (handoff.get("local_compiled_outputs_restored") is True
-                and handoff.get("local_compiled_outputs_reuse_verified") is True):
-            source_watermark = int(handoff.get("source_max_completed_actions", 0) or 0)
-        required_at_start = max(0, total - source_watermark)
-    remaining = max(0, total - watermark)
+        if previous is not None:
+            prior_remaining = previous.get("estimated_remaining_actions")
+            required_at_start = int(prior_remaining) if prior_remaining is not None else total
+        else:
+            source_watermark = 0
+            if (handoff.get("local_compiled_outputs_restored") is True
+                    and handoff.get("local_compiled_outputs_reuse_verified") is True):
+                source_watermark = int(handoff.get("source_max_completed_actions", 0) or 0)
+            required_at_start = max(0, total - source_watermark)
+        remaining = max(0, total - watermark)
+        basis = "graph_total_minus_non_additive_progress_watermark"
     return {
         "required_actions_at_start": required_at_start,
         "remaining_actions_after_window": remaining,
         "required_work_reduction_vs_predecessor_remaining": required_at_start - remaining,
-        "required_work_estimate_basis": "graph_total_minus_non_additive_progress_watermark",
+        "required_work_estimate_basis": basis,
         "required_work_is_unique_compiled_action_count": False,
     }
 
@@ -238,6 +248,8 @@ def main() -> int:
     p.add_argument("--output", type=Path, required=True); p.add_argument("--previous", type=Path)
     p.add_argument("--root", type=Path); p.add_argument("--completed-actions", type=int, required=True)
     p.add_argument("--total-actions", type=int, required=True)
+    p.add_argument("--required-actions-at-start", type=int)
+    p.add_argument("--remaining-actions-after-window", type=int)
     p.add_argument("--apk", type=Path)
     p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_regular_files_v1")
     p.add_argument("--state-handoff-report", type=Path, required=True)
@@ -298,7 +310,10 @@ def main() -> int:
         evidence = validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous, handoff)
     accounting = progress_accounting_fields(a.completed_actions, cumulative_done, a.total_actions)
     # Explicitly label these as graph-edge estimates, not unique compiled actions.
-    work_accounting = required_work_accounting(a.total_actions, cumulative_done, previous, handoff)
+    work_accounting = required_work_accounting(
+        a.total_actions, cumulative_done, previous, handoff,
+        a.required_actions_at_start, a.remaining_actions_after_window
+    )
     required_at_start = work_accounting["required_actions_at_start"]
     remaining_after_window = work_accounting["remaining_actions_after_window"]
     reduction_vs_prior = work_accounting["required_work_reduction_vs_predecessor_remaining"]
