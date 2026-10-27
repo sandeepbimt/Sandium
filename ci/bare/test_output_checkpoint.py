@@ -218,7 +218,7 @@ class OutputCheckpointTests(unittest.TestCase):
             object_paths = sorted(p.relative_to(output).as_posix() for p in (output / "obj").rglob("*.o"))
             current_metrics.write_text("".join(json.dumps({
                 "step_id": f"stage-2-noexec-{index}", "outputs": [relative], "no_exec": True
-            }) + "\\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
+            }) + "\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
 
             result = M.verify_local_compiled_output_reuse(
                 root=root, stage=2, metrics_path=current_metrics, report_path=report_path
