@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for early verification of restored compiled object reuse."""
-import hashlib, importlib.util, json, subprocess, tempfile, unittest
+import hashlib, importlib.util, json, os, subprocess, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 SPEC=importlib.util.spec_from_file_location("reuse_preflight",Path(__file__).with_name("compiled_output_reuse_preflight.py"))
@@ -17,7 +17,7 @@ def write_inputs(source):
 def fixture(root):
     source=root/"src"; write_inputs(source)
     out=root/M.OUTPUT_RELATIVE; out.mkdir(parents=True)
-    (out/"build.ninja").write_text("stable graph\n"); (out/"args.gn").write_text("use_siso=true\n")
+    (out/"build.ninja").write_text("stable graph\n"); (out/"build.ninja.stamp").write_text("stable stamp\n"); (out/"args.gn").write_text("use_siso=true\n")
     samples=[]; obj=out/"obj/test"; obj.mkdir(parents=True)
     for i in range(8):
         target=f"obj/test/unit_{i}.o"; path=out/target; data=f"object-{i}".encode(); path.write_bytes(data)
@@ -56,6 +56,17 @@ class Tests(unittest.TestCase):
                 return subprocess.CompletedProcess(["autoninja"],0,"ninja: no work to do.\n",None)
             with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",side_effect=mutate):
                 with self.assertRaisesRegex(M.ReusePreflightError,"build.ninja changed"):
+                    M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
+    def test_stamp_mtime_only_change_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source,out,report=fixture(root)
+            def touch_stamp(*args,**kwargs):
+                stamp=out/"build.ninja.stamp"
+                before=stamp.stat()
+                os.utime(stamp,ns=(before.st_atime_ns,before.st_mtime_ns+2_000_000_000))
+                return subprocess.CompletedProcess(["autoninja"],0,"ninja: no work to do.\\n",None)
+            with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",side_effect=touch_stamp):
+                with self.assertRaisesRegex(M.ReusePreflightError,"build.ninja.stamp changed"):
                     M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
     def test_continuation_missing_restored_checkpoint_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
