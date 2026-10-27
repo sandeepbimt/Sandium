@@ -272,9 +272,11 @@ def build_ledger_payload(
         "schema": SCHEMA,
         "stage": stage,
         "stage_kind": STAGE_KINDS[stage],
-        "build_identity": identity,
+        # Persist the stable identity as this object; generated GN is a separate
+        # fingerprint established at Stage 2, never inherited from Stage 1.
+        "build_identity": stable_identity(identity),
         "build_identity_sha256": identity_hash,
-        "gn_args_sha256": identity.get("gn_args_sha256"),
+        "gn_args_sha256": identity.get("gn_args_sha256") if stage >= 2 else None,
         "previous_stage_ledger_sha256": previous_ledger_sha256,
         "siso_metrics_sha256": metrics_sha256,
         "siso_log_sha256": log_sha256,
