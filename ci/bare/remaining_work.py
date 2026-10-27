@@ -69,7 +69,25 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
         raise RemainingWorkError(f"no-build dry run timed out after {timeout_seconds}s") from exc
     if run.returncode != 0:
         raise RemainingWorkError(f"no-build dry run failed with exit {run.returncode}")
-    count = parse_pending_actions(run.stdout or "")
+    output = run.stdout or ""
+    print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
+    print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
+    try:
+        count = parse_pending_actions(output)
+    except RemainingWorkError:
+        # The driver log is retained as a CircleCI artifact. Include a bounded
+        # sample so an unsupported Siso/autoninja -n format can be diagnosed
+        # without spending a compile window. Never proceed on an unknown format.
+        lines = output.splitlines()
+        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
+        for line in lines[:30]:
+            print(line[:500])
+        if len(lines) > 30:
+            print(f"... {len(lines) - 30} additional dry-run lines omitted ...")
+            for line in lines[-10:]:
+                print(line[:500])
+        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
+        raise
     if sha256_file(graph) != graph_before or sha256_file(args_gn) != args_hash:
         raise RemainingWorkError("GN/Ninja graph or args changed during pending-work measurement")
     report = {
