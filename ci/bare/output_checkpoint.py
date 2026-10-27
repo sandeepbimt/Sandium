@@ -557,6 +557,9 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         "checkpoint_kind": meta.get("checkpoint_kind", "unknown"),
         "source_max_completed_actions": meta.get("max_completed_actions", 0),
         "source_total_action_count": meta.get("total_action_count", 0),
+        "source_required_actions_at_start": meta.get("required_actions_at_start"),
+        "source_remaining_actions_after_window": meta.get("remaining_actions_after_window"),
+        "build_ninja_sha256": meta.get("output_files", {}).get("build.ninja"),
         "source_remote_execution_proven": meta.get("remote_execution_proven", False),
         "source_remote_action_cache_reuse_proven": meta.get("remote_action_cache_reuse_proven", False),
         "compiled_output_inventory_status": (
@@ -635,6 +638,13 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             ),
             "max_completed_actions": int(ledger.get("max_completed_actions", 0) or 0),
             "total_action_count": int(ledger.get("total_action_count", 0) or 0),
+            "required_actions_at_start": (
+                int(ledger.get("required_actions_at_start", 0) or 0) or None
+            ),
+            "remaining_actions_after_window": (
+                int(ledger.get("remaining_actions_after_window", 0) or 0) or None
+            ),
+            "build_ninja_sha256": files.get("build.ninja"),
             "remote_execution_proven": bool(ledger.get("remote_execution_proven", False)),
             "remote_action_cache_reuse_proven": bool(ledger.get("remote_action_cache_reuse_proven", False)),
             "artifact_verified": ledger.get("artifact_verified") is True,
