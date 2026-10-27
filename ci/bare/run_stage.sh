@@ -44,6 +44,7 @@ python3 "$CONTROL/ci/bare/test_build_identity.py"
 python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
 python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
+python3 "$CONTROL/ci/bare/test_compiled_output_reuse_preflight.py"
 python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/test_manifest_preflight.py"
 python3 "$CONTROL/ci/bare/test_normalize_progress_total.py"
@@ -229,6 +230,9 @@ test -s "$OUT/build.ninja"; test -s "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_reclient[[:space:]]*=[[:space:]]*false$' "$OUT/args.gn"
 grep -Eq '^[[:space:]]*use_remoteexec[[:space:]]*=[[:space:]]*true$' "$OUT/args.gn"
+# GN rewrites these generated files after source timestamp normalization. Stabilize
+# their mtimes before restoring the cached output tree to avoid Siso dirtying the generator state.
+python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" normalize --source-root "$SRC" --epoch "$TS_EPOCH"
 python3 "$CONTROL/ci/bare/write_cache_identity.py"
 # CircleCI restores only the first cache key that matches. Reject and quarantine
 # failed/partial/tiny legacy candidates before the authoritative restore check.
@@ -288,6 +292,11 @@ fi
 python3 "$CONTROL/ci/bare/manifest_preflight.py" \
   --control "$CONTROL" --root "$ROOT" --source-root "$SRC" --output-dir "$OUT" \
   --stage "$STAGE" --log "$ROOT/stage-$STAGE-manifest-preflight.log" --timeout-seconds 180
+
+# Prove restored object targets are up to date before spending the compile budget.
+python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" verify-reuse \
+  --root "$ROOT" --source-root "$SRC" --stage "$STAGE" \
+  --report "$STATE_REPORT" --epoch "$TS_EPOCH" --timeout-seconds 180
 
 ELAPSED=$(( $(date +%s) - STAGE_START_TS )); REMAIN=$(( WALL - ELAPSED ))
 echo "SANDIUM_SETUP_SECONDS=$ELAPSED"; echo "SANDIUM_REMAINING_COMPILE_SECONDS=$REMAIN"
