@@ -125,6 +125,23 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(M.IdentityError, "Invalid graph total or progress watermark"):
             M.required_work_accounting(100, 101, None, {})
 
+    def test_required_work_accounting_uses_measured_pending_build_actions(self):
+        previous = {"estimated_remaining_actions": 60}
+        measured = M.required_work_accounting(
+            100, 65, previous, {}, measured_start=42, measured_end=17
+        )
+        self.assertEqual(measured["required_actions_at_start"], 42)
+        self.assertEqual(measured["remaining_actions_after_window"], 17)
+        self.assertEqual(measured["required_work_reduction_vs_predecessor_remaining"], 25)
+        self.assertEqual(
+            measured["required_work_estimate_basis"],
+            "autoninja_dry_run_pending_action_rows_before_and_after_stage",
+        )
+
+    def test_required_work_accounting_rejects_increased_pending_actions(self):
+        with self.assertRaisesRegex(M.IdentityError, "cannot increase within a stage"):
+            M.required_work_accounting(100, 65, None, {}, measured_start=17, measured_end=42)
+
     def test_progress_fields_disclose_non_additive_watermark_semantics(self):
         fields = M.progress_accounting_fields(55453, 55453, 109040)
         self.assertEqual(fields["progress_accounting_mode"], "NON_ADDITIVE_WATERMARK")
