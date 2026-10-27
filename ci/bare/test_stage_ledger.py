@@ -50,7 +50,7 @@ class LedgerTests(unittest.TestCase):
 
     def test_later_stage_does_not_add_overlapping_action_counters(self):
         previous = {"max_completed_actions": 96, "total_action_count": 100}
-        handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 96}
+        handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 96}
         metrics = {"remote_execution_proven": False, "remote_action_cache_reuse_proven": True}
         self.assertEqual(
             M.validate_progress(2, metrics, 3, 100, previous, handoff),
@@ -63,7 +63,7 @@ class LedgerTests(unittest.TestCase):
     def test_later_stage_requires_some_new_progress(self):
         from build_identity import IdentityError
         previous = {"max_completed_actions": 90, "total_action_count": 100}
-        handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 90}
+        handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 90}
         with self.assertRaisesRegex(IdentityError, "No parseable completed-action progress"):
             M.validate_progress(
                 2, {"remote_execution_proven": True}, 0, 100, previous, handoff
@@ -72,14 +72,27 @@ class LedgerTests(unittest.TestCase):
     def test_graph_total_must_be_stable_across_stages(self):
         from build_identity import IdentityError
         previous = {"max_completed_actions": 50, "total_action_count": 100}
-        handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 50}
+        handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 50}
         with self.assertRaisesRegex(IdentityError, "Build graph action count changed"):
             M.validate_progress(
                 2, {"remote_execution_proven": True}, 20, 101, previous, handoff
             )
 
+    def test_continuation_requires_reuse_proof_not_just_restore_flag(self):
+        from build_identity import IdentityError
+        previous = {"max_completed_actions": 50, "total_action_count": 100}
+        handoff = {
+            "local_compiled_outputs_restored": True,
+            "local_compiled_outputs_reuse_verified": False,
+            "source_max_completed_actions": 50,
+        }
+        with self.assertRaisesRegex(IdentityError, "did not prove local compiled-output reuse"):
+            M.cumulative_progress(
+                2, 10, 100, previous, handoff
+            )
+
     def test_stage_one_uses_a_non_additive_watermark_for_prior_checkpoint(self):
-        handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 70}
+        handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 70}
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 70)
 
     def test_state_capsule_does_not_claim_local_compiled_output_progress(self):
@@ -87,7 +100,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 10)
 
     def test_stage_local_actions_are_not_added_to_checkpoint_watermark(self):
-        handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 95}
+        handoff = {"local_compiled_outputs_restored": True, "local_compiled_outputs_reuse_verified": True, "source_max_completed_actions": 95}
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 95)
 
     def test_progress_fields_disclose_non_additive_watermark_semantics(self):
@@ -118,6 +131,7 @@ class LedgerTests(unittest.TestCase):
         }
         handoff = {
             "local_compiled_outputs_restored": True,
+            "local_compiled_outputs_reuse_verified": True,
             "source_max_completed_actions": 103735,
         }
         metrics = {"remote_execution_proven": False, "remote_action_cache_reuse_proven": True}
