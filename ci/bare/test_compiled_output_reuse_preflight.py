@@ -49,7 +49,7 @@ class Tests(unittest.TestCase):
             # Reproduce the observed Siso wrapper line: every requested target is
             # present as an argument, but no compile action is listed.
             echoed=(f"{targets[0]}: depot_tools/siso.py: ninja "
-                    f"-re_cache_enable_write=true -n -C {out} " + " ".join(targets) + "\\n")
+                    f"-re_cache_enable_write=true -n -C {out} " + " ".join(targets) + "\n")
             fake=subprocess.CompletedProcess(["autoninja"],0,echoed,None)
             with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",return_value=fake):
                 result=M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
