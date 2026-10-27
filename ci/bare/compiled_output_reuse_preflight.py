@@ -100,9 +100,18 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
         return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0}
     output = root / OUTPUT_RELATIVE
     graph = output / "build.ninja"
+    stamp = output / "build.ninja.stamp"
     if not graph.is_file() or graph.is_symlink() or graph.stat().st_size == 0:
         raise ReusePreflightError("Restored build.ninja missing/unsafe before reuse preflight")
-    graph_before = sha256_file(graph)
+    if not stamp.is_file() or stamp.is_symlink():
+        raise ReusePreflightError("Restored build.ninja.stamp missing/unsafe before reuse preflight")
+
+    def generator_output_signature(path: Path) -> tuple[str, int, int]:
+        stat = path.stat()
+        return sha256_file(path), stat.st_size, stat.st_mtime_ns
+
+    graph_before = generator_output_signature(graph)
+    stamp_before = generator_output_signature(stamp)
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise ReusePreflightError("autoninja not found on PATH for compiled-output reuse preflight")
@@ -122,12 +131,15 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
     log_path.write_text(log, encoding="utf-8")
     if completed.returncode != 0:
         raise ReusePreflightError(f"Targeted dry-run failed with exit {completed.returncode}; full build was not started")
-    graph_after = sha256_file(graph)
+    graph_after = generator_output_signature(graph)
+    stamp_after = generator_output_signature(stamp)
     config_after = normalize_siso_input_timestamps(source_root, epoch)
     if config_after != config_before:
         raise ReusePreflightError("Siso config bytes changed during targeted dry-run")
     if graph_after != graph_before:
         raise ReusePreflightError("Restored build.ninja changed during targeted dry-run; graph is unstable; full build was not started")
+    if stamp_after != stamp_before:
+        raise ReusePreflightError("Restored build.ninja.stamp changed during targeted dry-run; GN graph regenerated; full build was not started")
     scheduled = scheduled_sample_targets(log, targets)
     if scheduled:
         details = "; ".join(f"{target}: {lines[0]}" for target, lines in list(scheduled.items())[:5])
