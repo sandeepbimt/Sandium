@@ -146,7 +146,8 @@ def cumulative_progress(stage: int, done: int, total: int, previous: dict | None
         # Stage 1 may resume from a compatible checkpoint saved by an earlier
         # workflow. A Siso-state capsule alone is not compiled-output reuse.
         baseline = 0
-        if handoff.get("local_compiled_outputs_restored") is True:
+        if (handoff.get("local_compiled_outputs_restored") is True
+                and handoff.get("local_compiled_outputs_reuse_verified") is True):
             baseline = int(handoff.get("source_max_completed_actions", 0) or 0)
     else:
         if previous is None:
@@ -156,6 +157,8 @@ def cumulative_progress(stage: int, done: int, total: int, previous: dict | None
             raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
         if handoff.get("local_compiled_outputs_restored") is not True:
             raise IdentityError("Continuation stage did not restore a full compiled-output checkpoint")
+        if handoff.get("local_compiled_outputs_reuse_verified") is not True:
+            raise IdentityError("Continuation stage did not prove local compiled-output reuse from prior object samples")
         raw_baseline = int(previous.get("max_completed_actions",
                                         previous.get("cumulative_completed_actions", 0)) or 0)
         handoff_baseline = int(handoff.get("source_max_completed_actions", raw_baseline) or 0)
