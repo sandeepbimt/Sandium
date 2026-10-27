@@ -146,10 +146,10 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
         raise ReusePreflightError(f"Restored outputs are scheduled for rebuild ({len(scheduled)}/{len(targets)} samples); full build was not started: {details}; see {log_path}")
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=PASS")
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_SAMPLES=" + str(len(targets)))
-    print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_after)
+    print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_after[0])
     print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_LOG=" + str(log_path))
     return {"status":"PASS","sample_count":len(targets),"sample_paths":targets,
-            "build_ninja_sha256":graph_after,"siso_config_sha256":config_after,"log":str(log_path)}
+            "build_ninja_sha256":graph_after[0],"siso_config_sha256":config_after,"log":str(log_path)}
 
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
