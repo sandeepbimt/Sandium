@@ -96,6 +96,30 @@ def progress_accounting_fields(stage_done: int, watermark: int, total: int) -> d
     }
 
 
+def required_work_accounting(total: int, watermark: int, previous: dict | None,
+                            handoff: dict) -> dict:
+    """Return graph-edge-based remaining-work estimates, not unique compile counts."""
+    if total <= 0 or watermark < 0 or watermark > total:
+        raise IdentityError("Invalid graph total or progress watermark for remaining-work estimate")
+    if previous is not None:
+        prior_remaining = previous.get("estimated_remaining_actions")
+        required_at_start = int(prior_remaining) if prior_remaining is not None else total
+    else:
+        source_watermark = 0
+        if (handoff.get("local_compiled_outputs_restored") is True
+                and handoff.get("local_compiled_outputs_reuse_verified") is True):
+            source_watermark = int(handoff.get("source_max_completed_actions", 0) or 0)
+        required_at_start = max(0, total - source_watermark)
+    remaining = max(0, total - watermark)
+    return {
+        "required_actions_at_start": required_at_start,
+        "remaining_actions_after_window": remaining,
+        "required_work_reduction_vs_predecessor_remaining": required_at_start - remaining,
+        "required_work_estimate_basis": "graph_total_minus_non_additive_progress_watermark",
+        "required_work_is_unique_compiled_action_count": False,
+    }
+
+
 def progress_watermark(ledger: dict) -> int:
     """Read a monotonic, non-additive progress watermark from a stage ledger.
 
@@ -273,20 +297,11 @@ def main() -> int:
         cumulative_done = cumulative_progress(a.stage, a.completed_actions, a.total_actions, previous, handoff)
         evidence = validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous, handoff)
     accounting = progress_accounting_fields(a.completed_actions, cumulative_done, a.total_actions)
-    # Estimates from the graph denominator and conservative monotonic watermark;
-    # these are not counts of unique compiled objects. Keep graph size separate
-    # from estimated remaining work.
-    if previous is not None:
-        prior_remaining = previous.get("estimated_remaining_actions")
-        required_at_start = int(prior_remaining) if prior_remaining is not None else a.total_actions
-    else:
-        source_watermark = 0
-        if (handoff.get("local_compiled_outputs_restored") is True
-                and handoff.get("local_compiled_outputs_reuse_verified") is True):
-            source_watermark = int(handoff.get("source_max_completed_actions", 0) or 0)
-        required_at_start = max(0, a.total_actions - source_watermark)
-    remaining_after_window = int(accounting["estimated_remaining_actions"])
-    reduction_vs_prior = required_at_start - remaining_after_window
+    # Explicitly label these as graph-edge estimates, not unique compiled actions.
+    work_accounting = required_work_accounting(a.total_actions, cumulative_done, previous, handoff)
+    required_at_start = work_accounting["required_actions_at_start"]
+    remaining_after_window = work_accounting["remaining_actions_after_window"]
+    reduction_vs_prior = work_accounting["required_work_reduction_vs_predecessor_remaining"]
     ledger = {"schema": SCHEMA, "stage": a.stage, "build_identity": ident, "build_identity_sha256": ident_hash,
               "previous_stage_ledger_sha256": sha(a.previous) if a.previous else None,
               "source_timestamp_policy": a.source_timestamp_policy,
@@ -299,7 +314,7 @@ def main() -> int:
               "stage_completed_actions": a.completed_actions,
               "required_actions_at_start": required_at_start,
               "remaining_actions_after_window": remaining_after_window,
-              "required_work_reduction_vs_predecessor_remaining": reduction_vs_prior,
+              **work_accounting,
               "build_ninja_sha256": graph_hash,
               **accounting,
               # Legacy field kept for consumers as the maximum graph/action
