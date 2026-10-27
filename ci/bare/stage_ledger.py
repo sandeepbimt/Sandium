@@ -90,6 +90,66 @@ def parse_metrics(path: Path, log_path: Path) -> dict[str, int]:
     return values
 
 
+def validate_stage_evidence(stage: int, metrics: dict[str, int], previous: dict[str, Any] | None) -> tuple[bool, bool]:
+    """Validate actual Siso evidence for this invocation.
+
+    The progress numerator/denominator emitted by Siso/Ninja is scoped to the
+    current invocation's build graph. It is not a globally unique action ID set,
+    so never add a prior stage's completed-action count to this invocation.
+    """
+    remote_execution = metrics["remote_executed_action_records"] > 0
+    cache_reuse = metrics["remote_cached_action_records"] > 0
+
+    if stage == 1 and not remote_execution:
+        raise IdentityError("Stage 1 did not prove any uncached remote action execution")
+    if 2 <= stage <= 4 and not cache_reuse:
+        raise IdentityError(f"Stage {stage} did not prove any remote action-cache hits from prior work")
+    if stage == 5 and not (remote_execution or cache_reuse):
+        raise IdentityError("Final stage has neither remote execution nor remote-cache evidence")
+    return remote_execution, cache_reuse
+
+
+def build_ledger_payload(
+    *,
+    stage: int,
+    identity: dict[str, Any],
+    identity_hash: str,
+    previous: dict[str, Any] | None,
+    metrics: dict[str, int],
+    previous_ledger_sha256: str | None,
+    metrics_sha256: str | None,
+    log_sha256: str,
+    remote_execution: bool,
+    cache_reuse: bool,
+) -> dict[str, Any]:
+    """Build an identity-bound ledger with strictly stage-local action counters."""
+    current_action_counts = {
+        "scope": "current_siso_invocation_only",
+        "action_records": metrics["action_records"],
+        "local_action_records": metrics["local_action_records"],
+        "remote_executed_action_records": metrics["remote_executed_action_records"],
+        "remote_cached_action_records": metrics["remote_cached_action_records"],
+        "local_fallback_action_records": metrics["local_fallback_action_records"],
+        "no_exec_action_records": metrics["no_exec_action_records"],
+    }
+    return {
+        "schema": SCHEMA,
+        "stage": stage,
+        "build_identity": identity,
+        "build_identity_sha256": identity_hash,
+        "previous_stage_ledger_sha256": previous_ledger_sha256,
+        "siso_metrics_sha256": metrics_sha256,
+        "siso_log_sha256": log_sha256,
+        "siso_metrics": metrics,
+        "stage_action_counts": current_action_counts,
+        "action_count_scope": "STAGE_LOCAL_ONLY_NOT_CUMULATIVE",
+        "remote_execution_proven": remote_execution or bool(previous and previous.get("remote_execution_proven")),
+        "current_stage_remote_execution_proven": remote_execution,
+        "remote_cache_reuse_proven": cache_reuse,
+        "progress_contract": "REMOTE_ACTION_CACHE",
+    }
+
+
 def load_ledger(path: Path) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         raise IdentityError(f"Previous stage ledger is missing or unsafe: {path}")
@@ -135,29 +195,23 @@ def main() -> int:
             raise IdentityError("Previous stage did not prove actual Siso remote execution")
 
     metrics = parse_metrics(args.metrics, args.siso_log)
-    remote_execution = metrics["remote_executed_action_records"] > 0
-    cache_reuse = metrics["remote_cached_action_records"] > 0
+    remote_execution, cache_reuse = validate_stage_evidence(args.stage, metrics, previous)
+    previous_digest = hashlib.sha256(args.previous.read_bytes()).hexdigest() if args.previous else None
+    metrics_digest = hashlib.sha256(args.metrics.read_bytes()).hexdigest() if args.metrics.is_file() else None
+    log_digest = hashlib.sha256(args.siso_log.read_bytes()).hexdigest()
 
-    if args.stage == 1 and not remote_execution:
-        raise IdentityError("Stage 1 did not prove any uncached remote action execution")
-    if 2 <= args.stage <= 4 and not cache_reuse:
-        raise IdentityError(f"Stage {args.stage} did not prove any remote action-cache hits from prior work")
-    if args.stage == 5 and not (remote_execution or cache_reuse):
-        raise IdentityError("Final stage has neither remote execution nor remote-cache evidence")
-
-    ledger = {
-        "schema": SCHEMA,
-        "stage": args.stage,
-        "build_identity": identity,
-        "build_identity_sha256": identity_hash,
-        "previous_stage_ledger_sha256": hashlib.sha256(args.previous.read_bytes()).hexdigest() if args.previous else None,
-        "siso_metrics_sha256": hashlib.sha256(args.metrics.read_bytes()).hexdigest() if args.metrics.is_file() else None,
-        "siso_log_sha256": hashlib.sha256(args.siso_log.read_bytes()).hexdigest(),
-        "siso_metrics": metrics,
-        "remote_execution_proven": remote_execution or bool(previous and previous.get("remote_execution_proven")),
-        "remote_cache_reuse_proven": cache_reuse,
-        "progress_contract": "REMOTE_ACTION_CACHE",
-    }
+    ledger = build_ledger_payload(
+        stage=args.stage,
+        identity=identity,
+        identity_hash=identity_hash,
+        previous=previous,
+        metrics=metrics,
+        previous_ledger_sha256=previous_digest,
+        metrics_sha256=metrics_digest,
+        log_sha256=log_digest,
+        remote_execution=remote_execution,
+        cache_reuse=cache_reuse,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"SANDIUM_STAGE_LEDGER=PASS stage={args.stage}")

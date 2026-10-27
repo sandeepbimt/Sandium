@@ -37,7 +37,8 @@ jobs:
               ci/bare/checkpoint.py \
               ci/bare/stage_ledger.py \
               ci/bare/write_cache_identity.py \
-              ci/bare/test_build_identity.py
+              ci/bare/test_build_identity.py \
+              ci/bare/test_stage_ledger.py
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
             bash -n ci/bare/package_artifact.sh
@@ -46,6 +47,7 @@ jobs:
             python3 ci/bare/checkpoint.py --help >/dev/null
             python3 ci/bare/stage_ledger.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
+            python3 ci/bare/test_stage_ledger.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
             grep -Fxq 'chromium_version=156.0.8078.25' ci/bare/source-pin.txt
