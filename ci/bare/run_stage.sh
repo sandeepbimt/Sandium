@@ -294,16 +294,20 @@ python3 "$CONTROL/ci/bare/manifest_preflight.py" \
   --control "$CONTROL" --root "$ROOT" --source-root "$SRC" --output-dir "$OUT" \
   --stage "$STAGE" --log "$ROOT/stage-$STAGE-manifest-preflight.log" --timeout-seconds 180
 
-# Prove restored object targets are up to date before spending the compile budget.
-python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" verify-reuse \
-  --root "$ROOT" --source-root "$SRC" --stage "$STAGE" \
-  --report "$STATE_REPORT" --epoch "$TS_EPOCH" --timeout-seconds 180
-
-# Measure pending target actions with a no-build dry run before spending the compile window.
+# First run the full-target no-build dry run. This may cause Siso/GN to
+# regenerate Ninja manifests, so it must precede the sampled reuse proof.
 START_WORK_REPORT="$ROOT/pending-work-$STAGE-start.json"
 python3 "$CONTROL/ci/bare/remaining_work.py" \
   --source-root "$SRC" --output-dir "$OUT" --stage "$STAGE" --phase start \
   --report "$START_WORK_REPORT" --timeout-seconds 180
+
+# Prove restored object targets are up to date against the graph that the full
+# dry run just measured. The reuse preflight independently checks graph/stamp
+# stability while it runs; also require its final graph hash to match the full
+# target measurement so neither preflight can invalidate the other's evidence.
+python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" verify-reuse \
+  --root "$ROOT" --source-root "$SRC" --stage "$STAGE" \
+  --report "$STATE_REPORT" --epoch "$TS_EPOCH" --timeout-seconds 180
 START_PENDING="$(python3 - "$START_WORK_REPORT" <<'PY'
 import json,sys
 print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
@@ -314,6 +318,12 @@ import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
 PY
 )"
+REUSE_GRAPH_SHA="$(sed -n 's/^SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=//p' "$DRIVER" | tail -n 1)"
+[[ -n "$REUSE_GRAPH_SHA" && "$START_GRAPH_SHA" == "$REUSE_GRAPH_SHA" ]] || {
+  echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=FAIL full_dry_run=$START_GRAPH_SHA sampled_reuse=$REUSE_GRAPH_SHA" >&2
+  exit 59
+}
+echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=PASS sha256=$START_GRAPH_SHA"
 if [[ "$STAGE" -gt 1 ]]; then
   PREVIOUS_PENDING="$(python3 - "$PREV" <<'PY'
 import json,sys
