@@ -37,7 +37,6 @@ jobs:
           python -m py_compile \
             ci/bare/stage_ledger.py \
             ci/bare/test_stage_ledger.py \
-            ci/bare/run_stage.sh \
             ci/bare/test_stage_runner.py \
             ci/bare/build_identity.py \
             ci/bare/test_build_identity.py \
