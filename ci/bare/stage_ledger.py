@@ -214,8 +214,6 @@ def main() -> int:
     p.add_argument("--output", type=Path, required=True); p.add_argument("--previous", type=Path)
     p.add_argument("--root", type=Path); p.add_argument("--completed-actions", type=int, required=True)
     p.add_argument("--total-actions", type=int, required=True)
-    p.add_argument("--required-actions-at-start", type=int, default=0)
-    p.add_argument("--remaining-actions-after-window", type=int, default=0)
     p.add_argument("--apk", type=Path)
     p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_regular_files_v1")
     p.add_argument("--state-handoff-report", type=Path, required=True)
@@ -263,27 +261,6 @@ def main() -> int:
         previous_graph_hash = previous.get("build_ninja_sha256")
         if previous_graph_hash is not None and graph_hash != previous_graph_hash:
             raise IdentityError("Build graph manifest SHA-256 changed across stages")
-    required_at_start = int(a.required_actions_at_start or 0)
-    remaining_after_window = int(a.remaining_actions_after_window or 0)
-    if required_at_start < 0 or remaining_after_window < 0:
-        raise IdentityError("Stage required-work counters must be nonnegative")
-    if required_at_start and remaining_after_window > required_at_start:
-        # A task denominator that grows during a stage indicates manifest/task
-        # graph churn; report it as invalid accounting rather than forcing a
-        # smaller value or relabeling it as progress.
-        raise IdentityError(
-            "Remaining actions after stage exceed required actions at stage start: "
-            f"start={required_at_start} remaining={remaining_after_window}"
-        )
-    prior_remaining = None
-    if previous is not None:
-        prior_remaining = previous.get("remaining_actions_after_window")
-    elif handoff.get("local_compiled_outputs_restored") is True:
-        prior_remaining = handoff.get("source_remaining_actions_after_window")
-    reduction_vs_prior = (
-        int(prior_remaining) - required_at_start
-        if prior_remaining is not None and required_at_start > 0 else None
-    )
     metrics = parse_metrics(a.metrics, a.siso_log)
     artifact = {}; complete = False
     if a.apk and a.manifest and a.apk.is_file():
@@ -296,6 +273,20 @@ def main() -> int:
         cumulative_done = cumulative_progress(a.stage, a.completed_actions, a.total_actions, previous, handoff)
         evidence = validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous, handoff)
     accounting = progress_accounting_fields(a.completed_actions, cumulative_done, a.total_actions)
+    # Estimates from the graph denominator and conservative monotonic watermark;
+    # these are not counts of unique compiled objects. Keep graph size separate
+    # from estimated remaining work.
+    if previous is not None:
+        prior_remaining = previous.get("estimated_remaining_actions")
+        required_at_start = int(prior_remaining) if prior_remaining is not None else a.total_actions
+    else:
+        source_watermark = 0
+        if (handoff.get("local_compiled_outputs_restored") is True
+                and handoff.get("local_compiled_outputs_reuse_verified") is True):
+            source_watermark = int(handoff.get("source_max_completed_actions", 0) or 0)
+        required_at_start = max(0, a.total_actions - source_watermark)
+    remaining_after_window = int(accounting["estimated_remaining_actions"])
+    reduction_vs_prior = required_at_start - remaining_after_window
     ledger = {"schema": SCHEMA, "stage": a.stage, "build_identity": ident, "build_identity_sha256": ident_hash,
               "previous_stage_ledger_sha256": sha(a.previous) if a.previous else None,
               "source_timestamp_policy": a.source_timestamp_policy,
