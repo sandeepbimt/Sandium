@@ -169,6 +169,42 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertFalse(checkpoint.exists())
         self.assertTrue((rejected / M.OC.META_NAME).is_file())
 
+    def test_legacy_checkpoint_is_stage_one_only_and_explicitly_unverified(self):
+        checkpoint = make_candidate(
+            self.root, stage=1, workflow="old-workflow", min_payload=200
+        )
+        meta_path = checkpoint / M.OC.META_NAME
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.pop("compiled_output_inventory", None)
+        meta.pop("compiled_output_action_samples", None)
+        meta.pop("compiled_output_action_samples_source_metrics_sha256", None)
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \\
+             patch.object(M, "source_identity", return_value=IDENTITY):
+            result = M.validate_candidate(
+                root=self.root, control=self.control, stage=1,
+                workflow_id="new-workflow", min_output_bytes=100,
+            )
+            self.assertEqual(result["compiled_output_inventory_status"], "LEGACY_UNVERIFIED")
+            with self.assertRaisesRegex(M.CheckpointQualityError, "compiled_output_inventory_missing"):
+                M.validate_candidate(
+                    root=self.root, control=self.control, stage=2,
+                    workflow_id="current-workflow", min_output_bytes=100,
+                )
+
+    def test_compiled_object_sample_hash_mismatch_is_rejected(self):
+        checkpoint = make_candidate(
+            self.root, stage=1, workflow="current-workflow", min_payload=200
+        )
+        meta = json.loads((checkpoint / M.OC.META_NAME).read_text(encoding="utf-8"))
+        relative = next(iter(meta["compiled_output_inventory"]["sample_sha256"]))
+        sample_path = checkpoint / relative
+        original = sample_path.read_bytes()
+        sample_path.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+        with self.assertRaisesRegex(M.CheckpointQualityError, "compiled_output_inventory_invalid"):
+            self.validate()
+
     def test_missing_candidate_is_not_treated_as_valid(self):
         with self.assertRaisesRegex(M.CheckpointQualityError, "missing_or_unsafe"):
             self.validate()
