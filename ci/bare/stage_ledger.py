@@ -81,6 +81,21 @@ def verify_artifact(apk: Path, manifest_path: Path, identity: dict, identity_has
     return {"artifact_sha256": result["artifact_sha256"], "artifact_bytes": result["artifact_bytes"],
             "artifact_verified": True, "manifest_sha256": sha(manifest_path)}
 
+def progress_accounting_fields(stage_done: int, watermark: int, total: int) -> dict:
+    """Describe the progress fields without implying unique cumulative actions."""
+    return {
+        "progress_accounting_mode": "NON_ADDITIVE_WATERMARK",
+        "progress_accounting_rule": "max(previous_normalized_watermark,current_invocation_completed_edges)",
+        "progress_is_unique_cumulative_action_count": False,
+        "max_completed_actions": watermark,
+        # Retained as a compatibility alias for older metadata readers.
+        "cumulative_completed_actions": watermark,
+        "progress_watermark": watermark,
+        "estimated_remaining_actions": max(0, total - watermark),
+        "remaining_estimate_basis": "total_graph_edges_minus_non_additive_progress_watermark",
+    }
+
+
 def progress_watermark(ledger: dict) -> int:
     """Read a monotonic, non-additive progress watermark from a stage ledger.
 
@@ -239,7 +254,7 @@ def main() -> int:
     else:
         cumulative_done = cumulative_progress(a.stage, a.completed_actions, a.total_actions, previous, handoff)
         evidence = validate_progress(a.stage, metrics, a.completed_actions, a.total_actions, previous, handoff)
-    remaining_estimate = max(0, a.total_actions - cumulative_done)
+    accounting = progress_accounting_fields(a.completed_actions, cumulative_done, a.total_actions)
     ledger = {"schema": SCHEMA, "stage": a.stage, "build_identity": ident, "build_identity_sha256": ident_hash,
               "previous_stage_ledger_sha256": sha(a.previous) if a.previous else None,
               "source_timestamp_policy": a.source_timestamp_policy,
@@ -250,18 +265,7 @@ def main() -> int:
               "metrics": metrics, "siso_metrics_sha256": sha(a.metrics) if a.metrics.is_file() else None,
               "siso_log_sha256": sha(a.siso_log) if a.siso_log.is_file() else None,
               "stage_completed_actions": a.completed_actions,
-              # Keep legacy field names for cache compatibility, but declare
-              # that the value is a conservative watermark, not a sum of
-              # disjoint unique actions. The source/output checkpoint can
-              # already contain actions also reported by this invocation.
-              "progress_accounting_mode": "NON_ADDITIVE_WATERMARK",
-              "progress_accounting_rule": "max(previous_normalized_watermark,current_invocation_completed_edges)",
-              "progress_is_unique_cumulative_action_count": False,
-              "max_completed_actions": cumulative_done,
-              "cumulative_completed_actions": cumulative_done,
-              "progress_watermark": cumulative_done,
-              "estimated_remaining_actions": remaining_estimate,
-              "remaining_estimate_basis": "total_graph_edges_minus_non_additive_progress_watermark",
+              **accounting,
               "total_action_count": a.total_actions,
               "evidence": evidence,
               "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
