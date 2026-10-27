@@ -213,7 +213,10 @@ def main() -> int:
     p.add_argument("--metrics", type=Path, required=True); p.add_argument("--siso-log", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True); p.add_argument("--previous", type=Path)
     p.add_argument("--root", type=Path); p.add_argument("--completed-actions", type=int, required=True)
-    p.add_argument("--total-actions", type=int, required=True); p.add_argument("--apk", type=Path)
+    p.add_argument("--total-actions", type=int, required=True)
+    p.add_argument("--required-actions-at-start", type=int, default=0)
+    p.add_argument("--remaining-actions-after-window", type=int, default=0)
+    p.add_argument("--apk", type=Path)
     p.add_argument("--manifest", type=Path); p.add_argument("--source-timestamp-policy", default="epoch_946684800_regular_files_v1")
     p.add_argument("--state-handoff-report", type=Path, required=True)
     a = p.parse_args()
@@ -246,6 +249,41 @@ def main() -> int:
             raise IdentityError("State handoff build identity differs from current stage")
     elif handoff.get("SANDIUM_STATE_HANDOFF") not in ("RESTORED", "MISS"):
         raise IdentityError("Stage 1 must explicitly record prior-run discovery outcome")
+    graph_path = root / "src" / "out" / "android_Debug_arm64" / "build.ninja"
+    if not graph_path.is_file() or graph_path.is_symlink() or graph_path.stat().st_size == 0:
+        raise IdentityError("Current build.ninja missing/unsafe; graph continuity cannot be verified")
+    graph_hash = sha(graph_path)
+    expected_graph_hash = handoff.get("build_ninja_sha256")
+    if handoff.get("local_compiled_outputs_restored") is True:
+        if not isinstance(expected_graph_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_graph_hash):
+            raise IdentityError("Restored compiled-output checkpoint lacks a verified build.ninja SHA-256")
+        if graph_hash != expected_graph_hash:
+            raise IdentityError("Current build.ninja differs from the identity-validated restored checkpoint")
+    if previous is not None:
+        previous_graph_hash = previous.get("build_ninja_sha256")
+        if previous_graph_hash is not None and graph_hash != previous_graph_hash:
+            raise IdentityError("Build graph manifest SHA-256 changed across stages")
+    required_at_start = int(a.required_actions_at_start or 0)
+    remaining_after_window = int(a.remaining_actions_after_window or 0)
+    if required_at_start < 0 or remaining_after_window < 0:
+        raise IdentityError("Stage required-work counters must be nonnegative")
+    if required_at_start and remaining_after_window > required_at_start:
+        # A task denominator that grows during a stage indicates manifest/task
+        # graph churn; report it as invalid accounting rather than forcing a
+        # smaller value or relabeling it as progress.
+        raise IdentityError(
+            "Remaining actions after stage exceed required actions at stage start: "
+            f"start={required_at_start} remaining={remaining_after_window}"
+        )
+    prior_remaining = None
+    if previous is not None:
+        prior_remaining = previous.get("remaining_actions_after_window")
+    elif handoff.get("local_compiled_outputs_restored") is True:
+        prior_remaining = handoff.get("source_remaining_actions_after_window")
+    reduction_vs_prior = (
+        int(prior_remaining) - required_at_start
+        if prior_remaining is not None and required_at_start > 0 else None
+    )
     metrics = parse_metrics(a.metrics, a.siso_log)
     artifact = {}; complete = False
     if a.apk and a.manifest and a.apk.is_file():
@@ -268,7 +306,14 @@ def main() -> int:
               "metrics": metrics, "siso_metrics_sha256": sha(a.metrics) if a.metrics.is_file() else None,
               "siso_log_sha256": sha(a.siso_log) if a.siso_log.is_file() else None,
               "stage_completed_actions": a.completed_actions,
+              "required_actions_at_start": required_at_start,
+              "remaining_actions_after_window": remaining_after_window,
+              "required_work_reduction_vs_predecessor_remaining": reduction_vs_prior,
+              "build_ninja_sha256": graph_hash,
               **accounting,
+              # Legacy field kept for consumers as the maximum graph/action
+              # denominator observed in this stage. Stage-to-stage compile work
+              # is recorded separately because valid local reuse reduces it.
               "total_action_count": a.total_actions,
               "evidence": evidence,
               "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
@@ -289,6 +334,12 @@ def main() -> int:
     remaining_estimate = accounting["estimated_remaining_actions"]
     print("SANDIUM_ESTIMATED_REMAINING_ACTIONS="+str(remaining_estimate))
     print("SANDIUM_TOTAL_ACTION_COUNT="+str(a.total_actions))
+    print("SANDIUM_BUILD_NINJA_SHA256="+graph_hash)
+    print("SANDIUM_REQUIRED_ACTIONS_AT_STAGE_START="+str(required_at_start))
+    print("SANDIUM_REMAINING_ACTIONS_AFTER_WINDOW="+str(remaining_after_window))
+    print("SANDIUM_REQUIRED_WORK_REDUCTION_VS_PREDECESSOR_REMAINING="+(
+        "UNKNOWN" if reduction_vs_prior is None else str(reduction_vs_prior)
+    ))
     return 0
 
 if __name__ == "__main__":
