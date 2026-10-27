@@ -403,11 +403,13 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("preflight", "restore", "pack", "pack-partial"))
+    parser.add_argument("mode", choices=("preflight", "restore", "pack", "pack-partial", "verify-reuse"))
     parser.add_argument("--root", type=Path, default=Path.home() / "project")
     parser.add_argument("--stage", type=int, choices=range(1, 6), required=True)
     parser.add_argument("--workflow-id", default="unknown")
     parser.add_argument("--ledger", type=Path, default=None)
+    parser.add_argument("--metrics", type=Path, default=None)
+    parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--required", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
@@ -416,6 +418,13 @@ def main() -> int:
         return command_preflight(root, control, args.stage, args.workflow_id, args.required)
     if args.mode == "restore":
         return command_restore(root, control, args.stage, args.workflow_id, args.required)
+    if args.mode == "verify-reuse":
+        metrics = args.metrics.resolve() if args.metrics else root / f"stage-{args.stage}-metrics.jsonl"
+        report = args.report.resolve() if args.report else root / REPORT_NAME
+        verify_local_compiled_output_reuse(
+            root=root, stage=args.stage, metrics_path=metrics, report_path=report
+        )
+        return 0
     ledger = args.ledger.resolve() if args.ledger else root / "ci-handoff" / f"stage-{args.stage}" / "ledger.json"
     return command_pack(root, control, args.stage, args.workflow_id, ledger,
                         partial=args.mode == "pack-partial")
