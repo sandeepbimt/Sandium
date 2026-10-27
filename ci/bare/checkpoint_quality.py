@@ -146,10 +146,44 @@ def validate_candidate(
     if OC.identity_digest(current_identity) != meta.get("build_identity_sha256"):
         raise CheckpointQualityError("checkpoint_source_toolchain_or_gn_identity_mismatch")
 
-    # Verify the files that establish whether this is a real resumable output
-    # tree. output_checkpoint.restore performs the same manifest checks again
-    # before and after the atomic move.
+    # Verify both the basic graph files and a bounded inventory of real compiled
+    # object outputs. Only Stage 1 may migrate a legacy checkpoint lacking this
+    # evidence; every newly published checkpoint and every continuation must have it.
     OC.verify_manifest_files(checkpoint, output_files)
+    inventory = meta.get("compiled_output_inventory")
+    inventory_status = "VERIFIED"
+    object_count = 0
+    object_bytes = 0
+    action_sample_count = 0
+    if inventory is None:
+        if stage > 1 or produced:
+            raise CheckpointQualityError("compiled_output_inventory_missing")
+        inventory_status = "LEGACY_UNVERIFIED"
+    else:
+        try:
+            checked_inventory = OC.validate_compiled_output_inventory(
+                checkpoint, inventory, require_minimum=True
+            )
+        except OC.CheckpointError as exc:
+            raise CheckpointQualityError("compiled_output_inventory_invalid:" + str(exc)) from exc
+        object_count = checked_inventory["object_file_count"]
+        object_bytes = checked_inventory["object_file_bytes"]
+        action_samples = meta.get("compiled_output_action_samples")
+        if not isinstance(action_samples, list) or len(action_samples) < OC.MIN_ACTION_OUTPUT_SAMPLES:
+            raise CheckpointQualityError("compiled_output_action_samples_missing_or_too_small")
+        action_sample_count = len(action_samples)
+        for item in action_samples:
+            if not isinstance(item, dict):
+                raise CheckpointQualityError("compiled_output_action_sample_not_object")
+            relative = item.get("path", "")
+            rel = Path(relative) if isinstance(relative, str) else Path("/")
+            if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
+                raise CheckpointQualityError("unsafe_compiled_output_action_sample_path")
+            sample_path = checkpoint / rel
+            if (not sample_path.is_file() or sample_path.is_symlink()
+                    or sample_path.stat().st_size != int(item.get("bytes", -1))
+                    or OC.sha256_file(sample_path) != item.get("sha256")):
+                raise CheckpointQualityError("compiled_output_action_sample_mismatch:" + relative)
     return {
         "source_stage": source_stage,
         "workflow_id": str(meta.get("workflow_id", "unknown")),
@@ -157,6 +191,10 @@ def validate_candidate(
         "output_bytes": measured_bytes,
         "build_identity_sha256": str(meta.get("build_identity_sha256")),
         "stage_record_valid": True,
+        "compiled_output_inventory_status": inventory_status,
+        "compiled_object_file_count": object_count,
+        "compiled_object_file_bytes": object_bytes,
+        "compiled_output_action_sample_count": action_sample_count,
     }
 
 
@@ -196,6 +234,10 @@ def main() -> int:
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_SOURCE_STAGE={result['source_stage']}")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_BYTES={result['output_bytes']}")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_BUILD_IDENTITY_SHA256={result['build_identity_sha256']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_COMPILED_INVENTORY={result['compiled_output_inventory_status']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_COMPILED_OBJECT_FILES={result['compiled_object_file_count']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_COMPILED_OBJECT_BYTES={result['compiled_object_file_bytes']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_FILES={result['compiled_output_action_sample_count']}")
         return 0
     except (CheckpointQualityError, OC.CheckpointError, IdentityError, OSError, ValueError, KeyError) as exc:
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY=REJECT reason={exc}", file=sys.stderr)
