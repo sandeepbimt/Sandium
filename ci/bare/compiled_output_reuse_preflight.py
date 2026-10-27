@@ -72,9 +72,9 @@ def is_siso_dry_run_invocation(clean: str) -> bool:
     Matching those command-line arguments as if they were output actions makes
     the reuse preflight report every sample dirty even when the dry run is idle.
     """
-    if not re.search(r"(?:^|[/\\\\])siso\\.py:\\s*ninja\\b", clean, re.IGNORECASE):
+    if not re.search(r"(?:^|[/\\])siso\.py:\s*ninja\b", clean, re.IGNORECASE):
         return False
-    return bool(re.search(r"(?:^|\\s)-n(?:\\s|$)", clean))
+    return bool(re.search(r"(?:^|\s)-n(?:\s|$)", clean))
 
 
 def scheduled_sample_targets(output_text: str, targets: list[str]) -> dict[str, list[str]]:
