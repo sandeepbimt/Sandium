@@ -286,6 +286,7 @@ def main() -> int:
     print("SANDIUM_PROGRESS_WATERMARK="+str(cumulative_done))
     print("SANDIUM_MAX_COMPLETED_ACTIONS="+str(cumulative_done))
     print("SANDIUM_CUMULATIVE_COMPLETED_ACTIONS="+str(cumulative_done))
+    remaining_estimate = accounting["estimated_remaining_actions"]
     print("SANDIUM_ESTIMATED_REMAINING_ACTIONS="+str(remaining_estimate))
     print("SANDIUM_TOTAL_ACTION_COUNT="+str(a.total_actions))
     return 0
