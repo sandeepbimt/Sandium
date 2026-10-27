@@ -149,7 +149,7 @@ class CheckpointQualityTests(unittest.TestCase):
             with self.assertRaisesRegex(M.CheckpointQualityError, "identity_mismatch"):
                 M.validate_candidate(
                     root=self.root, control=self.control, stage=2,
-                    workflow_id="current-workflow", min_output_bytes=100,
+                    workflow_id="old-workflow", min_output_bytes=100,
                 )
 
     def test_rejects_declared_actual_payload_size_mismatch(self):
