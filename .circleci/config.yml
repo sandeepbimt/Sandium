@@ -51,6 +51,7 @@ jobs:
             python3 ci/bare/stage_ledger.py --help >/dev/null
             python3 ci/bare/state_handoff.py --help >/dev/null
             python3 ci/bare/output_checkpoint.py --help >/dev/null
+            python3 ci/bare/compiled_output_reuse_preflight.py --help >/dev/null
             python3 ci/bare/fast_apk.py --help >/dev/null
             python3 ci/bare/cache_fingerprint.py --help >/dev/null
             python3 ci/bare/source_cache_fingerprint.py --help >/dev/null
@@ -58,6 +59,7 @@ jobs:
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py
             python3 ci/bare/test_output_checkpoint.py
+            python3 ci/bare/test_compiled_output_reuse_preflight.py
             python3 ci/bare/test_fast_apk.py
             python3 ci/bare/stage_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
