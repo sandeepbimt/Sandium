@@ -98,37 +98,44 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
                                  report_path: Path, epoch: int, timeout_seconds: int = 180) -> dict[str, Any]:
     """Run a target-only no-op preflight before allowing a full stage compile."""
     config_before = normalize_siso_input_timestamps(source_root, epoch)
+    output = root / OUTPUT_RELATIVE
+    graph = output / "build.ninja"
+    stamp = output / "build.ninja.stamp"
+
+    def generator_output_signature(path: Path) -> tuple[str, int, int]:
+        stat = path.stat()
+        return sha256_file(path), stat.st_size, stat.st_mtime_ns
+
+    if not graph.is_file() or graph.is_symlink() or graph.stat().st_size == 0:
+        raise ReusePreflightError("Current build.ninja missing/unsafe before reuse preflight")
+    if not stamp.is_file() or stamp.is_symlink():
+        raise ReusePreflightError("Current build.ninja.stamp missing/unsafe before reuse preflight")
+    graph_before = generator_output_signature(graph)
+    stamp_before = generator_output_signature(stamp)
+
+    # A cold Stage 1 legitimately has no prior-output evidence. Still report the
+    # real current graph hash so the shell never infers it from console logs.
     if not report_path.is_file() or report_path.is_symlink():
         if stage > 1:
             raise ReusePreflightError("Continuation stage lacks a state-handoff report before the build window")
         print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=SKIP_NO_RESTORED_OUTPUTS")
-        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0}
+        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_before[0])
+        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0,
+                "build_ninja_sha256": graph_before[0], "build_ninja_mtime_ns": graph_before[2]}
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ReusePreflightError(f"State-handoff report is unreadable: {exc}") from exc
     if not isinstance(report, dict):
         raise ReusePreflightError("State-handoff report must be a JSON object")
-    targets = safe_sample_paths(report, root / OUTPUT_RELATIVE)
+    targets = safe_sample_paths(report, output)
     if not targets:
         if stage > 1:
             raise ReusePreflightError("Continuation stage has no restored compiled-output checkpoint to reuse")
         print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=SKIP_NO_RESTORED_OUTPUTS")
-        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0}
-    output = root / OUTPUT_RELATIVE
-    graph = output / "build.ninja"
-    stamp = output / "build.ninja.stamp"
-    if not graph.is_file() or graph.is_symlink() or graph.stat().st_size == 0:
-        raise ReusePreflightError("Restored build.ninja missing/unsafe before reuse preflight")
-    if not stamp.is_file() or stamp.is_symlink():
-        raise ReusePreflightError("Restored build.ninja.stamp missing/unsafe before reuse preflight")
-
-    def generator_output_signature(path: Path) -> tuple[str, int, int]:
-        stat = path.stat()
-        return sha256_file(path), stat.st_size, stat.st_mtime_ns
-
-    graph_before = generator_output_signature(graph)
-    stamp_before = generator_output_signature(stamp)
+        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_before[0])
+        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0,
+                "build_ninja_sha256": graph_before[0], "build_ninja_mtime_ns": graph_before[2]}
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise ReusePreflightError("autoninja not found on PATH for compiled-output reuse preflight")
@@ -178,6 +185,22 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
     return {"status":"PASS","sample_count":len(targets),"sample_paths":targets,
             "build_ninja_sha256":graph_after[0],"siso_config_sha256":config_after,"log":str(log_path)}
 
+def write_result_report(path: Path, result: dict[str, Any]) -> None:
+    """Publish this invocation's structured result atomically."""
+    if path.is_symlink():
+        raise ReusePreflightError(f"Unsafe reuse-preflight result-report path: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".tmp-{os.getpid()}")
+    if temporary.is_symlink():
+        raise ReusePreflightError(f"Unsafe temporary reuse-preflight result-report path: {temporary}")
+    try:
+        temporary.write_text(json.dumps(result, indent=2, sort_keys=True) + chr(10), encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists() and not temporary.is_symlink():
+            temporary.unlink()
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     subs=parser.add_subparsers(dest="mode",required=True)
@@ -189,6 +212,8 @@ def main() -> int:
     verify.add_argument("--source-root",type=Path,default=None)
     verify.add_argument("--stage",type=int,choices=range(1,6),required=True)
     verify.add_argument("--report",type=Path,default=None)
+    verify.add_argument("--result-report",type=Path,default=None,
+                        help="Write this invocation's structured result JSON")
     verify.add_argument("--epoch",type=int,required=True)
     verify.add_argument("--timeout-seconds",type=int,default=180)
     args=parser.parse_args()
@@ -203,8 +228,10 @@ def main() -> int:
         report=args.report.resolve() if args.report else root/"sandium-state-handoff-report.json"
         if args.timeout_seconds <= 0:
             raise ReusePreflightError("Reuse-preflight timeout must be positive")
-        verify_restored_output_reuse(root=root,source_root=source_root,stage=args.stage,
+        result = verify_restored_output_reuse(root=root,source_root=source_root,stage=args.stage,
             report_path=report,epoch=args.epoch,timeout_seconds=args.timeout_seconds)
+        if args.result_report:
+            write_result_report(args.result_report, result)
         return 0
     except (ReusePreflightError,OSError,ValueError) as exc:
         print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=FAIL "+str(exc),file=sys.stderr)

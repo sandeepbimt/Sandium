@@ -306,9 +306,12 @@ python3 "$CONTROL/ci/bare/remaining_work.py" \
 # dry run just measured. The reuse preflight independently checks graph/stamp
 # stability while it runs; also require its final graph hash to match the full
 # target measurement so neither preflight can invalidate the other's evidence.
+REUSE_REPORT="$ROOT/reuse-preflight-$STAGE.json"
+rm -f "$REUSE_REPORT"
 python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" verify-reuse \
   --root "$ROOT" --source-root "$SRC" --stage "$STAGE" \
-  --report "$STATE_REPORT" --epoch "$TS_EPOCH" --timeout-seconds 180
+  --report "$STATE_REPORT" --result-report "$REUSE_REPORT" \
+  --epoch "$TS_EPOCH" --timeout-seconds 180
 START_PENDING="$(python3 - "$START_WORK_REPORT" <<'PY'
 import json,sys
 print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
@@ -319,7 +322,20 @@ import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
 PY
 )"
-REUSE_GRAPH_SHA="$(sed -n 's/^SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=//p' "$DRIVER" | tail -n 1)"
+REUSE_GRAPH_SHA="$(python3 - "$REUSE_REPORT" <<'PY'
+import json,sys
+from pathlib import Path
+report_path=Path(sys.argv[1])
+try:
+    report=json.loads(report_path.read_text(encoding="utf-8"))
+except (OSError,json.JSONDecodeError) as exc:
+    raise SystemExit(f"reuse-preflight result report is unreadable: {exc}")
+value=report.get("build_ninja_sha256")
+if not isinstance(value,str) or len(value)!=64 or any(ch not in "0123456789abcdef" for ch in value):
+    raise SystemExit("reuse-preflight result report lacks a valid current build.ninja SHA-256")
+print(value)
+PY
+)"
 python3 "$CONTROL/ci/bare/preflight_graph_continuity.py" \
   --stage "$STAGE" --full-graph-sha "$START_GRAPH_SHA" --reuse-graph-sha "$REUSE_GRAPH_SHA"
 if [[ "$STAGE" -gt 1 ]]; then
