@@ -14,6 +14,8 @@ from typing import Any
 
 PAIR = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]\s+\S", re.M)
 NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
+SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps\s*$", re.M)
+SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
 
 
 class RemainingWorkError(RuntimeError):
@@ -29,13 +31,26 @@ def sha256_file(path: Path) -> str:
 
 
 def parse_pending_actions(output: str) -> int:
-    """Count action rows emitted by a completed dry run, never graph edges."""
+    """Count pending actions from supported Ninja rows or Siso's completed summary."""
     pairs = [(int(a), int(b)) for a, b in PAIR.findall(output)]
     if not pairs:
         if NO_WORK.search(output):
             return 0
+        # Siso's -n output can print commands and finish with aggregate counters
+        # instead of Ninja [done/total] rows. Accept only a completed summary
+        # plus its explicit skip counter; never infer zero from silence.
+        summaries = [int(n) for n in SISO_SUCCESS.findall(output)]
+        skipped = [int(n) for n in SISO_SKIP.findall(output)]
+        if len(summaries) == 1 and len(skipped) == 1:
+            steps, skip_count = summaries[0], skipped[0]
+            if steps <= 0 or skip_count > steps:
+                raise RemainingWorkError(
+                    f"invalid Siso dry-run counters: steps={steps}, skip={skip_count}"
+                )
+            return steps - skip_count
         raise RemainingWorkError(
-            "dry-run output contains neither parseable action rows nor an explicit no-work result"
+            "dry-run output has no Ninja action rows, explicit no-work result, "
+            "or unambiguous completed Siso summary/skip counters"
         )
     totals = {total for _, total in pairs}
     if len(totals) != 1:
