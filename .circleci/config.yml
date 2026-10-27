@@ -39,9 +39,11 @@ jobs:
               ci/bare/write_cache_identity.py \
               ci/bare/test_build_identity.py \
               ci/bare/test_stage_ledger.py \
+              ci/bare/test_stage_runner.py \
               ci/bare/test_bootstrap_contract.py
             bash -n ci/bare/prepare_source.sh
             bash -n ci/bare/bootstrap_chromium.sh
+            bash -n ci/bare/run_stage.sh
             bash -n ci/bare/package_artifact.sh
             python3 ci/bare/build_identity.py --help >/dev/null
             python3 ci/bare/configure_siso.py --help >/dev/null
@@ -49,6 +51,7 @@ jobs:
             python3 ci/bare/stage_ledger.py --help >/dev/null
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
+            python3 ci/bare/test_stage_runner.py
             python3 ci/bare/test_bootstrap_contract.py
             grep -Fxq 'bare_commit=a5a7ef74f3b77d45720b8c502cbacc30f2f3dbd5' ci/bare/source-pin.txt
             grep -Fxq 'chromium_commit=1228231501697ff7a4a0150ea8ae6df37bb99331' ci/bare/source-pin.txt
