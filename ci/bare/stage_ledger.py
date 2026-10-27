@@ -250,9 +250,18 @@ def main() -> int:
               "metrics": metrics, "siso_metrics_sha256": sha(a.metrics) if a.metrics.is_file() else None,
               "siso_log_sha256": sha(a.siso_log) if a.siso_log.is_file() else None,
               "stage_completed_actions": a.completed_actions,
+              # Keep legacy field names for cache compatibility, but declare
+              # that the value is a conservative watermark, not a sum of
+              # disjoint unique actions. The source/output checkpoint can
+              # already contain actions also reported by this invocation.
+              "progress_accounting_mode": "NON_ADDITIVE_WATERMARK",
+              "progress_accounting_rule": "max(previous_normalized_watermark,current_invocation_completed_edges)",
+              "progress_is_unique_cumulative_action_count": False,
               "max_completed_actions": cumulative_done,
               "cumulative_completed_actions": cumulative_done,
+              "progress_watermark": cumulative_done,
               "estimated_remaining_actions": remaining_estimate,
+              "remaining_estimate_basis": "total_graph_edges_minus_non_additive_progress_watermark",
               "total_action_count": a.total_actions,
               "evidence": evidence,
               "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
@@ -265,6 +274,9 @@ def main() -> int:
     print("SISO_REMOTE_EXECUTED_ACTIONS="+str(metrics["remote_executed_action_records"]))
     print("SISO_REMOTE_ACTION_CACHE_HITS="+str(metrics["cached_action_records"]))
     print("SANDIUM_STAGE_COMPLETED_ACTIONS="+str(a.completed_actions))
+    print("SANDIUM_PROGRESS_ACCOUNTING_MODE=NON_ADDITIVE_WATERMARK")
+    print("SANDIUM_PROGRESS_IS_UNIQUE_CUMULATIVE_ACTION_COUNT=false")
+    print("SANDIUM_PROGRESS_WATERMARK="+str(cumulative_done))
     print("SANDIUM_MAX_COMPLETED_ACTIONS="+str(cumulative_done))
     print("SANDIUM_CUMULATIVE_COMPLETED_ACTIONS="+str(cumulative_done))
     print("SANDIUM_ESTIMATED_REMAINING_ACTIONS="+str(remaining_estimate))
