@@ -44,6 +44,7 @@ python3 "$CONTROL/ci/bare/test_build_identity.py"
 python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
 python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
+python3 "$CONTROL/ci/bare/test_remaining_work.py"
 python3 "$CONTROL/ci/bare/test_compiled_output_reuse_preflight.py"
 python3 "$CONTROL/ci/bare/test_fast_apk.py"
 python3 "$CONTROL/ci/bare/test_manifest_preflight.py"
@@ -298,6 +299,38 @@ python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" verify-reuse \
   --root "$ROOT" --source-root "$SRC" --stage "$STAGE" \
   --report "$STATE_REPORT" --epoch "$TS_EPOCH" --timeout-seconds 180
 
+# Measure pending target actions with a no-build dry run before spending the compile window.
+START_WORK_REPORT="$ROOT/pending-work-$STAGE-start.json"
+python3 "$CONTROL/ci/bare/remaining_work.py" \
+  --source-root "$SRC" --output-dir "$OUT" --stage "$STAGE" --phase start \
+  --report "$START_WORK_REPORT" --timeout-seconds 180
+START_PENDING="$(python3 - "$START_WORK_REPORT" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
+PY
+)"
+START_GRAPH_SHA="$(python3 - "$START_WORK_REPORT" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
+PY
+)"
+if [[ "$STAGE" -gt 1 ]]; then
+  PREVIOUS_PENDING="$(python3 - "$PREV" <<'PY'
+import json,sys
+ledger=json.load(open(sys.argv[1],encoding="utf-8"))
+value=ledger.get("remaining_actions_after_window")
+if value is None:
+    raise SystemExit("previous stage lacks measured pending-work evidence; refusing unverified continuation")
+print(int(value))
+PY
+)"
+  [[ "$START_PENDING" -eq "$PREVIOUS_PENDING" ]] || {
+    echo "SANDIUM_PENDING_WORK_CONTINUITY=FAIL previous=$PREVIOUS_PENDING current=$START_PENDING" >&2
+    exit 55
+  }
+fi
+echo "SANDIUM_REQUIRED_ACTIONS_AT_STAGE_START=$START_PENDING"
+
 ELAPSED=$(( $(date +%s) - STAGE_START_TS )); REMAIN=$(( WALL - ELAPSED ))
 echo "SANDIUM_SETUP_SECONDS=$ELAPSED"; echo "SANDIUM_REMAINING_COMPILE_SECONDS=$REMAIN"
 [[ "$REMAIN" -gt 120 ]] || { echo STAGE_SETUP_CONSUMED_BUDGET >&2; exit 47; }
@@ -343,6 +376,37 @@ if pgrep -x siso >/dev/null 2>&1; then echo SISO_SHUTDOWN=FAILED >&2; pkill -TER
 python3 "$CONTROL/ci/bare/output_checkpoint.py" verify-reuse \
   --root "$ROOT" --stage "$STAGE" --metrics "$METRICS" --report "$STATE_REPORT"
 
+# Re-measure pending work after the bounded window; require real reduction unless APK is complete.
+END_WORK_REPORT="$ROOT/pending-work-$STAGE-end.json"
+python3 "$CONTROL/ci/bare/remaining_work.py" \
+  --source-root "$SRC" --output-dir "$OUT" --stage "$STAGE" --phase end \
+  --report "$END_WORK_REPORT" --timeout-seconds 180
+END_PENDING="$(python3 - "$END_WORK_REPORT" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
+PY
+)"
+END_GRAPH_SHA="$(python3 - "$END_WORK_REPORT" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
+PY
+)"
+[[ "$START_GRAPH_SHA" == "$END_GRAPH_SHA" ]] || {
+  echo "SANDIUM_PENDING_WORK_GRAPH_CONTINUITY=FAIL start=$START_GRAPH_SHA end=$END_GRAPH_SHA" >&2
+  exit 56
+}
+APK="$OUT/apks/ChromePublic.apk"
+if [[ -s "$APK" ]]; then
+  [[ "$END_PENDING" -eq 0 ]] || { echo "SANDIUM_PENDING_WORK_APK_INCOMPLETE=$END_PENDING" >&2; exit 57; }
+else
+  [[ "$END_PENDING" -lt "$START_PENDING" ]] || {
+    echo "SANDIUM_PENDING_WORK_NO_REDUCTION start=$START_PENDING end=$END_PENDING" >&2
+    exit 58
+  }
+fi
+echo "SANDIUM_REMAINING_ACTIONS_AFTER_WINDOW=$END_PENDING"
+echo "SANDIUM_REQUIRED_WORK_REDUCTION_VS_PREDECESSOR_REMAINING=$(( START_PENDING - END_PENDING ))"
+
 grep -oE '\[[[:space:]]*[0-9]+/[0-9]+\]' "$LOG" 2>/dev/null | sed -E 's/\[//;s/\]//;s/[[:space:]]//g' > "$ROOT/progress-$STAGE.txt" || true
 # A Siso invocation can regenerate its graph and emit more than one [done/total]
 # denominator. Taking the maximum numerator and maximum denominator independently
@@ -370,9 +434,9 @@ else
   PREV_ARGS=(--previous "$PREV")
 fi
 if [[ "$COMPLETE" == true ]]; then
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
 else
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
 fi
 CUMULATIVE_DONE="$(python3 - "$LEDGER" <<'PY'
 import json,sys
