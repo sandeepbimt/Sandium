@@ -14,6 +14,12 @@ class RemainingWorkTests(unittest.TestCase):
         output = "\n".join(f"[{i}/4] c++ compile unit_{i}.o" for i in range(1, 5))
         self.assertEqual(M.parse_pending_actions(output), 4)
 
+    def test_counts_dirty_actions_when_graph_denominator_is_larger(self):
+        self.assertEqual(
+            M.parse_pending_actions("[1/109068] compile changed.o\\n[2/109068] link target\\n"),
+            2,
+        )
+
     def test_explicit_no_work_is_zero(self):
         self.assertEqual(M.parse_pending_actions("ninja: no work to do.\n"), 0)
 
