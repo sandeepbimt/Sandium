@@ -37,6 +37,12 @@ def validate():
         errors.append("runner must record the regular-files-only timestamp policy")
     if 'output_checkpoint.py" restore' not in run_stage or 'output_checkpoint.py" pack' not in run_stage:
         errors.append("runner must restore and pack the full GN output tree")
+    if "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN" not in run_stage:
+        errors.append("compatible checkpoints must be restored intact before GN generation")
+    if run_stage.index('checkpoint_quality.py" --root "$ROOT"') > run_stage.index('bootstrap_chromium.sh" configure'):
+        errors.append("checkpoint quality must run before the Stage 1 cold GN path")
+    if "SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS" not in output_checkpoint:
+        errors.append("checkpoint restore must preserve graph, stamp, Siso state and compiled outputs as one snapshot")
     if 'output_checkpoint.py" verify-reuse' not in run_stage:
         errors.append("runner must verify sampled local compiled-output reuse after each build window")
     if "compiled_output_inventory" not in output_checkpoint or "COMPILED_OUTPUT_MIN_FILES = 100" not in output_checkpoint:

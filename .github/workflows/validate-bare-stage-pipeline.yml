@@ -162,11 +162,11 @@ jobs:
           assert "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" in fast_apk
           assert "subprocess.run" not in fast_apk, "cached APK fast path must not claim to rerun apksigner"
           assert "APK_FAST_PATH_ARTIFACT_REVALIDATION=PASS" in runner
-           assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('bootstrap_chromium.sh" configure')
-           assert runner.index('checkpoint_quality.py" --root "$ROOT"') < runner.index('output_checkpoint.py" restore') < runner.index('bootstrap_chromium.sh" configure'), "a compatible checkpoint must be validated/restored before GN generation"
-           assert "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN" in runner, "warm restore must precede GN"
-           assert "SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS" in checkpoint, "cached graph/stamp/state/objects must be restored as one snapshot"
-           assert 'test -s "$SDIR/.sisoenv"' in runner
+          assert runner.index('if [[ "$MODE" == "prepare-source" ]]') < runner.index('bootstrap_chromium.sh" configure')
+          assert runner.index('checkpoint_quality.py" --root "$ROOT"') < runner.index('output_checkpoint.py" restore') < runner.index('bootstrap_chromium.sh" configure'), "a compatible checkpoint must be validated/restored before GN generation"
+          assert "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN" in runner, "warm restore must precede GN"
+          assert "SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS" in checkpoint, "cached graph/stamp/state/objects must be restored as one snapshot"
+          assert 'test -s "$SDIR/.sisoenv"' in runner
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
           assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
           assert 'checkpoint_quality.py" --root "$ROOT"' in runner
