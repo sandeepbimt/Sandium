@@ -7,6 +7,8 @@ on:
     paths:
       - "ci/bare/stage_ledger.py"
       - "ci/bare/test_stage_ledger.py"
+      - "ci/bare/run_stage.sh"
+      - "ci/bare/test_stage_runner.py"
       - "ci/bare/bootstrap_chromium.sh"
       - "ci/bare/test_bootstrap_contract.py"
       - "ci/bare/build_identity.py"
@@ -35,18 +37,22 @@ jobs:
           python -m py_compile \
             ci/bare/stage_ledger.py \
             ci/bare/test_stage_ledger.py \
+            ci/bare/run_stage.sh \
+            ci/bare/test_stage_runner.py \
             ci/bare/build_identity.py \
             ci/bare/test_build_identity.py \
             ci/bare/test_bootstrap_contract.py
       - name: Run stage-ledger and source-identity tests
         run: |
           python ci/bare/test_stage_ledger.py
+          python ci/bare/test_stage_runner.py
           python ci/bare/test_bootstrap_contract.py
           python ci/bare/test_build_identity.py
       - name: Check shell syntax only
         run: |
           bash -n ci/bare/prepare_source.sh
           bash -n ci/bare/bootstrap_chromium.sh
+          bash -n ci/bare/run_stage.sh
           bash -n ci/bare/package_artifact.sh
       - name: Confirm build operations were not invoked
         run: |
