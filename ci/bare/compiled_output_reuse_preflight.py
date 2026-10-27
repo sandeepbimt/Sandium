@@ -65,6 +65,18 @@ def safe_sample_paths(report: dict[str, Any], output: Path) -> list[str]:
         raise ReusePreflightError(f"Too few unique restored object targets: {len(paths)}")
     return paths
 
+def is_siso_dry_run_invocation(clean: str) -> bool:
+    """Identify Siso's echoed ninja -n invocation, not a scheduled build action.
+
+    The wrapper may print one command line containing every requested target.
+    Matching those command-line arguments as if they were output actions makes
+    the reuse preflight report every sample dirty even when the dry run is idle.
+    """
+    if not re.search(r"(?:^|[/\\\\])siso\\.py:\\s*ninja\\b", clean, re.IGNORECASE):
+        return False
+    return bool(re.search(r"(?:^|\\s)-n(?:\\s|$)", clean))
+
+
 def scheduled_sample_targets(output_text: str, targets: list[str]) -> dict[str, list[str]]:
     scheduled = {}
     for target in targets:
@@ -72,6 +84,10 @@ def scheduled_sample_targets(output_text: str, targets: list[str]) -> dict[str, 
         for line in output_text.splitlines():
             clean = line.strip()
             if not clean or clean.startswith(("ninja:", "Siso finished", "Build Succeeded:", "SANDIUM_")):
+                continue
+            # Siso can echo the full dry-run command with all requested targets.
+            # Those arguments are not build actions and must not count as rebuilds.
+            if is_siso_dry_run_invocation(clean):
                 continue
             if pattern.search(clean):
                 scheduled.setdefault(target, []).append(clean[:300])
