@@ -23,6 +23,22 @@ class RemainingWorkTests(unittest.TestCase):
     def test_explicit_no_work_is_zero(self):
         self.assertEqual(M.parse_pending_actions("ninja: no work to do.\n"), 0)
 
+    def test_parses_completed_siso_dry_run_summary(self):
+        output = """1m49.52s Build Succeeded: 56599 steps
+noexec:0 local:0 remote:0 cache:0 skip:52498
+  cache-write:0(err:0) fallback:0 retry:0
+"""
+        self.assertEqual(M.parse_pending_actions(output), 4101)
+
+    def test_siso_summary_requires_both_counters(self):
+        with self.assertRaisesRegex(M.RemainingWorkError, "unambiguous completed Siso"):
+            M.parse_pending_actions("1m49.52s Build Succeeded: 56599 steps\\n")
+
+    def test_siso_counters_cannot_skip_more_than_total(self):
+        output = "1m49.52s Build Succeeded: 100 steps\\nnoexec:0 local:0 remote:0 cache:0 skip:101\\n"
+        with self.assertRaisesRegex(M.RemainingWorkError, "invalid Siso dry-run counters"):
+            M.parse_pending_actions(output)
+
     def test_missing_measurement_fails_closed(self):
         with self.assertRaisesRegex(M.RemainingWorkError, "neither parseable action rows"):
             M.parse_pending_actions("Siso finished successfully\n")
