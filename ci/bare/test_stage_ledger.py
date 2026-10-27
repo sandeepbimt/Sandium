@@ -48,7 +48,7 @@ class LedgerTests(unittest.TestCase):
                 1, 10, None, {"local_compiled_outputs_restored": False},
             )
 
-    def test_later_stage_accepts_smaller_incremental_slice_with_cumulative_progress(self):
+    def test_later_stage_does_not_add_overlapping_action_counters(self):
         previous = {"max_completed_actions": 96, "total_action_count": 100}
         handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 96}
         metrics = {"remote_execution_proven": False, "remote_action_cache_reuse_proven": True}
@@ -56,7 +56,9 @@ class LedgerTests(unittest.TestCase):
             M.validate_progress(2, metrics, 3, 100, previous, handoff),
             "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS",
         )
-        self.assertEqual(M.cumulative_progress(2, 3, 100, previous, handoff), 99)
+        # Current-stage activity proves forward progress, but overlaps with the
+        # previous checkpoint's graph-level count and must not be added.
+        self.assertEqual(M.cumulative_progress(2, 3, 100, previous, handoff), 96)
 
     def test_later_stage_requires_some_new_progress(self):
         from build_identity import IdentityError
@@ -76,19 +78,44 @@ class LedgerTests(unittest.TestCase):
                 2, {"remote_execution_proven": True}, 20, 101, previous, handoff
             )
 
-    def test_stage_one_accumulates_a_compatible_prior_run_checkpoint(self):
+    def test_stage_one_uses_a_non_additive_watermark_for_prior_checkpoint(self):
         handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 70}
-        self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 80)
+        self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 70)
 
     def test_state_capsule_does_not_claim_local_compiled_output_progress(self):
         handoff = {"local_compiled_outputs_restored": False, "source_max_completed_actions": 70}
         self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 10)
 
-    def test_cumulative_count_cannot_exceed_action_graph(self):
-        from build_identity import IdentityError
+    def test_stage_local_actions_are_not_added_to_checkpoint_watermark(self):
         handoff = {"local_compiled_outputs_restored": True, "source_max_completed_actions": 95}
-        with self.assertRaisesRegex(IdentityError, "exceeds graph total"):
-            M.cumulative_progress(1, 10, 100, None, handoff)
+        self.assertEqual(M.cumulative_progress(1, 10, 100, None, handoff), 95)
+
+    def test_legacy_additive_ledger_is_repaired_for_stage_continuation(self):
+        # Reproduce the actual failure: Stage 1 added 51,734 checkpoint actions
+        # to 52,001 current-stage actions. Stage 2 then tried to add another
+        # 55,453 and failed because 103,735 + 55,453 > 109,040.
+        previous = {
+            "schema": M.SCHEMA,
+            "stage": 1,
+            "max_completed_actions": 103735,
+            "stage_completed_actions": 52001,
+            "total_action_count": 109040,
+            "state_handoff": {
+                "local_compiled_outputs_restored": True,
+                "source_max_completed_actions": 51734,
+            },
+        }
+        handoff = {
+            "local_compiled_outputs_restored": True,
+            "source_max_completed_actions": 103735,
+        }
+        metrics = {"remote_execution_proven": False, "remote_action_cache_reuse_proven": True}
+        self.assertEqual(M.progress_watermark(previous), 52001)
+        self.assertEqual(M.cumulative_progress(2, 55453, 109040, previous, handoff), 55453)
+        self.assertEqual(
+            M.validate_progress(2, metrics, 55453, 109040, previous, handoff),
+            "REMOTE_ACTION_CACHE_HIT_WITH_FORWARD_PROGRESS",
+        )
 
 
 if __name__ == "__main__":
