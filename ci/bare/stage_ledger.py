@@ -134,6 +134,8 @@ def validate_stage_evidence(
         raise IdentityError("Stage 3 did not prove any uncached remote action execution")
     if stage == 4 and not cache_reuse:
         raise IdentityError("Stage 4 did not prove any remote action-cache hits from prior work")
+    if stage == 4 and not remote_execution:
+        raise IdentityError("Stage 4 did not prove any additional uncached remote actions; no useful forward progress is evidenced")
     return remote_execution, cache_reuse
 
 
