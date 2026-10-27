@@ -188,6 +188,32 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             return miss("build_identity_digest_mismatch")
         verify_control_inputs(meta.get("control_inputs"), control)
         verify_manifest_files(checkpoint, meta.get("output_files"))
+        inventory = meta.get("compiled_output_inventory")
+        if inventory is None:
+            # One-time Stage 1 migration fallback: old caches are preserved and
+            # may be restored once, but never qualify as a Stage 2+ predecessor.
+            if stage > 1:
+                return miss("compiled_output_inventory_missing_from_predecessor_checkpoint")
+            print("SANDIUM_OUTPUT_CHECKPOINT_COMPILED_INVENTORY=LEGACY_UNVERIFIED")
+        else:
+            validate_compiled_output_inventory(checkpoint, inventory, require_minimum=True)
+            action_samples = meta.get("compiled_output_action_samples")
+            if not isinstance(action_samples, list) or len(action_samples) < MIN_ACTION_OUTPUT_SAMPLES:
+                if stage > 1:
+                    return miss("compiled_output_action_samples_missing_from_predecessor_checkpoint")
+            else:
+                for item in action_samples:
+                    if not isinstance(item, dict):
+                        return miss("invalid_compiled_output_action_sample")
+                    relative = item.get("path", "")
+                    rel = Path(relative) if isinstance(relative, str) else Path("/")
+                    if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
+                        return miss("unsafe_compiled_output_action_sample_path")
+                    sample_path = checkpoint / rel
+                    if (not sample_path.is_file() or sample_path.is_symlink()
+                            or sample_path.stat().st_size != int(item.get("bytes", -1))
+                            or sha256_file(sample_path) != item.get("sha256")):
+                        return miss("compiled_output_action_sample_mismatch:" + relative)
         if pre_source:
             if stage > 1 and (
                 meta.get("stage") != stage - 1
@@ -268,6 +294,12 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         "source_total_action_count": meta.get("total_action_count", 0),
         "source_remote_execution_proven": meta.get("remote_execution_proven", False),
         "source_remote_action_cache_reuse_proven": meta.get("remote_action_cache_reuse_proven", False),
+        "compiled_output_inventory_status": (
+            "VERIFIED" if isinstance(meta.get("compiled_output_inventory"), dict)
+            else "LEGACY_UNVERIFIED"
+        ),
+        "compiled_output_inventory": meta.get("compiled_output_inventory"),
+        "compiled_output_action_samples": meta.get("compiled_output_action_samples", []),
     }
     write_json_atomic(root / REPORT_NAME, report)
     print("SANDIUM_OUTPUT_CHECKPOINT=RESTORED")
@@ -309,6 +341,13 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
         if not partial and not stage_record_valid:
             raise CheckpointError("No current stage ledger matches the output build identity")
         output_bytes = sum(p.stat().st_size for p in output.rglob("*") if p.is_file() and not p.is_symlink())
+        inventory = compiled_output_inventory(output)
+        metrics_path = root / f"stage-{stage}-metrics.jsonl"
+        action_samples = (
+            compiled_output_action_samples(metrics_path, output)
+            if metrics_path.is_file() and not metrics_path.is_symlink()
+            else []
+        )
         payload = {
             "schema": SCHEMA,
             "source": "Bare",
@@ -324,6 +363,11 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "control_inputs": control_inputs(control),
             "output_files": files,
             "output_bytes": output_bytes,
+            "compiled_output_inventory": inventory,
+            "compiled_output_action_samples": action_samples,
+            "compiled_output_action_samples_source_metrics_sha256": (
+                sha256_file(metrics_path) if metrics_path.is_file() and not metrics_path.is_symlink() else None
+            ),
             "max_completed_actions": int(ledger.get("max_completed_actions", 0) or 0),
             "total_action_count": int(ledger.get("total_action_count", 0) or 0),
             "remote_execution_proven": bool(ledger.get("remote_execution_proven", False)),
@@ -347,6 +391,9 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
         print("SANDIUM_OUTPUT_CHECKPOINT_KIND=" + payload["checkpoint_kind"])
         print("SANDIUM_OUTPUT_CHECKPOINT_BYTES=" + str(output_bytes))
         print("SANDIUM_OUTPUT_CHECKPOINT_BUILD_IDENTITY_SHA256=" + identity_hash)
+        print("SANDIUM_OUTPUT_CHECKPOINT_COMPILED_OBJECT_FILES=" + str(inventory["object_file_count"]))
+        print("SANDIUM_OUTPUT_CHECKPOINT_COMPILED_OBJECT_BYTES=" + str(inventory["object_file_bytes"]))
+        print("SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_FILES=" + str(len(action_samples)))
         return 0
     except (CheckpointError, IdentityError, OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         if partial:
