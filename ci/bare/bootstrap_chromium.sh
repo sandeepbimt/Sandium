@@ -98,14 +98,36 @@ case "$MODE" in
     : "${BUILDBUDDY_API_KEY:?Existing protected BuildBuddy credential is unavailable; stop without creating a replacement}"
 
     cd "$ROOT"
-    "$DEPOT_TOOLS/fetch" --nohooks android
+    # Do not run "fetch android" here: it performs an initial dependency sync
+    # before this workflow can enforce the pinned Chromium revision.
+    "$DEPOT_TOOLS/gclient" config --spec "solutions = [{'name': 'src', 'url': 'https://chromium.googlesource.com/chromium/src.git'}]"
     test -f "$ROOT/.gclient"
     python3 "$SISO_ADAPTER" --workspace "$ROOT" --write
-    "$DEPOT_TOOLS/gclient" sync --nohooks --revision "src@$CHROMIUM_COMMIT"
+
+    mkdir "$CHROMIUM_SRC"
+    git -C "$CHROMIUM_SRC" init
+    git -C "$CHROMIUM_SRC" remote add origin https://chromium.googlesource.com/chromium/src.git
+    echo "SANDIUM_CHROMIUM_DIRECT_PIN_FETCH=START"
+    if ! timeout 900 git -C "$CHROMIUM_SRC" fetch --no-tags origin "$CHROMIUM_COMMIT" 2>&1 | tee "$ROOT/sandium-chromium-fetch.log"; then
+      echo "SANDIUM_CHROMIUM_DIRECT_PIN_FETCH=FAIL" >&2
+      exit 36
+    fi
+    git -C "$CHROMIUM_SRC" checkout --detach FETCH_HEAD
     actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
     if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
       echo "SANDIUM_CHROMIUM_PIN_MISMATCH expected=$CHROMIUM_COMMIT actual=$actual" >&2
       exit 33
+    fi
+
+    echo "SANDIUM_CHROMIUM_DEPENDENCY_SYNC=START"
+    if ! timeout 1200 "$DEPOT_TOOLS/gclient" sync --nohooks --revision "src@$CHROMIUM_COMMIT" 2>&1 | tee "$ROOT/sandium-gclient-sync.log"; then
+      echo "SANDIUM_CHROMIUM_DEPENDENCY_SYNC=FAIL" >&2
+      exit 37
+    fi
+    actual="$(git -C "$CHROMIUM_SRC" rev-parse HEAD)"
+    if [[ "$actual" != "$CHROMIUM_COMMIT" ]]; then
+      echo "SANDIUM_CHROMIUM_PIN_MISMATCH_AFTER_SYNC expected=$CHROMIUM_COMMIT actual=$actual" >&2
+      exit 38
     fi
     bash "$BARE_ADAPTER" apply
     "$DEPOT_TOOLS/gclient" runhooks
