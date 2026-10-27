@@ -51,7 +51,7 @@ def make_candidate(root: Path, *, stage=1, workflow="old-workflow", kind="comple
     object_paths = sorted(p.relative_to(checkpoint).as_posix() for p in (checkpoint / "obj").rglob("*.o"))
     metrics.write_text("".join(json.dumps({
         "step_id": f"fixture-{index}", "outputs": [relative], "is_local": True
-    }) + "\\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
+    }) + "\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
     output_bytes = sum(
         path.stat().st_size for path in checkpoint.rglob("*")
         if path.is_file() and not path.is_symlink()
