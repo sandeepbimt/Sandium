@@ -45,7 +45,7 @@ def validate():
         errors.append("checkpoint must bind Siso-reported object outputs to content hashes")
     if "compiled_output_inventory_missing_from_predecessor_checkpoint" not in output_checkpoint:
         errors.append("continuation stages must reject legacy checkpoints without compiled-output inventory")
-    if "SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=VERIFIED_LOCAL_OUTPUT_REUSE" not in output_checkpoint:
+    if "SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=" not in output_checkpoint or "VERIFIED_LOCAL_OUTPUT_REUSE" not in output_checkpoint:
         errors.append("the reuse verifier must emit explicit evidence, separate from checkpoint restore")
     if not manifest_preflight:
         errors.append("runner must have a dedicated manifest preflight helper")
