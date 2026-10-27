@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_identity import IdentityError, control_and_workspace, sha256, source_identity
+from build_identity import IdentityError, control_and_workspace, sha256, source_identity, verify_apk
 
 SCHEMA = 2
 STAGE_KINDS = {
@@ -168,7 +168,7 @@ def validate_build_graph(workspace: Path, identity: dict[str, Any]) -> dict[str,
 
 
 def validate_artifact(
-    artifact_path: Path, manifest_path: Path, identity: dict[str, Any]
+    artifact_path: Path, manifest_path: Path, identity: dict[str, Any], workspace: Path
 ) -> dict[str, Any]:
     for path, label in ((artifact_path, "APK"), (manifest_path, "build manifest")):
         if not path.is_file() or path.is_symlink():
@@ -188,17 +188,24 @@ def validate_artifact(
     if manifest.get("build_identity_sha256") != expected_identity:
         raise IdentityError("Stage 5 APK manifest does not match the current full source/GN identity")
 
-    actual_size = artifact_path.stat().st_size
-    actual_hash = sha256(artifact_path)
-    if manifest.get("artifact_bytes") != actual_size or manifest.get("artifact_sha256") != actual_hash:
+    # Re-verify the artifact itself; do not trust PASS strings in JSON as proof.
+    # This repeats ZIP/manifest/DEX inspection and executes apksigner at this stage.
+    verified = verify_apk(
+        artifact_path,
+        {**identity, "artifact_name": manifest.get("artifact_name")},
+        workspace=workspace,
+        require_signature=True,
+    )
+    if verified.get("artifact_verified") is not True or verified.get("apksigner_verification") != "PASS":
+        raise IdentityError("Stage 5 direct APK/signature verification did not pass")
+    if manifest.get("artifact_bytes") != verified["artifact_bytes"] or manifest.get("artifact_sha256") != verified["artifact_sha256"]:
         raise IdentityError("Stage 5 APK size/SHA-256 does not match its build manifest")
-    if actual_size < 1_000_000:
-        raise IdentityError(f"Stage 5 APK is unexpectedly small: {actual_size} bytes")
     return {
-        "artifact_sha256": actual_hash,
-        "artifact_bytes": actual_size,
+        "artifact_sha256": verified["artifact_sha256"],
+        "artifact_bytes": verified["artifact_bytes"],
         "artifact_manifest_sha256": sha256(manifest_path),
         "apksigner_verification": "PASS",
+        "direct_apk_verification": "PASS",
     }
 
 
@@ -361,7 +368,7 @@ def main() -> int:
         manifest = args.manifest.resolve() if args.manifest else (
             root / "sandium-output" / "build-manifest.json"
         )
-        artifact_evidence = validate_artifact(artifact, manifest, identity)
+        artifact_evidence = validate_artifact(artifact, manifest, identity, root)
     elif args.artifact is not None or args.manifest is not None:
         raise IdentityError("Only Stage 5 accepts --artifact or --manifest")
 
