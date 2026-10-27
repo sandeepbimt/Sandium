@@ -198,5 +198,79 @@ class OutputCheckpointTests(unittest.TestCase):
                 self.assertTrue((output / ".siso_fs_state.journal").is_file())
                 self.assertFalse((output / ".siso_fs_state").exists())
 
+    def test_local_compiled_output_reuse_requires_unchanged_prior_action_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            evidence = add_checkpoint_evidence(root, output)
+            report_path = root / M.REPORT_NAME
+            report_path.write_text(json.dumps({
+                "schema": 1,
+                "SANDIUM_STATE_HANDOFF": "RESTORED",
+                "source_stage": 1,
+                "current_stage": 2,
+                "local_compiled_outputs_restored": True,
+                "compiled_output_inventory_status": "VERIFIED",
+                "compiled_output_action_samples": evidence["compiled_output_action_samples"],
+            }), encoding="utf-8")
+            current_metrics = root / "stage-2-metrics.jsonl"
+            object_paths = sorted(p.relative_to(output).as_posix() for p in (output / "obj").rglob("*.o"))
+            current_metrics.write_text("".join(json.dumps({
+                "step_id": f"stage-2-noexec-{index}", "outputs": [relative], "no_exec": True
+            }) + "\\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
+
+            result = M.verify_local_compiled_output_reuse(
+                root=root, stage=2, metrics_path=current_metrics, report_path=report_path
+            )
+            self.assertEqual(result["status"], "VERIFIED_LOCAL_OUTPUT_REUSE")
+            self.assertGreaterEqual(result["verified_local_reuse_count"], M.MIN_REUSED_ACTION_SAMPLES)
+            saved = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertTrue(saved["local_compiled_outputs_reuse_verified"])
+
+    def test_continuation_fails_when_prior_sampled_objects_are_reexecuted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            evidence = add_checkpoint_evidence(root, output)
+            report_path = root / M.REPORT_NAME
+            report_path.write_text(json.dumps({
+                "schema": 1,
+                "SANDIUM_STATE_HANDOFF": "RESTORED",
+                "source_stage": 1,
+                "current_stage": 2,
+                "local_compiled_outputs_restored": True,
+                "compiled_output_action_samples": evidence["compiled_output_action_samples"],
+            }), encoding="utf-8")
+            current_metrics = root / "stage-2-metrics.jsonl"
+            object_paths = sorted(p.relative_to(output).as_posix() for p in (output / "obj").rglob("*.o"))
+            current_metrics.write_text("".join(json.dumps({
+                "step_id": f"stage-2-exec-{index}", "outputs": [relative], "is_local": True
+            }) + "\\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
+            with self.assertRaisesRegex(M.CheckpointError, "could not prove unchanged prior-stage object outputs"):
+                M.verify_local_compiled_output_reuse(
+                    root=root, stage=2, metrics_path=current_metrics, report_path=report_path
+                )
+
+    def test_stage_one_can_migrate_legacy_checkpoint_but_marks_reuse_unverifiable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            report_path = root / M.REPORT_NAME
+            report_path.write_text(json.dumps({
+                "schema": 1,
+                "SANDIUM_STATE_HANDOFF": "RESTORED",
+                "source_stage": 1,
+                "current_stage": 1,
+                "local_compiled_outputs_restored": True,
+            }), encoding="utf-8")
+            metrics_path = root / "stage-1-metrics.jsonl"
+            metrics_path.write_text("", encoding="utf-8")
+            result = M.verify_local_compiled_output_reuse(
+                root=root, stage=1, metrics_path=metrics_path, report_path=report_path
+            )
+            self.assertEqual(result["status"], "UNVERIFIABLE_NO_PRIOR_ACTION_SAMPLES")
+            self.assertFalse(json.loads(report_path.read_text())["local_compiled_outputs_reuse_verified"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
