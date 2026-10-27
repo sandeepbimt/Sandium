@@ -26,7 +26,24 @@ def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str
     files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", state_name: "siso resumable state\n"}
     for name, contents in files.items():
         (path / name).write_text(contents, encoding="utf-8")
+    objects = path / "obj" / "checkpoint_test"
+    objects.mkdir(parents=True)
+    for index in range(120):
+        (objects / f"unit_{index:03d}.o").write_bytes((f"compiled-object-{index}\\n".encode() + b"x" * 12000))
     return {name: M.sha256_file(path / name) for name in files}
+
+
+def add_checkpoint_evidence(root: Path, output: Path) -> dict:
+    metrics = root / "stage-1-metrics.jsonl"
+    paths = sorted(p.relative_to(output).as_posix() for p in (output / "obj").rglob("*.o"))
+    metrics.write_text("".join(json.dumps({
+        "step_id": f"fixture-{index}", "outputs": [relative], "is_local": True
+    }) + "\\n" for index, relative in enumerate(paths)), encoding="utf-8")
+    return {
+        "compiled_output_inventory": M.compiled_output_inventory(output),
+        "compiled_output_action_samples": M.compiled_output_action_samples(metrics, output),
+        "compiled_output_action_samples_source_metrics_sha256": M.sha256_file(metrics),
+    }
 
 class OutputCheckpointTests(unittest.TestCase):
     def test_identity_digest_is_order_independent(self):
@@ -45,6 +62,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
                 "control_inputs": CONTROL_HASHES, "output_files": files, "output_bytes": 30,
+                **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
             }), encoding="utf-8")
             with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
@@ -64,6 +82,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
                 "control_inputs": CONTROL_HASHES, "output_files": files,
+                **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "old-wf", "stage_record_valid": True,
             }), encoding="utf-8")
             with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
@@ -115,6 +134,7 @@ class OutputCheckpointTests(unittest.TestCase):
             control.mkdir()
             output = root / M.OUT_RELATIVE
             files = make_output(output)
+            add_checkpoint_evidence(root, output)
             ledger = root / "ledger.json"
             ledger.write_text(json.dumps({
                 "stage": 1,
@@ -155,6 +175,7 @@ class OutputCheckpointTests(unittest.TestCase):
             control.mkdir()
             output = root / M.OUT_RELATIVE
             make_output(output, state_name=".siso_fs_state.journal")
+            add_checkpoint_evidence(root, output)
             ledger = root / "ledger.json"
             ledger.write_text(json.dumps({
                 "stage": 1,
