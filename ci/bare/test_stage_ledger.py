@@ -122,6 +122,32 @@ class StageLedgerTests(unittest.TestCase):
         )
         self.assertNotEqual(MODULE.digest(before), MODULE.digest(after))
 
+    def test_stage_one_never_freezes_partial_or_stale_gn_fingerprint(self):
+        identity = {
+            "source": "Bare",
+            "chromium_commit": "pinned",
+            "gn_args_sha256": "partial-or-stale-gn",
+        }
+        stable = MODULE.stable_identity(identity)
+        payload = MODULE.build_ledger_payload(
+            stage=1,
+            identity=identity,
+            identity_hash=MODULE.digest(stable),
+            previous=None,
+            metrics=None,
+            previous_ledger_sha256=None,
+            metrics_sha256=None,
+            log_sha256=None,
+            source_log_sha256="source-log-sha",
+            graph_evidence=None,
+            artifact_evidence=None,
+            remote_execution=False,
+            cache_reuse=False,
+        )
+        self.assertEqual(payload["build_identity"], stable)
+        self.assertEqual(payload["build_identity_sha256"], MODULE.digest(payload["build_identity"]))
+        self.assertIsNone(payload["gn_args_sha256"])
+
     def test_stage_two_allows_only_gn_identity_to_be_established(self):
         from build_identity import IdentityError
         source_id = MODULE.digest({"source": "Bare", "chromium_commit": "pinned"})
