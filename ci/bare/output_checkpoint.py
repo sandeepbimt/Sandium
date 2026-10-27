@@ -267,7 +267,12 @@ def _metrics_outputs(metrics_path: Path) -> dict[str, list[dict[str, Any]]]:
                 if rel.is_absolute() or ".." in rel.parts or not rel.parts:
                     continue
                 relative = rel.as_posix()
-                if relative.startswith("obj/") and rel.suffix.lower() in COMPILED_OUTPUT_SUFFIXES:
+                # Reuse proof must sample leaf compilation outputs only. Static
+                # libraries and shared objects are aggregate/link outputs: their
+                # rebuild commands can be scheduled because one member changed,
+                # even when most restored object files are reusable. Mixing them
+                # into the leaf-object gate produces misleading near-total failures.
+                if relative.startswith("obj/") and rel.suffix.lower() == ".o":
                     result.setdefault(relative, []).append(flags)
     return result
 
