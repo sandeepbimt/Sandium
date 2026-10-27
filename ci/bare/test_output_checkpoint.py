@@ -38,7 +38,7 @@ def add_checkpoint_evidence(root: Path, output: Path) -> dict:
     paths = sorted(p.relative_to(output).as_posix() for p in (output / "obj").rglob("*.o"))
     metrics.write_text("".join(json.dumps({
         "step_id": f"fixture-{index}", "outputs": [relative], "is_local": True
-    }) + "\\n" for index, relative in enumerate(paths)), encoding="utf-8")
+    }) + "\n" for index, relative in enumerate(paths)), encoding="utf-8")
     return {
         "compiled_output_inventory": M.compiled_output_inventory(output),
         "compiled_output_action_samples": M.compiled_output_action_samples(metrics, output),
