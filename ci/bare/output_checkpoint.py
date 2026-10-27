@@ -277,6 +277,14 @@ def compiled_output_action_samples(metrics_path: Path, output: Path) -> list[dic
     records = _metrics_outputs(metrics_path)
     candidates = []
     for relative in sorted(records):
+        # Reuse samples must come from real local compilation in the predecessor,
+        # not remote-cache hits, copy/no-exec records or other generated outputs.
+        previous_local_compile = any(
+            flag["is_local"] and not flag["cached"] and not flag["no_exec"]
+            for flag in records[relative]
+        )
+        if not previous_local_compile:
+            continue
         path = output / relative
         if path.is_file() and not path.is_symlink() and path.stat().st_size > 0:
             candidates.append(path)
