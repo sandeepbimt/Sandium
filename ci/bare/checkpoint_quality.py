@@ -172,6 +172,7 @@ def validate_candidate(
             action_samples = OC.normalize_compiled_output_action_samples(
                 meta.get("compiled_output_action_samples"),
                 meta.get("compiled_output_action_sample_schema"),
+                output=checkpoint,
             )
         except OC.CheckpointError as exc:
             raise CheckpointQualityError("compiled_output_action_samples_invalid:" + str(exc)) from exc

@@ -28,9 +28,8 @@ def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str
     files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", state_name: "siso resumable state\n"}
     for name, contents in files.items():
         (path / name).write_text(contents, encoding="utf-8")
-    # GN writes this stamp with the generated graph. Checkpoint archives have an
-    # older stamp; continuation must keep the current job's fresh stamp so Siso
-    # does not regenerate the Ninja manifest immediately after restoring outputs.
+    # The generator stamp belongs to the same snapshot as build.ninja, Siso state,
+    # and compiled objects. Warm restore must preserve it intact.
     stamp = path / "build.ninja.stamp"
     stamp.write_text("checkpoint generator stamp\n", encoding="utf-8")
     old_ns = 946684800 * 1_000_000_000
@@ -200,27 +199,74 @@ class OutputCheckpointTests(unittest.TestCase):
                 self.assertTrue((checkpoint / M.META_NAME).is_file())
                 self.assertFalse(output.exists())
 
-                # A later stage runs GN first and creates a fresh output shell.
+                # A fresh output shell may exist in older callers. Its graph bytes
+                # must match, but the restore must not graft the fresh stamp onto
+                # the cached Siso state and object files.
+                cached_stamp = checkpoint / "build.ninja.stamp"
+                cached_stamp_text = cached_stamp.read_text(encoding="utf-8")
+                cached_stamp_mtime = cached_stamp.stat().st_mtime_ns
+                cached_graph_mtime = (checkpoint / "build.ninja").stat().st_mtime_ns
+                cached_object = checkpoint / "obj" / "checkpoint_test" / "unit_000.o"
+                cached_object_hash = M.sha256_file(cached_object)
+                cached_object_mtime = cached_object.stat().st_mtime_ns
                 output.mkdir(parents=True)
                 (output / "args.gn").write_text("use_siso=true\n", encoding="utf-8")
                 (output / "build.ninja").write_text("build edge\n", encoding="utf-8")
                 fresh_stamp = output / "build.ninja.stamp"
-                fresh_stamp.write_text("current job generator stamp\n", encoding="utf-8")
-                fresh_ns = time.time_ns()
-                os.utime(fresh_stamp, ns=(fresh_ns, fresh_ns))
-                fresh_graph_mtime = (output / "build.ninja").stat().st_mtime_ns
+                fresh_stamp.write_text("fresh job stamp must not win\n", encoding="utf-8")
                 restored = M.command_restore(root, control, 2, "wf-1", required=True)
                 self.assertEqual(restored, 0)
                 self.assertTrue((output / ".siso_fs_state").is_file())
                 self.assertEqual((output / "build.ninja").read_text(encoding="utf-8"), "build edge\n")
-                self.assertEqual(fresh_stamp.read_text(encoding="utf-8"), "current job generator stamp\n")
-                self.assertEqual(fresh_stamp.stat().st_mtime_ns, fresh_ns)
-                self.assertEqual((output / "build.ninja").stat().st_mtime_ns, fresh_graph_mtime)
+                self.assertEqual((output / "build.ninja.stamp").read_text(encoding="utf-8"), cached_stamp_text)
+                self.assertEqual((output / "build.ninja.stamp").stat().st_mtime_ns, cached_stamp_mtime)
+                self.assertEqual((output / "build.ninja").stat().st_mtime_ns, cached_graph_mtime)
+                self.assertEqual(M.sha256_file(output / "obj" / "checkpoint_test" / "unit_000.o"), cached_object_hash)
+                self.assertEqual((output / "obj" / "checkpoint_test" / "unit_000.o").stat().st_mtime_ns, cached_object_mtime)
                 self.assertFalse(checkpoint.exists())
                 self.assertFalse((output / M.META_NAME).exists())
                 report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
                 self.assertTrue(report["local_compiled_outputs_restored"])
                 self.assertEqual(report["source_stage"], 1)
+
+    def test_restore_full_snapshot_without_gn_first(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            add_checkpoint_evidence(root, output)
+            cached_stamp = (output / "build.ninja.stamp").read_text(encoding="utf-8")
+            cached_graph = M.sha256_file(output / "build.ninja")
+            cached_graph_mtime = (output / "build.ninja").stat().st_mtime_ns
+            cached_object = output / "obj" / "checkpoint_test" / "unit_005.o"
+            cached_object_hash = M.sha256_file(cached_object)
+            cached_object_mtime = cached_object.stat().st_mtime_ns
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 25,
+                "total_action_count": 100,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": True,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+                self.assertFalse(output.exists())
+                # A fresh source checkout has no generated out/ directory.
+                output.parent.rmdir()
+                self.assertEqual(M.command_restore(root, control, 2, "wf-1", required=True), 0)
+                self.assertEqual(M.sha256_file(output / "build.ninja"), cached_graph)
+                self.assertEqual((output / "build.ninja").stat().st_mtime_ns, cached_graph_mtime)
+                self.assertEqual((output / "build.ninja.stamp").read_text(encoding="utf-8"), cached_stamp)
+                self.assertEqual(M.sha256_file(output / "obj" / "checkpoint_test" / "unit_005.o"), cached_object_hash)
+                self.assertEqual((output / "obj" / "checkpoint_test" / "unit_005.o").stat().st_mtime_ns, cached_object_mtime)
+                self.assertTrue((output / ".siso_fs_state").is_file())
+                self.assertFalse((root / M.CHECKPOINT_NAME).exists())
 
     def test_pack_and_restore_full_output_checkpoint_from_journal_only(self):
         with tempfile.TemporaryDirectory() as temp:

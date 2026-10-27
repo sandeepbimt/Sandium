@@ -123,13 +123,15 @@ class CheckpointQualityTests(unittest.TestCase):
         meta_path = checkpoint / M.OC.META_NAME
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         meta.pop("compiled_output_action_sample_schema")
-        # Reproduce an old checkpoint's sampled aggregate output. No file is
-        # needed for this record because legacy aggregate samples are discarded.
-        original_count = len(meta["compiled_output_action_samples"])
-        meta["compiled_output_action_samples"][0]["path"] = "obj/checkpoint_test/legacy.a"
+        # Reproduce the old cache contract: its sample list is dominated by
+        # aggregate archives. Migration must derive a real .o sample from the
+        # validated checkpoint tree instead of rejecting an otherwise usable cache.
+        meta["compiled_output_action_samples"] = [
+            {"path": "obj/checkpoint_test/legacy.a", "sha256": "a" * 64, "bytes": 12000}
+        ]
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
         result = self.validate(stage=1, workflow="new-workflow")
-        self.assertEqual(result["compiled_output_action_sample_count"], original_count - 1)
+        self.assertEqual(result["compiled_output_action_sample_count"], M.OC.COMPILED_OUTPUT_SAMPLE_LIMIT)
 
     def test_current_sample_contract_rejects_aggregate_output(self):
         checkpoint = make_candidate(

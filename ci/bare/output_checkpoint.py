@@ -178,7 +178,7 @@ def sample_indices(length: int, limit: int) -> list[int]:
 
 
 def normalize_compiled_output_action_samples(
-    samples: Any, schema: Any = None
+    samples: Any, schema: Any = None, *, output: Path | None = None
 ) -> list[dict[str, Any]]:
     """Validate action-sample records and migrate the old aggregate-inclusive contract.
 
@@ -187,11 +187,16 @@ def normalize_compiled_output_action_samples(
     preserve only verified .o samples. Never infer compilation provenance from the
     filesystem inventory, and reject unknown/future sample contracts fail-closed.
     """
+    legacy = schema is None
     if not isinstance(samples, list):
-        raise CheckpointError("compiled-output action samples are missing or not a list")
+        if legacy and output is not None:
+            # Old cache metadata predates the leaf-only sample contract. A missing
+            # legacy list can be migrated from the verified output tree below.
+            samples = []
+        else:
+            raise CheckpointError("compiled-output action samples are missing or not a list")
     if schema not in (None, ACTION_SAMPLE_SCHEMA):
         raise CheckpointError(f"unsupported compiled-output action-sample schema: {schema}")
-    legacy = schema is None
     normalized: dict[str, dict[str, Any]] = {}
     for item in samples:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
@@ -224,6 +229,27 @@ def normalize_compiled_output_action_samples(
         if previous is not None and previous != record:
             raise CheckpointError(f"conflicting duplicate compiled-output samples: {relative}")
         normalized.setdefault(record["path"], record)
+
+    # Legacy checkpoints could sample mostly .a/.so aggregate outputs. Those are
+    # not compile-reuse evidence. If fewer than the minimum leaf objects survive,
+    # derive a deterministic sample from real .o files in the checkpoint itself.
+    # The caller still runs Siso's no-rebuild preflight against every selected
+    # object; this migration never exempts a dirty target or relabels an archive.
+    if legacy and output is not None and len(normalized) < MIN_ACTION_OUTPUT_SAMPLES:
+        leaf_objects = sorted(
+            path for path in compiled_object_paths(output)
+            if path.suffix.lower() == ".o"
+        )
+        picked = [leaf_objects[i] for i in sample_indices(len(leaf_objects), COMPILED_OUTPUT_SAMPLE_LIMIT)]
+        if len(picked) >= MIN_ACTION_OUTPUT_SAMPLES:
+            normalized = {
+                path.relative_to(output).as_posix(): {
+                    "path": path.relative_to(output).as_posix(),
+                    "sha256": sha256_file(path),
+                    "bytes": path.stat().st_size,
+                }
+                for path in picked
+            }
     return list(normalized.values())
 
 
@@ -488,6 +514,7 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
                 action_samples = normalize_compiled_output_action_samples(
                     meta.get("compiled_output_action_samples"),
                     meta.get("compiled_output_action_sample_schema"),
+                    output=checkpoint,
                 )
             except CheckpointError as exc:
                 return miss("compiled_output_action_samples_invalid:" + str(exc))
@@ -513,7 +540,13 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             ):
                 return miss("previous_stage_checkpoint_missing_or_incompatible")
         else:
-            identity = source_identity(control, root, require_gn=True)
+            active_output = root / OUT_RELATIVE
+            if active_output.is_dir() and not active_output.is_symlink():
+                identity = source_identity(control, root, require_gn=True)
+            else:
+                identity = source_identity(
+                    control, root, require_gn=True, output_dir_override=checkpoint
+                )
             if identity_digest(identity) != meta.get("build_identity_sha256"):
                 return miss("current_source_toolchain_or_gn_identity_mismatch")
             if stage > 1 and (
@@ -543,79 +576,85 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
     output = root / OUT_RELATIVE
     checkpoint = root / CHECKPOINT_NAME
     backup = output.with_name("android_Debug_arm64.pre-checkpoint-restore")
-    if not output.is_dir() or output.is_symlink():
-        raise CheckpointError(f"Fresh GN output directory missing/unsafe: {output}")
+    output_was_present = output.exists() or output.is_symlink()
     if backup.exists() or backup.is_symlink():
         raise CheckpointError(f"Refusing to overwrite preserved output backup: {backup}")
 
-    # GN has already generated a current graph in this job. The old restore code
-    # replaced that graph and its generator stamp with older cached copies, so
-    # Siso immediately ran "Regenerating ninja files" and scheduled thousands of
-    # cached object actions again. Preserve the current graph/stamp, but only when
-    # args.gn and build.ninja are byte-identical to the validated checkpoint.
-    # A graph mismatch is a compatibility failure, not something to paper over.
-    fresh_graph_files = ("args.gn", "build.ninja")
-    expected_files = meta.get("output_files", {})
-    for name in fresh_graph_files:
-        path = output / name
-        require_regular_nonempty(path)
-        expected = expected_files.get(name)
-        if not isinstance(expected, str) or sha256_file(path) != expected:
-            raise CheckpointError(
-                f"Fresh GN {name} differs from the identity-validated compiled-output checkpoint"
-            )
-    fresh_stamp = output / "build.ninja.stamp"
-    if not fresh_stamp.is_file() or fresh_stamp.is_symlink():
-        raise CheckpointError("Fresh GN build.ninja.stamp missing/unsafe; refusing stale-manifest restore")
-    print("SANDIUM_OUTPUT_CHECKPOINT_CURRENT_GRAPH_COMPATIBLE=PASS")
+    # A warm restore must be an atomic snapshot of build.ninja, its generator stamp,
+    # Siso filesystem state, and compiled outputs. Combining cached Siso state with
+    # fresh GN graph/stamp files makes Siso regard prior objects as dirty. The warm
+    # path therefore leaves OUT absent until this restore finishes.
+    if output_was_present:
+        if output.is_symlink() or not output.is_dir():
+            raise CheckpointError(f"Existing GN output path is unsafe: {output}")
+        expected_files = meta.get("output_files", {})
+        for name in ("args.gn", "build.ninja"):
+            path = output / name
+            require_regular_nonempty(path)
+            expected = expected_files.get(name)
+            if not isinstance(expected, str) or sha256_file(path) != expected:
+                raise CheckpointError(
+                    f"Fresh GN {name} differs from the identity-validated compiled-output checkpoint"
+                )
+        stamp = output / "build.ninja.stamp"
+        if not stamp.is_file() or stamp.is_symlink():
+            raise CheckpointError("Fresh GN build.ninja.stamp missing/unsafe; refusing incompatible output tree")
+        print("SANDIUM_OUTPUT_CHECKPOINT_CURRENT_GRAPH_COMPATIBLE=PASS")
+        os.replace(output, backup)
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        print("SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN")
 
-    os.replace(output, backup)
     try:
         os.replace(checkpoint, output)
-        verify_manifest_files(output, meta["output_files"])
-        # Retain the current job's args/manifest mtimes and generator stamp.
-        # Their bytes are identical to the saved graph, and their newer mtime
-        # prevents the first real Siso invocation from regenerating Ninja files
-        # and invalidating local object-output reuse.
-        for name in (*fresh_graph_files, "build.ninja.stamp"):
-            source = backup / name
-            destination = output / name
-            if not source.is_file() or source.is_symlink():
-                raise CheckpointError(f"Fresh GN generator file missing/unsafe: {name}")
-            shutil.copy2(source, destination)
         verify_manifest_files(output, meta["output_files"])
         restored_identity = source_identity(control, root, require_gn=True)
         if identity_digest(restored_identity) != meta["build_identity_sha256"]:
             raise CheckpointError("Restored source/toolchain/GN identity differs from checkpoint")
-        # The cache metadata is stored inside the cached directory so a save
-        # cannot publish metadata without the matching output tree. Remove it
-        # only after every validation passes; it is not a Chromium build input.
+        # Metadata travels inside the snapshot to keep its publication atomic,
+        # but it is not a Chromium build input; remove it only after validation.
         (output / META_NAME).unlink()
     except Exception:
         if output.exists() or output.is_symlink():
-            # Keep a failed candidate for forensics instead of deleting a restored tree.
-            failed = output.with_name("android_Debug_arm64.failed-checkpoint-restore")
-            if not failed.exists() and not failed.is_symlink():
+            if not checkpoint.exists() and not checkpoint.is_symlink():
+                # Preserve the cache candidate for diagnosis/retry instead of losing it.
+                os.replace(output, checkpoint)
+            else:
+                failed = output.with_name(f"android_Debug_arm64.failed-checkpoint-restore-{int(datetime.now().timestamp())}")
                 os.replace(output, failed)
         if backup.exists():
             os.replace(backup, output)
         raise
-    # The backup contains only freshly generated graph scaffolding; cached
-    # compiled outputs and Siso filesystem state are now active in output.
-    shutil.rmtree(backup)
-    print("SANDIUM_OUTPUT_CHECKPOINT_PRESERVED_CURRENT_GN_MANIFEST=PASS")
+    if backup.exists():
+        shutil.rmtree(backup)
+    print("SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS")
     raw_action_samples = meta.get("compiled_output_action_samples", [])
-    if isinstance(raw_action_samples, list) and raw_action_samples:
-        action_samples = normalize_compiled_output_action_samples(
-            raw_action_samples, meta.get("compiled_output_action_sample_schema")
-        )
-    else:
-        action_samples = []
     sample_schema = meta.get("compiled_output_action_sample_schema")
+    raw_leaf_sample_count = sum(
+        1 for item in raw_action_samples
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+        and Path(item["path"]).suffix.lower() == ".o"
+    ) if isinstance(raw_action_samples, list) else 0
+    action_samples = normalize_compiled_output_action_samples(
+        raw_action_samples, sample_schema, output=output
+    )
+    derived_legacy_leaf_samples = (
+        sample_schema is None and raw_leaf_sample_count < MIN_ACTION_OUTPUT_SAMPLES
+        and len(action_samples) >= MIN_ACTION_OUTPUT_SAMPLES
+    )
     sample_migration = (
-        "legacy_aggregate_outputs_filtered"
-        if sample_schema is None and len(action_samples) < len(raw_action_samples)
-        else ("legacy_object_samples_validated" if sample_schema is None and action_samples else "none")
+        "legacy_leaf_objects_derived_from_verified_checkpoint"
+        if derived_legacy_leaf_samples
+        else (
+            "legacy_aggregate_outputs_filtered"
+            if sample_schema is None and len(action_samples) < len(raw_action_samples)
+            else ("legacy_object_samples_validated" if sample_schema is None and action_samples else "none")
+        )
+    )
+    sample_source = (
+        "verified_checkpoint_leaf_object_migration"
+        if derived_legacy_leaf_samples
+        else str(meta.get("compiled_output_action_sample_source", "legacy_unknown"))
     )
     print("SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_SCHEMA=" + ACTION_SAMPLE_SCHEMA)
     print("SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_MIGRATION=" + sample_migration)
@@ -645,6 +684,7 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         "compiled_output_inventory": meta.get("compiled_output_inventory"),
         "compiled_output_action_sample_schema": ACTION_SAMPLE_SCHEMA,
         "compiled_output_action_sample_migration": sample_migration,
+        "compiled_output_action_sample_source": sample_source,
         "compiled_output_action_samples": action_samples,
     }
     write_json_atomic(root / REPORT_NAME, report)
@@ -711,6 +751,7 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "output_bytes": output_bytes,
             "compiled_output_inventory": inventory,
             "compiled_output_action_sample_schema": ACTION_SAMPLE_SCHEMA,
+            "compiled_output_action_sample_source": "siso_metrics_local_compile",
             "compiled_output_action_samples": action_samples,
             "compiled_output_action_samples_source_metrics_sha256": (
                 sha256_file(metrics_path) if metrics_path.is_file() and not metrics_path.is_symlink() else None
