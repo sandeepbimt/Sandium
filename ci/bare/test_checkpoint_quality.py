@@ -180,8 +180,7 @@ class CheckpointQualityTests(unittest.TestCase):
         meta.pop("compiled_output_action_samples_source_metrics_sha256", None)
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
-        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \\
-             patch.object(M, "source_identity", return_value=IDENTITY):
+        with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), patch.object(M, "source_identity", return_value=IDENTITY):
             result = M.validate_candidate(
                 root=self.root, control=self.control, stage=1,
                 workflow_id="new-workflow", min_output_bytes=100,
