@@ -40,8 +40,22 @@ def make_candidate(root: Path, *, stage=1, workflow="old-workflow", kind="comple
     }
     for name, payload in files.items():
         (checkpoint / name).write_bytes(payload)
+    objects = checkpoint / "obj" / "checkpoint_test"
+    objects.mkdir(parents=True)
+    for index in range(120):
+        (objects / f"unit_{index:03d}.o").write_bytes(
+            f"compiled-object-{index}\\n".encode() + b"x" * 12000
+        )
     output_files = {name: digest_file(checkpoint / name) for name in files}
-    output_bytes = sum((checkpoint / name).stat().st_size for name in files)
+    metrics = root / "stage-1-metrics.jsonl"
+    object_paths = sorted(p.relative_to(checkpoint).as_posix() for p in (checkpoint / "obj").rglob("*.o"))
+    metrics.write_text("".join(json.dumps({
+        "step_id": f"fixture-{index}", "outputs": [relative], "is_local": True
+    }) + "\\n" for index, relative in enumerate(object_paths)), encoding="utf-8")
+    output_bytes = sum(
+        path.stat().st_size for path in checkpoint.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    )
     meta = {
         "schema": M.OC.SCHEMA,
         "checkpoint_name": M.OC.CHECKPOINT_NAME,
@@ -55,6 +69,9 @@ def make_candidate(root: Path, *, stage=1, workflow="old-workflow", kind="comple
         "control_inputs": CONTROL_HASHES,
         "output_files": output_files,
         "output_bytes": output_bytes,
+        "compiled_output_inventory": M.OC.compiled_output_inventory(checkpoint),
+        "compiled_output_action_samples": M.OC.compiled_output_action_samples(metrics, checkpoint),
+        "compiled_output_action_samples_source_metrics_sha256": M.OC.sha256_file(metrics),
     }
     (checkpoint / M.OC.META_NAME).write_text(json.dumps(meta), encoding="utf-8")
     return checkpoint
@@ -101,7 +118,7 @@ class CheckpointQualityTests(unittest.TestCase):
     def test_rejects_metadata_only_16_byte_checkpoint(self):
         make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=1)
         with self.assertRaisesRegex(M.CheckpointQualityError, "too_small"):
-            self.validate(min_bytes=10000)
+            self.validate(min_bytes=5_000_000)
 
     def test_rejects_failed_or_partial_stage_checkpoint(self):
         make_candidate(self.root, stage=1, workflow="current-workflow",
