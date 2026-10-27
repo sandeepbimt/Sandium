@@ -41,6 +41,21 @@ class Tests(unittest.TestCase):
                 result=M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
             self.assertEqual(result["status"],"PASS"); self.assertEqual(result["sample_count"],8)
             self.assertIn("obj/test/unit_0.o",run.call_args.args[0])
+    def test_siso_dry_run_invocation_is_not_mistaken_for_scheduled_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); source,out,report=fixture(root)
+            handoff=json.loads(report.read_text(encoding="utf-8"))
+            targets=[item["path"] for item in handoff["compiled_output_action_samples"]]
+            # Reproduce the observed Siso wrapper line: every requested target is
+            # present as an argument, but no compile action is listed.
+            echoed=(f"{targets[0]}: depot_tools/siso.py: ninja "
+                    f"-re_cache_enable_write=true -n -C {out} " + " ".join(targets) + "\\n")
+            fake=subprocess.CompletedProcess(["autoninja"],0,echoed,None)
+            with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",return_value=fake):
+                result=M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
+            self.assertEqual(result["status"],"PASS")
+            self.assertEqual(result["sample_count"],8)
+
     def test_dirty_sample_fails_before_expensive_window(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); source,out,report=fixture(root)
