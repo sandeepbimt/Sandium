@@ -53,6 +53,15 @@ jobs:
           bash -n ci/bare/bootstrap_chromium.sh
           bash -n ci/bare/run_stage.sh
           bash -n ci/bare/package_artifact.sh
+      - name: Confirm stage runner stays blocked without explicit approval
+        run: |
+          set +e
+          SANDIUM_BARE_STAGE_RUN_APPROVED=false bash ci/bare/run_stage.sh 1
+          rc=$?
+          set -e
+          test "$rc" -eq 78
+          echo "SANDIUM_BARE_STAGE_RUN=BLOCKED (expected)"
+
       - name: Confirm build operations were not invoked
         run: |
           echo "CHROMIUM_SYNC_RUN=no"
