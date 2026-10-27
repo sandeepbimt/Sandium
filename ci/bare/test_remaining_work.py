@@ -16,7 +16,7 @@ class RemainingWorkTests(unittest.TestCase):
 
     def test_counts_dirty_actions_when_graph_denominator_is_larger(self):
         self.assertEqual(
-            M.parse_pending_actions("[1/109068] compile changed.o\\n[2/109068] link target\\n"),
+            M.parse_pending_actions("[1/109068] compile changed.o\n[2/109068] link target\n"),
             2,
         )
 
