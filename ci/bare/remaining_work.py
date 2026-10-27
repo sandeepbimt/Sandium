@@ -43,12 +43,8 @@ def parse_pending_actions(output: str) -> int:
     total = next(iter(totals))
     if total <= 0 or any(done <= 0 or done > total for done, _ in pairs):
         raise RemainingWorkError("dry-run emitted invalid action progress rows")
-    # Ninja/Siso emits one progress row per scheduled command. Do not use the
-    # denominator as the pending count: it can describe a graph, not just dirty work.
-    if len(pairs) != total:
-        raise RemainingWorkError(
-            f"dry-run action-row count does not match scheduled denominator: rows={len(pairs)} denominator={total}"
-        )
+    # Count emitted command rows, not the denominator: Siso's denominator can
+    # describe the whole graph while this dry run emits only dirty actions.
     return len(pairs)
 
 
