@@ -319,18 +319,8 @@ print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
 PY
 )"
 REUSE_GRAPH_SHA="$(sed -n 's/^SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=//p' "$DRIVER" | tail -n 1)"
-if [[ -n "$REUSE_GRAPH_SHA" ]]; then
-  [[ "$START_GRAPH_SHA" == "$REUSE_GRAPH_SHA" ]] || {
-    echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=FAIL full_dry_run=$START_GRAPH_SHA sampled_reuse=$REUSE_GRAPH_SHA" >&2
-    exit 59
-  }
-  echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=PASS sha256=$START_GRAPH_SHA"
-elif [[ "$STAGE" -gt 1 ]]; then
-  echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=FAIL continuation stage has no sampled-reuse graph hash" >&2
-  exit 59
-else
-  echo "SANDIUM_PREFLIGHT_GRAPH_CONTINUITY=SKIP no restored compiled outputs to verify"
-fi
+python3 "$CONTROL/ci/bare/preflight_graph_continuity.py" \
+  --stage "$STAGE" --full-graph-sha "$START_GRAPH_SHA" --reuse-graph-sha "$REUSE_GRAPH_SHA"
 if [[ "$STAGE" -gt 1 ]]; then
   PREVIOUS_PENDING="$(python3 - "$PREV" <<'PY'
 import json,sys
