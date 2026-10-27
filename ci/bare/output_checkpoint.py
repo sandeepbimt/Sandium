@@ -46,6 +46,15 @@ SISO_STATE_NAMES = (".siso_fs_state", ".siso_fs_state.0")
 SISO_JOURNAL_STATE_NAMES = (".siso_fs_state.journal",)
 OPTIONAL_STATE_NAMES = (*SISO_JOURNAL_STATE_NAMES, ".ninja_log", ".ninja_deps")
 
+# A full-output checkpoint must contain real Chromium compiled outputs, not
+# merely generated assets and a resumable Siso state file.
+COMPILED_OUTPUT_SUFFIXES = {".o", ".a", ".so"}
+COMPILED_OUTPUT_MIN_FILES = 100
+COMPILED_OUTPUT_MIN_BYTES = 1 * 1024 * 1024
+COMPILED_OUTPUT_SAMPLE_LIMIT = 24
+MIN_ACTION_OUTPUT_SAMPLES = 8
+MIN_REUSED_ACTION_SAMPLES = 3
+
 class CheckpointError(RuntimeError):
     pass
 
@@ -142,6 +151,219 @@ def output_manifest(output: Path) -> dict[str, str]:
     if apk.is_file() and not apk.is_symlink() and apk.stat().st_size:
         hashes["apks/ChromePublic.apk"] = sha256_file(apk)
     return hashes
+
+def compiled_object_paths(output: Path) -> list[Path]:
+    """List regular compiled files under obj/, excluding symlinks and generators."""
+    obj = output / "obj"
+    if not obj.is_dir() or obj.is_symlink():
+        return []
+    files = []
+    for path in obj.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix.lower() not in COMPILED_OUTPUT_SUFFIXES:
+            continue
+        files.append(path)
+    return sorted(files, key=lambda item: item.relative_to(output).as_posix())
+
+
+def sample_indices(length: int, limit: int) -> list[int]:
+    if length <= 0 or limit <= 0:
+        return []
+    if length <= limit:
+        return list(range(length))
+    return sorted({round(i * (length - 1) / (limit - 1)) for i in range(limit)})
+
+
+def compiled_output_inventory(output: Path) -> dict[str, Any]:
+    """Hash a deterministic sample while counting the whole compiled-object set."""
+    files = compiled_object_paths(output)
+    total_bytes = sum(path.stat().st_size for path in files)
+    samples = {}
+    for index in sample_indices(len(files), COMPILED_OUTPUT_SAMPLE_LIMIT):
+        path = files[index]
+        samples[path.relative_to(output).as_posix()] = sha256_file(path)
+    return {
+        "schema": 1,
+        "root": "obj/",
+        "accepted_suffixes": sorted(COMPILED_OUTPUT_SUFFIXES),
+        "object_file_count": len(files),
+        "object_file_bytes": total_bytes,
+        "sample_sha256": samples,
+        "minimum_required_files": COMPILED_OUTPUT_MIN_FILES,
+        "minimum_required_bytes": COMPILED_OUTPUT_MIN_BYTES,
+    }
+
+
+def validate_compiled_output_inventory(output: Path, inventory: Any, *, require_minimum: bool) -> dict[str, Any]:
+    if not isinstance(inventory, dict) or inventory.get("schema") != 1:
+        raise CheckpointError("Compiled-output inventory is missing or has an unsupported schema")
+    files = compiled_object_paths(output)
+    total_bytes = sum(path.stat().st_size for path in files)
+    if int(inventory.get("object_file_count", -1)) != len(files):
+        raise CheckpointError("Compiled-output inventory object-file count mismatch")
+    if int(inventory.get("object_file_bytes", -1)) != total_bytes:
+        raise CheckpointError("Compiled-output inventory object-file byte count mismatch")
+    samples = inventory.get("sample_sha256")
+    if not isinstance(samples, dict) or not samples:
+        raise CheckpointError("Compiled-output inventory has no sample hashes")
+    for relative, expected in samples.items():
+        rel = Path(relative)
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
+            raise CheckpointError(f"Unsafe compiled-output sample path: {relative}")
+        path = output / rel
+        require_regular_nonempty(path)
+        if path.suffix.lower() not in COMPILED_OUTPUT_SUFFIXES:
+            raise CheckpointError(f"Non-compiled output in sample manifest: {relative}")
+        if sha256_file(path) != expected:
+            raise CheckpointError(f"Compiled-output sample hash mismatch: {relative}")
+    if require_minimum:
+        if len(files) < COMPILED_OUTPUT_MIN_FILES:
+            raise CheckpointError(
+                f"Too few compiled object outputs: {len(files)} < {COMPILED_OUTPUT_MIN_FILES}"
+            )
+        if total_bytes < COMPILED_OUTPUT_MIN_BYTES:
+            raise CheckpointError(
+                f"Compiled object output payload too small: {total_bytes} < {COMPILED_OUTPUT_MIN_BYTES}"
+            )
+    return {
+        "object_file_count": len(files),
+        "object_file_bytes": total_bytes,
+        "sample_file_count": len(samples),
+        "minimum_thresholds_met": (
+            len(files) >= COMPILED_OUTPUT_MIN_FILES and total_bytes >= COMPILED_OUTPUT_MIN_BYTES
+        ),
+    }
+
+
+def _metrics_outputs(metrics_path: Path) -> dict[str, list[dict[str, Any]]]:
+    """Return output paths from the current Siso invocation, preserving evidence flags."""
+    result: dict[str, list[dict[str, Any]]] = {}
+    if not metrics_path.is_file() or metrics_path.is_symlink():
+        raise CheckpointError(f"Current-stage Siso metrics are missing/unsafe: {metrics_path}")
+    with metrics_path.open(encoding="utf-8", errors="replace") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise CheckpointError(f"Invalid Siso metrics JSONL line {line_number}") from exc
+            if not isinstance(row, dict):
+                continue
+            names = row.get("outputs")
+            if not isinstance(names, list):
+                names = [row.get("output")] if isinstance(row.get("output"), str) else []
+            flags = {
+                "cached": row.get("cached") is True,
+                "no_exec": row.get("no_exec") is True,
+                "is_local": row.get("is_local") is True,
+                "is_remote": row.get("is_remote") is True or row.get("is_local") is False,
+            }
+            for name in names:
+                if not isinstance(name, str):
+                    continue
+                rel = Path(name)
+                if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+                    continue
+                relative = rel.as_posix()
+                if relative.startswith("obj/") and rel.suffix.lower() in COMPILED_OUTPUT_SUFFIXES:
+                    result.setdefault(relative, []).append(flags)
+    return result
+
+
+def compiled_output_action_samples(metrics_path: Path, output: Path) -> list[dict[str, Any]]:
+    """Sample object outputs named by this invocation's Siso action metrics."""
+    records = _metrics_outputs(metrics_path)
+    candidates = []
+    for relative in sorted(records):
+        path = output / relative
+        if path.is_file() and not path.is_symlink() and path.stat().st_size > 0:
+            candidates.append(path)
+    picked = [candidates[index] for index in sample_indices(len(candidates), COMPILED_OUTPUT_SAMPLE_LIMIT)]
+    return [
+        {
+            "path": path.relative_to(output).as_posix(),
+            "sha256": sha256_file(path),
+            "bytes": path.stat().st_size,
+        }
+        for path in picked
+    ]
+
+
+def verify_local_compiled_output_reuse(
+    *, root: Path, stage: int, metrics_path: Path, report_path: Path
+) -> dict[str, Any]:
+    """Prove sampled previous-stage object outputs remain unchanged and weren't re-executed."""
+    report = read_json(report_path)
+    samples = report.get("compiled_output_action_samples")
+    current_metrics_sha256 = sha256_file(metrics_path) if metrics_path.is_file() and not metrics_path.is_symlink() else None
+    if not isinstance(samples, list) or len(samples) < MIN_ACTION_OUTPUT_SAMPLES:
+        evidence = {
+            "schema": 1,
+            "status": "UNVERIFIABLE_NO_PRIOR_ACTION_SAMPLES",
+            "previous_sample_count": len(samples) if isinstance(samples, list) else 0,
+            "verified_local_reuse_count": 0,
+            "minimum_required_reuse_count": MIN_REUSED_ACTION_SAMPLES,
+            "current_metrics_sha256": current_metrics_sha256,
+        }
+        report["compiled_output_reuse_evidence"] = evidence
+        report["local_compiled_outputs_reuse_verified"] = False
+        write_json_atomic(report_path, report)
+        print("SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=" + evidence["status"])
+        if stage > 1:
+            raise CheckpointError("Continuation stage has no verified prior-stage compiled-output action samples")
+        return evidence
+
+    output = root / OUT_RELATIVE
+    current_records = _metrics_outputs(metrics_path)
+    verified, unchanged, mentioned_cached, mentioned_executed = [], [], [], []
+    for item in samples:
+        if not isinstance(item, dict):
+            continue
+        relative = item.get("path", "")
+        rel = Path(relative) if isinstance(relative, str) else Path("/")
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
+            continue
+        path = output / rel
+        if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
+            continue
+        if sha256_file(path) != item.get("sha256"):
+            continue
+        unchanged.append(relative)
+        flags = current_records.get(relative, [])
+        if any(flag["cached"] for flag in flags):
+            mentioned_cached.append(relative)
+        # no_exec is explicit evidence an output wasn't re-executed; a path
+        # omitted from all current invocation output records also wasn't run.
+        if not flags or all(flag["no_exec"] for flag in flags):
+            verified.append(relative)
+        elif any(not flag["cached"] and not flag["no_exec"] for flag in flags):
+            mentioned_executed.append(relative)
+
+    evidence = {
+        "schema": 1,
+        "status": "VERIFIED_LOCAL_OUTPUT_REUSE" if len(verified) >= MIN_REUSED_ACTION_SAMPLES else "LOCAL_OUTPUT_REUSE_NOT_PROVEN",
+        "previous_sample_count": len(samples),
+        "unchanged_sample_count": len(unchanged),
+        "verified_local_reuse_count": len(verified),
+        "current_stage_remote_or_action_cache_sample_count": len(mentioned_cached),
+        "current_stage_uncached_execution_sample_count": len(mentioned_executed),
+        "minimum_required_reuse_count": MIN_REUSED_ACTION_SAMPLES,
+        "verified_sample_paths": verified,
+        "unchanged_sample_paths": unchanged,
+        "current_metrics_sha256": current_metrics_sha256,
+    }
+    report["compiled_output_reuse_evidence"] = evidence
+    report["local_compiled_outputs_reuse_verified"] = len(verified) >= MIN_REUSED_ACTION_SAMPLES
+    write_json_atomic(report_path, report)
+    print("SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=" + evidence["status"])
+    print("SANDIUM_COMPILED_OUTPUT_REUSE_VERIFIED_SAMPLES=" + str(len(verified)))
+    print("SANDIUM_COMPILED_OUTPUT_REUSE_MINIMUM_SAMPLES=" + str(MIN_REUSED_ACTION_SAMPLES))
+    if stage > 1 and len(verified) < MIN_REUSED_ACTION_SAMPLES:
+        raise CheckpointError("Continuation stage could not prove unchanged prior-stage object outputs were reused locally")
+    return evidence
+
 
 def verify_manifest_files(output: Path, entries: Any) -> None:
     if not isinstance(entries, dict) or not entries:
