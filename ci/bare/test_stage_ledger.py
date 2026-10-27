@@ -99,9 +99,13 @@ class StageLedgerTests(unittest.TestCase):
             MODULE.validate_stage_evidence(
                 4, metric_values(remote_executed_action_records=200, remote_cached_action_records=0)
             )
+        with self.assertRaisesRegex(IdentityError, "no useful forward progress"):
+            MODULE.validate_stage_evidence(
+                4, metric_values(remote_executed_action_records=0, remote_cached_action_records=1)
+            )
         self.assertEqual(
-            MODULE.validate_stage_evidence(4, metric_values(remote_executed_action_records=0)),
-            (False, True),
+            MODULE.validate_stage_evidence(4, metric_values(remote_executed_action_records=200)),
+            (True, True),
         )
 
     def test_stable_identity_does_not_change_when_generated_gn_identity_appears(self):
