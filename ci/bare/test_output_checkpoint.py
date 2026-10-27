@@ -46,6 +46,25 @@ def add_checkpoint_evidence(root: Path, output: Path) -> dict:
     }
 
 class OutputCheckpointTests(unittest.TestCase):
+    def test_action_samples_only_include_predecessor_local_compilation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "out"
+            output.mkdir()
+            obj = output / "obj"
+            obj.mkdir()
+            for name in ("local.o", "cached.o", "noexec.o"):
+                (obj / name).write_bytes(name.encode() + b" compiled")
+            metrics = root / "metrics.jsonl"
+            rows = [
+                {"step_id": "local", "outputs": ["obj/local.o"], "is_local": True},
+                {"step_id": "cached", "outputs": ["obj/cached.o"], "cached": True},
+                {"step_id": "noexec", "outputs": ["obj/noexec.o"], "no_exec": True},
+            ]
+            metrics.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            samples = M.compiled_output_action_samples(metrics, output)
+            self.assertEqual([item["path"] for item in samples], ["obj/local.o"])
+
     def test_identity_digest_is_order_independent(self):
         reversed_identity = dict(reversed(list(IDENTITY.items())))
         self.assertEqual(M.identity_digest(IDENTITY), M.identity_digest(reversed_identity))
