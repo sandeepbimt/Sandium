@@ -1,0 +1,52 @@
+name: Bare adapter unit tests (no build)
+
+on:
+  push:
+    branches:
+      - migration/bare-source-adapter
+    paths:
+      - "ci/bare/stage_ledger.py"
+      - "ci/bare/test_stage_ledger.py"
+      - "ci/bare/build_identity.py"
+      - "ci/bare/test_build_identity.py"
+      - ".circleci/config.yml"
+      - ".github/workflows/bare-adapter-unit-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Validate Bare ledger semantics without Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the source-adapter branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile adapter and test scripts
+        run: |
+          python -m py_compile \
+            ci/bare/stage_ledger.py \
+            ci/bare/test_stage_ledger.py \
+            ci/bare/build_identity.py \
+            ci/bare/test_build_identity.py
+      - name: Run stage-ledger and source-identity tests
+        run: |
+          python ci/bare/test_stage_ledger.py
+          python ci/bare/test_build_identity.py
+      - name: Check shell syntax only
+        run: |
+          bash -n ci/bare/prepare_source.sh
+          bash -n ci/bare/bootstrap_chromium.sh
+          bash -n ci/bare/package_artifact.sh
+      - name: Confirm build operations were not invoked
+        run: |
+          echo "CHROMIUM_SYNC_RUN=no"
+          echo "GN_GENERATION_RUN=no"
+          echo "SISO_BUILD_RUN=no"
+          echo "APK_BUILD_RUN=no"
