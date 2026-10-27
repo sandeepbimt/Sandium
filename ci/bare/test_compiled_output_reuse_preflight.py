@@ -165,6 +165,7 @@ class Tests(unittest.TestCase):
             root=Path(tmp); source=root/"src"; write_inputs(source)
             (root/M.OUTPUT_RELATIVE).mkdir(parents=True)
             (root/M.OUTPUT_RELATIVE/"build.ninja").write_text("graph\n")
+            (root/M.OUTPUT_RELATIVE/"build.ninja.stamp").write_text("stamp\n")
             report=root/"sandium-state-handoff-report.json"
             report.write_text(json.dumps({"local_compiled_outputs_restored":False,"compiled_output_action_samples":[]}))
             with self.assertRaisesRegex(M.ReusePreflightError,"no restored compiled-output checkpoint"):
