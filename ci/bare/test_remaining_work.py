@@ -32,15 +32,15 @@ noexec:0 local:0 remote:0 cache:0 skip:52498
 
     def test_siso_summary_requires_both_counters(self):
         with self.assertRaisesRegex(M.RemainingWorkError, "unambiguous completed Siso"):
-            M.parse_pending_actions("1m49.52s Build Succeeded: 56599 steps\\n")
+            M.parse_pending_actions("1m49.52s Build Succeeded: 56599 steps\n")
 
     def test_siso_counters_cannot_skip_more_than_total(self):
-        output = "1m49.52s Build Succeeded: 100 steps\\nnoexec:0 local:0 remote:0 cache:0 skip:101\\n"
+        output = "1m49.52s Build Succeeded: 100 steps\nnoexec:0 local:0 remote:0 cache:0 skip:101\n"
         with self.assertRaisesRegex(M.RemainingWorkError, "invalid Siso dry-run counters"):
             M.parse_pending_actions(output)
 
     def test_missing_measurement_fails_closed(self):
-        with self.assertRaisesRegex(M.RemainingWorkError, "neither parseable action rows"):
+        with self.assertRaisesRegex(M.RemainingWorkError, "no Ninja action rows"):
             M.parse_pending_actions("Siso finished successfully\n")
 
     def test_mixed_denominators_fail_closed(self):
