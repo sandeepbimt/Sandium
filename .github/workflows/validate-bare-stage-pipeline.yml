@@ -62,6 +62,7 @@ jobs:
           python3 ci/bare/test_state_handoff.py
           python3 ci/bare/test_output_checkpoint.py
           python3 ci/bare/test_remaining_work.py
+          python3 ci/bare/test_preflight_graph_continuity.py
           python3 ci/bare/test_compiled_output_reuse_preflight.py
           python3 ci/bare/test_fast_apk.py
           python3 ci/bare/test_siso_output_path_guard.py
