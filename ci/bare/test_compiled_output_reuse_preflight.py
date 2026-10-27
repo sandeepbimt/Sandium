@@ -51,8 +51,8 @@ class Tests(unittest.TestCase):
                 "bytes": 123,
             })
             report.write_text(json.dumps(handoff), encoding="utf-8")
-            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\\n", None)
-            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \\
+            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\n", None)
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
                  patch.object(M.subprocess, "run", return_value=fake) as run:
                 result = M.verify_restored_output_reuse(
                     root=root, source_root=source, stage=2, report_path=report, epoch=946684800
@@ -69,8 +69,8 @@ class Tests(unittest.TestCase):
                 {"path": "obj/test/libaggregate.a", "sha256": "a" * 64, "bytes": 123}
             ]
             report.write_text(json.dumps(handoff), encoding="utf-8")
-            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\\n", None)
-            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \\
+            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\n", None)
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
                  patch.object(M.subprocess, "run", return_value=fake):
                 with self.assertRaisesRegex(ReusePreflightError, "too few verified leaf-object"):
                     M.verify_restored_output_reuse(
