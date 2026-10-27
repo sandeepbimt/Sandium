@@ -3,7 +3,9 @@
 import hashlib
 import importlib.util
 import json
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -26,6 +28,14 @@ def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str
     files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", state_name: "siso resumable state\n"}
     for name, contents in files.items():
         (path / name).write_text(contents, encoding="utf-8")
+    # GN writes this stamp with the generated graph. Checkpoint archives have an
+    # older stamp; continuation must keep the current job's fresh stamp so Siso
+    # does not regenerate the Ninja manifest immediately after restoring outputs.
+    stamp = path / "build.ninja.stamp"
+    stamp.write_text("checkpoint generator stamp\n", encoding="utf-8")
+    old_ns = 946684800 * 1_000_000_000
+    for name in ("args.gn", "build.ninja", "build.ninja.stamp"):
+        os.utime(path / name, ns=(old_ns, old_ns))
     objects = path / "obj" / "checkpoint_test"
     objects.mkdir(parents=True)
     for index in range(120):
@@ -175,12 +185,20 @@ class OutputCheckpointTests(unittest.TestCase):
 
                 # A later stage runs GN first and creates a fresh output shell.
                 output.mkdir(parents=True)
-                (output / "args.gn").write_text("fresh args\n", encoding="utf-8")
-                (output / "build.ninja").write_text("fresh graph\n", encoding="utf-8")
+                (output / "args.gn").write_text("use_siso=true\n", encoding="utf-8")
+                (output / "build.ninja").write_text("build edge\n", encoding="utf-8")
+                fresh_stamp = output / "build.ninja.stamp"
+                fresh_stamp.write_text("current job generator stamp\n", encoding="utf-8")
+                fresh_ns = time.time_ns()
+                os.utime(fresh_stamp, ns=(fresh_ns, fresh_ns))
+                fresh_graph_mtime = (output / "build.ninja").stat().st_mtime_ns
                 restored = M.command_restore(root, control, 2, "wf-1", required=True)
                 self.assertEqual(restored, 0)
                 self.assertTrue((output / ".siso_fs_state").is_file())
                 self.assertEqual((output / "build.ninja").read_text(encoding="utf-8"), "build edge\n")
+                self.assertEqual(fresh_stamp.read_text(encoding="utf-8"), "current job generator stamp\n")
+                self.assertEqual(fresh_stamp.stat().st_mtime_ns, fresh_ns)
+                self.assertEqual((output / "build.ninja").stat().st_mtime_ns, fresh_graph_mtime)
                 self.assertFalse(checkpoint.exists())
                 self.assertFalse((output / M.META_NAME).exists())
                 report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
@@ -211,11 +229,44 @@ class OutputCheckpointTests(unittest.TestCase):
                 checkpoint = root / M.CHECKPOINT_NAME
                 self.assertTrue((checkpoint / ".siso_fs_state.journal").is_file())
                 output.mkdir(parents=True)
-                (output / "args.gn").write_text("fresh args\n", encoding="utf-8")
-                (output / "build.ninja").write_text("fresh graph\n", encoding="utf-8")
+                (output / "args.gn").write_text("use_siso=true\n", encoding="utf-8")
+                (output / "build.ninja").write_text("build edge\n", encoding="utf-8")
+                (output / "build.ninja.stamp").write_text("current job generator stamp\n", encoding="utf-8")
                 self.assertEqual(M.command_restore(root, control, 2, "wf-1", required=True), 0)
                 self.assertTrue((output / ".siso_fs_state.journal").is_file())
                 self.assertFalse((output / ".siso_fs_state").exists())
+
+    def test_restore_rejects_different_current_gn_graph_before_moving_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            add_checkpoint_evidence(root, output)
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 25,
+                "total_action_count": 100,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": True,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \\
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+                checkpoint = root / M.CHECKPOINT_NAME
+                output.mkdir(parents=True)
+                (output / "args.gn").write_text("use_siso=true\\n", encoding="utf-8")
+                (output / "build.ninja").write_text("different graph\\n", encoding="utf-8")
+                (output / "build.ninja.stamp").write_text("fresh stamp\\n", encoding="utf-8")
+                with self.assertRaisesRegex(M.CheckpointError, "Fresh GN build.ninja differs"):
+                    M.command_restore(root, control, 2, "wf-1", required=True)
+                self.assertTrue(checkpoint.is_dir(), "incompatible checkpoint must be preserved for diagnosis")
+                self.assertTrue(output.is_dir(), "fresh GN output must remain untouched on early rejection")
+                self.assertTrue((output / "build.ninja").read_text(encoding="utf-8") == "different graph\\n")
 
     def test_local_compiled_output_reuse_requires_unchanged_prior_action_outputs(self):
         with tempfile.TemporaryDirectory() as temp:
