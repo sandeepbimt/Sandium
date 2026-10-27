@@ -5,13 +5,13 @@ import argparse, hashlib, json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import output_checkpoint as OC
+
 OUTPUT_RELATIVE = Path("src/out/android_Debug_arm64")
 SISO_CONFIG_RELATIVE = Path("src/build/config/siso")
 SISO_INPUT_NAMES = (".sisoenv", ".sisorc")
-# Only leaf object files are suitable samples for local compile reuse.
-# Archives/shared objects are aggregate outputs and may legitimately be relinked.
-COMPILED_SUFFIXES = {".o"}
-MIN_SAMPLE_COUNT = 8
+MIN_SAMPLE_COUNT = OC.MIN_ACTION_OUTPUT_SAMPLES
 
 class ReusePreflightError(RuntimeError):
     pass
@@ -43,28 +43,27 @@ def normalize_siso_input_timestamps(source_root: Path, epoch: int) -> dict[str, 
 def safe_sample_paths(report: dict[str, Any], output: Path) -> list[str]:
     if report.get("local_compiled_outputs_restored") is not True:
         return []
-    samples = report.get("compiled_output_action_samples")
-    if not isinstance(samples, list) or len(samples) < MIN_SAMPLE_COUNT:
+    try:
+        samples = OC.normalize_compiled_output_action_samples(
+            report.get("compiled_output_action_samples"),
+            report.get("compiled_output_action_sample_schema"),
+        )
+    except OC.CheckpointError as exc:
+        raise ReusePreflightError(str(exc)) from exc
+    if len(samples) < MIN_SAMPLE_COUNT:
         raise ReusePreflightError(
-            f"Restored checkpoint has too few action-output samples: {len(samples) if isinstance(samples, list) else 0} < {MIN_SAMPLE_COUNT}"
+            f"Restored checkpoint has too few verified leaf-object action samples: "
+            f"{len(samples)} < {MIN_SAMPLE_COUNT}"
         )
     paths = []
     for item in samples:
-        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
-            raise ReusePreflightError("Invalid previous-stage compiled-output sample record")
         relative = item["path"]
         rel = Path(relative)
-        if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
-            raise ReusePreflightError(f"Unsafe previous-stage object target: {relative}")
-        if rel.suffix.lower() not in COMPILED_SUFFIXES:
-            raise ReusePreflightError(f"Unsupported prior object target suffix: {relative}")
         path = output / rel
-        if not path.is_file() or path.is_symlink() or path.stat().st_size == 0 or sha256_file(path) != item.get("sha256"):
+        if (not path.is_file() or path.is_symlink() or path.stat().st_size != item["bytes"]
+                or sha256_file(path) != item["sha256"]):
             raise ReusePreflightError(f"Restored sample output missing or hash mismatch: {relative}")
         paths.append(rel.as_posix())
-    paths = list(dict.fromkeys(paths))
-    if len(paths) < MIN_SAMPLE_COUNT:
-        raise ReusePreflightError(f"Too few unique restored object targets: {len(paths)}")
     return paths
 
 def is_siso_dry_run_invocation(clean: str) -> bool:

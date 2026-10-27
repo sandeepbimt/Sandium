@@ -51,6 +51,7 @@ def add_checkpoint_evidence(root: Path, output: Path) -> dict:
     }) + "\n" for index, relative in enumerate(paths)), encoding="utf-8")
     return {
         "compiled_output_inventory": M.compiled_output_inventory(output),
+        "compiled_output_action_sample_schema": M.ACTION_SAMPLE_SCHEMA,
         "compiled_output_action_samples": M.compiled_output_action_samples(metrics, output),
         "compiled_output_action_samples_source_metrics_sha256": M.sha256_file(metrics),
     }
@@ -74,6 +75,22 @@ class OutputCheckpointTests(unittest.TestCase):
             metrics.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
             samples = M.compiled_output_action_samples(metrics, output)
             self.assertEqual([item["path"] for item in samples], ["obj/local.o"])
+
+    def test_legacy_action_samples_keep_only_leaf_objects(self):
+        legacy = [
+            {"path": "obj/a/first.o", "sha256": "a" * 64, "bytes": 10},
+            {"path": "obj/a/libfirst.a", "sha256": "b" * 64, "bytes": 20},
+            {"path": "obj/a/libsecond.so", "sha256": "c" * 64, "bytes": 30},
+            {"path": "obj/b/second.o", "sha256": "d" * 64, "bytes": 40},
+        ]
+        migrated = M.normalize_compiled_output_action_samples(legacy)
+        self.assertEqual([item["path"] for item in migrated],
+                         ["obj/a/first.o", "obj/b/second.o"])
+
+    def test_current_action_sample_schema_rejects_aggregate_outputs(self):
+        aggregate = [{"path": "obj/a/libfirst.a", "sha256": "b" * 64, "bytes": 20}]
+        with self.assertRaisesRegex(M.CheckpointError, "non-object output"):
+            M.normalize_compiled_output_action_samples(aggregate, M.ACTION_SAMPLE_SCHEMA)
 
     def test_identity_digest_is_order_independent(self):
         reversed_identity = dict(reversed(list(IDENTITY.items())))

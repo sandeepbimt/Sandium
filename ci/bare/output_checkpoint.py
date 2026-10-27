@@ -54,6 +54,8 @@ COMPILED_OUTPUT_MIN_BYTES = 1 * 1024 * 1024
 COMPILED_OUTPUT_SAMPLE_LIMIT = 24
 MIN_ACTION_OUTPUT_SAMPLES = 8
 MIN_REUSED_ACTION_SAMPLES = 3
+# Explicit contract for action samples: only leaf object files can prove local compile reuse.
+ACTION_SAMPLE_SCHEMA = "leaf-object-v1"
 
 class CheckpointError(RuntimeError):
     pass
@@ -173,6 +175,56 @@ def sample_indices(length: int, limit: int) -> list[int]:
     if length <= limit:
         return list(range(length))
     return sorted({round(i * (length - 1) / (limit - 1)) for i in range(limit)})
+
+
+def normalize_compiled_output_action_samples(
+    samples: Any, schema: Any = None
+) -> list[dict[str, Any]]:
+    """Validate action-sample records and migrate the old aggregate-inclusive contract.
+
+    Missing schema identifies checkpoints written before leaf-object-only sampling.
+    Those legacy records may contain .a/.so link outputs; discard those records and
+    preserve only verified .o samples. Never infer compilation provenance from the
+    filesystem inventory, and reject unknown/future sample contracts fail-closed.
+    """
+    if not isinstance(samples, list):
+        raise CheckpointError("compiled-output action samples are missing or not a list")
+    if schema not in (None, ACTION_SAMPLE_SCHEMA):
+        raise CheckpointError(f"unsupported compiled-output action-sample schema: {schema}")
+    legacy = schema is None
+    normalized: dict[str, dict[str, Any]] = {}
+    for item in samples:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise CheckpointError("invalid compiled-output action-sample record")
+        relative = item["path"]
+        rel = Path(relative)
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
+            raise CheckpointError(f"unsafe compiled-output action-sample path: {relative}")
+        suffix = rel.suffix.lower()
+        if legacy:
+            if suffix not in COMPILED_OUTPUT_SUFFIXES:
+                raise CheckpointError(f"unsupported legacy compiled-output sample suffix: {relative}")
+        elif suffix != ".o":
+            raise CheckpointError(f"current leaf-object sample contract contains non-object output: {relative}")
+
+        digest = item.get("sha256")
+        if (not isinstance(digest, str) or len(digest) != 64
+                or any(ch not in "0123456789abcdefABCDEF" for ch in digest)):
+            raise CheckpointError(f"invalid compiled-output sample SHA-256: {relative}")
+        byte_count = item.get("bytes")
+        if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count <= 0:
+            raise CheckpointError(f"invalid compiled-output sample byte count: {relative}")
+
+        # Old checkpoints sampled link outputs alongside leaf objects. Their hashes
+        # are not accepted as evidence of compile reuse; drop them during migration.
+        if legacy and suffix in {".a", ".so"}:
+            continue
+        record = {"path": rel.as_posix(), "sha256": digest, "bytes": byte_count}
+        previous = normalized.get(record["path"])
+        if previous is not None and previous != record:
+            raise CheckpointError(f"conflicting duplicate compiled-output samples: {relative}")
+        normalized.setdefault(record["path"], record)
+    return list(normalized.values())
 
 
 def compiled_output_inventory(output: Path) -> dict[str, Any]:
@@ -432,23 +484,27 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             print("SANDIUM_OUTPUT_CHECKPOINT_COMPILED_INVENTORY=LEGACY_UNVERIFIED")
         else:
             validate_compiled_output_inventory(checkpoint, inventory, require_minimum=True)
-            action_samples = meta.get("compiled_output_action_samples")
-            if not isinstance(action_samples, list) or len(action_samples) < MIN_ACTION_OUTPUT_SAMPLES:
-                if stage > 1:
-                    return miss("compiled_output_action_samples_missing_from_predecessor_checkpoint")
-            else:
-                for item in action_samples:
-                    if not isinstance(item, dict):
-                        return miss("invalid_compiled_output_action_sample")
-                    relative = item.get("path", "")
-                    rel = Path(relative) if isinstance(relative, str) else Path("/")
-                    if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
-                        return miss("unsafe_compiled_output_action_sample_path")
-                    sample_path = checkpoint / rel
-                    if (not sample_path.is_file() or sample_path.is_symlink()
-                            or sample_path.stat().st_size != int(item.get("bytes", -1))
-                            or sha256_file(sample_path) != item.get("sha256")):
-                        return miss("compiled_output_action_sample_mismatch:" + relative)
+            try:
+                action_samples = normalize_compiled_output_action_samples(
+                    meta.get("compiled_output_action_samples"),
+                    meta.get("compiled_output_action_sample_schema"),
+                )
+            except CheckpointError as exc:
+                return miss("compiled_output_action_samples_invalid:" + str(exc))
+            # Even Stage 1 may use a cached output tree only when enough *leaf*
+            # objects survive validation. Aggregate-only samples cannot prove compile reuse.
+            if len(action_samples) < MIN_ACTION_OUTPUT_SAMPLES:
+                return miss(
+                    "compiled_output_action_samples_too_few_leaf_objects:"
+                    + str(len(action_samples))
+                )
+            for item in action_samples:
+                relative = item["path"]
+                sample_path = checkpoint / relative
+                if (not sample_path.is_file() or sample_path.is_symlink()
+                        or sample_path.stat().st_size != item["bytes"]
+                        or sha256_file(sample_path) != item["sha256"]):
+                    return miss("compiled_output_action_sample_mismatch:" + relative)
         if pre_source:
             if stage > 1 and (
                 meta.get("stage") != stage - 1
@@ -548,6 +604,21 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
     # compiled outputs and Siso filesystem state are now active in output.
     shutil.rmtree(backup)
     print("SANDIUM_OUTPUT_CHECKPOINT_PRESERVED_CURRENT_GN_MANIFEST=PASS")
+    raw_action_samples = meta.get("compiled_output_action_samples", [])
+    if isinstance(raw_action_samples, list) and raw_action_samples:
+        action_samples = normalize_compiled_output_action_samples(
+            raw_action_samples, meta.get("compiled_output_action_sample_schema")
+        )
+    else:
+        action_samples = []
+    sample_schema = meta.get("compiled_output_action_sample_schema")
+    sample_migration = (
+        "legacy_aggregate_outputs_filtered"
+        if sample_schema is None and len(action_samples) < len(raw_action_samples)
+        else ("legacy_object_samples_validated" if sample_schema is None and action_samples else "none")
+    )
+    print("SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_SCHEMA=" + ACTION_SAMPLE_SCHEMA)
+    print("SANDIUM_OUTPUT_CHECKPOINT_ACTION_SAMPLE_MIGRATION=" + sample_migration)
     report = {
         "schema": 1,
         "SANDIUM_STATE_HANDOFF": "RESTORED",
@@ -572,7 +643,9 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
             else "LEGACY_UNVERIFIED"
         ),
         "compiled_output_inventory": meta.get("compiled_output_inventory"),
-        "compiled_output_action_samples": meta.get("compiled_output_action_samples", []),
+        "compiled_output_action_sample_schema": ACTION_SAMPLE_SCHEMA,
+        "compiled_output_action_sample_migration": sample_migration,
+        "compiled_output_action_samples": action_samples,
     }
     write_json_atomic(root / REPORT_NAME, report)
     print("SANDIUM_OUTPUT_CHECKPOINT=RESTORED")
@@ -637,6 +710,7 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "output_files": files,
             "output_bytes": output_bytes,
             "compiled_output_inventory": inventory,
+            "compiled_output_action_sample_schema": ACTION_SAMPLE_SCHEMA,
             "compiled_output_action_samples": action_samples,
             "compiled_output_action_samples_source_metrics_sha256": (
                 sha256_file(metrics_path) if metrics_path.is_file() and not metrics_path.is_symlink() else None

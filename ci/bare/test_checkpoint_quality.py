@@ -70,6 +70,7 @@ def make_candidate(root: Path, *, stage=1, workflow="old-workflow", kind="comple
         "output_files": output_files,
         "output_bytes": output_bytes,
         "compiled_output_inventory": M.OC.compiled_output_inventory(checkpoint),
+        "compiled_output_action_sample_schema": M.OC.ACTION_SAMPLE_SCHEMA,
         "compiled_output_action_samples": M.OC.compiled_output_action_samples(metrics, checkpoint),
         "compiled_output_action_samples_source_metrics_sha256": M.OC.sha256_file(metrics),
     }
@@ -114,6 +115,32 @@ class CheckpointQualityTests(unittest.TestCase):
         identity.assert_called_once_with(
             self.control, self.root, require_gn=True, output_dir_override=checkpoint
         )
+
+    def test_migrates_legacy_aggregate_samples_at_quality_gate(self):
+        checkpoint = make_candidate(
+            self.root, stage=1, workflow="old-workflow", min_payload=200
+        )
+        meta_path = checkpoint / M.OC.META_NAME
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.pop("compiled_output_action_sample_schema")
+        # Reproduce an old checkpoint's sampled aggregate output. No file is
+        # needed for this record because legacy aggregate samples are discarded.
+        original_count = len(meta["compiled_output_action_samples"])
+        meta["compiled_output_action_samples"][0]["path"] = "obj/checkpoint_test/legacy.a"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        result = self.validate(stage=1, workflow="new-workflow")
+        self.assertEqual(result["compiled_output_action_sample_count"], original_count - 1)
+
+    def test_current_sample_contract_rejects_aggregate_output(self):
+        checkpoint = make_candidate(
+            self.root, stage=1, workflow="current-workflow", min_payload=200
+        )
+        meta_path = checkpoint / M.OC.META_NAME
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["compiled_output_action_samples"][0]["path"] = "obj/checkpoint_test/legacy.a"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        with self.assertRaisesRegex(M.CheckpointQualityError, "non-object output"):
+            self.validate(stage=1, workflow="current-workflow")
 
     def test_rejects_metadata_only_16_byte_checkpoint(self):
         make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=1)

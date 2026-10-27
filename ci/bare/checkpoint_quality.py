@@ -168,21 +168,25 @@ def validate_candidate(
             raise CheckpointQualityError("compiled_output_inventory_invalid:" + str(exc)) from exc
         object_count = checked_inventory["object_file_count"]
         object_bytes = checked_inventory["object_file_bytes"]
-        action_samples = meta.get("compiled_output_action_samples")
-        if not isinstance(action_samples, list) or len(action_samples) < OC.MIN_ACTION_OUTPUT_SAMPLES:
-            raise CheckpointQualityError("compiled_output_action_samples_missing_or_too_small")
+        try:
+            action_samples = OC.normalize_compiled_output_action_samples(
+                meta.get("compiled_output_action_samples"),
+                meta.get("compiled_output_action_sample_schema"),
+            )
+        except OC.CheckpointError as exc:
+            raise CheckpointQualityError("compiled_output_action_samples_invalid:" + str(exc)) from exc
+        if len(action_samples) < OC.MIN_ACTION_OUTPUT_SAMPLES:
+            raise CheckpointQualityError(
+                "compiled_output_action_samples_too_few_leaf_objects:"
+                + str(len(action_samples))
+            )
         action_sample_count = len(action_samples)
         for item in action_samples:
-            if not isinstance(item, dict):
-                raise CheckpointQualityError("compiled_output_action_sample_not_object")
-            relative = item.get("path", "")
-            rel = Path(relative) if isinstance(relative, str) else Path("/")
-            if rel.is_absolute() or ".." in rel.parts or not rel.parts or rel.parts[0] != "obj":
-                raise CheckpointQualityError("unsafe_compiled_output_action_sample_path")
-            sample_path = checkpoint / rel
+            relative = item["path"]
+            sample_path = checkpoint / relative
             if (not sample_path.is_file() or sample_path.is_symlink()
-                    or sample_path.stat().st_size != int(item.get("bytes", -1))
-                    or OC.sha256_file(sample_path) != item.get("sha256")):
+                    or sample_path.stat().st_size != item["bytes"]
+                    or OC.sha256_file(sample_path) != item["sha256"]):
                 raise CheckpointQualityError("compiled_output_action_sample_mismatch:" + relative)
     return {
         "source_stage": source_stage,

@@ -41,6 +41,42 @@ class Tests(unittest.TestCase):
                 result=M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
             self.assertEqual(result["status"],"PASS"); self.assertEqual(result["sample_count"],8)
             self.assertIn("obj/test/unit_0.o",run.call_args.args[0])
+    def test_legacy_aggregate_samples_are_filtered_before_reuse_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source, out, report = fixture(root)
+            handoff = json.loads(report.read_text(encoding="utf-8"))
+            handoff["compiled_output_action_samples"].append({
+                "path": "obj/test/libaggregate.a",
+                "sha256": "a" * 64,
+                "bytes": 123,
+            })
+            report.write_text(json.dumps(handoff), encoding="utf-8")
+            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\\n", None)
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \\
+                 patch.object(M.subprocess, "run", return_value=fake) as run:
+                result = M.verify_restored_output_reuse(
+                    root=root, source_root=source, stage=2, report_path=report, epoch=946684800
+                )
+            self.assertEqual(result["status"], "PASS")
+            self.assertEqual(result["sample_count"], 8)
+            self.assertNotIn("obj/test/libaggregate.a", run.call_args.args[0])
+
+    def test_legacy_aggregate_samples_cannot_substitute_for_leaf_objects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source, out, report = fixture(root)
+            handoff = json.loads(report.read_text(encoding="utf-8"))
+            handoff["compiled_output_action_samples"] = handoff["compiled_output_action_samples"][:7] + [
+                {"path": "obj/test/libaggregate.a", "sha256": "a" * 64, "bytes": 123}
+            ]
+            report.write_text(json.dumps(handoff), encoding="utf-8")
+            fake = subprocess.CompletedProcess(["autoninja"], 0, "ninja: no work to do.\\n", None)
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \\
+                 patch.object(M.subprocess, "run", return_value=fake):
+                with self.assertRaisesRegex(ReusePreflightError, "too few verified leaf-object"):
+                    M.verify_restored_output_reuse(
+                        root=root, source_root=source, stage=2, report_path=report, epoch=946684800
+                    )
+
     def test_siso_dry_run_invocation_is_not_mistaken_for_scheduled_targets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); source,out,report=fixture(root)
