@@ -486,9 +486,42 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         raise CheckpointError(f"Fresh GN output directory missing/unsafe: {output}")
     if backup.exists() or backup.is_symlink():
         raise CheckpointError(f"Refusing to overwrite preserved output backup: {backup}")
+
+    # GN has already generated a current graph in this job. The old restore code
+    # replaced that graph and its generator stamp with older cached copies, so
+    # Siso immediately ran "Regenerating ninja files" and scheduled thousands of
+    # cached object actions again. Preserve the current graph/stamp, but only when
+    # args.gn and build.ninja are byte-identical to the validated checkpoint.
+    # A graph mismatch is a compatibility failure, not something to paper over.
+    fresh_graph_files = ("args.gn", "build.ninja")
+    expected_files = meta.get("output_files", {})
+    for name in fresh_graph_files:
+        path = output / name
+        require_regular_nonempty(path)
+        expected = expected_files.get(name)
+        if not isinstance(expected, str) or sha256_file(path) != expected:
+            raise CheckpointError(
+                f"Fresh GN {name} differs from the identity-validated compiled-output checkpoint"
+            )
+    fresh_stamp = output / "build.ninja.stamp"
+    if not fresh_stamp.is_file() or fresh_stamp.is_symlink():
+        raise CheckpointError("Fresh GN build.ninja.stamp missing/unsafe; refusing stale-manifest restore")
+    print("SANDIUM_OUTPUT_CHECKPOINT_CURRENT_GRAPH_COMPATIBLE=PASS")
+
     os.replace(output, backup)
     try:
         os.replace(checkpoint, output)
+        verify_manifest_files(output, meta["output_files"])
+        # Retain the current job's args/manifest mtimes and generator stamp.
+        # Their bytes are identical to the saved graph, and their newer mtime
+        # prevents the first real Siso invocation from regenerating Ninja files
+        # and invalidating local object-output reuse.
+        for name in (*fresh_graph_files, "build.ninja.stamp"):
+            source = backup / name
+            destination = output / name
+            if not source.is_file() or source.is_symlink():
+                raise CheckpointError(f"Fresh GN generator file missing/unsafe: {name}")
+            shutil.copy2(source, destination)
         verify_manifest_files(output, meta["output_files"])
         restored_identity = source_identity(control, root, require_gn=True)
         if identity_digest(restored_identity) != meta["build_identity_sha256"]:
@@ -506,8 +539,10 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         if backup.exists():
             os.replace(backup, output)
         raise
-    # The backup is only freshly generated GN scaffolding, not cached compiled output.
+    # The backup contains only freshly generated graph scaffolding; cached
+    # compiled outputs and Siso filesystem state are now active in output.
     shutil.rmtree(backup)
+    print("SANDIUM_OUTPUT_CHECKPOINT_PRESERVED_CURRENT_GN_MANIFEST=PASS")
     report = {
         "schema": 1,
         "SANDIUM_STATE_HANDOFF": "RESTORED",
