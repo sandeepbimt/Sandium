@@ -37,6 +37,16 @@ def validate():
         errors.append("runner must record the regular-files-only timestamp policy")
     if 'output_checkpoint.py" restore' not in run_stage or 'output_checkpoint.py" pack' not in run_stage:
         errors.append("runner must restore and pack the full GN output tree")
+    if 'output_checkpoint.py" verify-reuse' not in run_stage:
+        errors.append("runner must verify sampled local compiled-output reuse after each build window")
+    if "compiled_output_inventory" not in output_checkpoint or "COMPILED_OUTPUT_MIN_FILES = 100" not in output_checkpoint:
+        errors.append("full-output checkpoints must inventory actual compiled object files")
+    if "compiled_output_action_samples" not in output_checkpoint or "MIN_REUSED_ACTION_SAMPLES = 3" not in output_checkpoint:
+        errors.append("checkpoint must bind Siso-reported object outputs to content hashes")
+    if "compiled_output_inventory_missing_from_predecessor_checkpoint" not in output_checkpoint:
+        errors.append("continuation stages must reject legacy checkpoints without compiled-output inventory")
+    if "SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=VERIFIED_LOCAL_OUTPUT_REUSE" not in output_checkpoint:
+        errors.append("the reuse verifier must emit explicit evidence, separate from checkpoint restore")
     if not manifest_preflight:
         errors.append("runner must have a dedicated manifest preflight helper")
     if 'manifest_preflight.py"' not in run_stage:
