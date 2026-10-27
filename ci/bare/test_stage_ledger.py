@@ -260,7 +260,7 @@ class StageLedgerTests(unittest.TestCase):
             manifest["apksigner_verification"] = "NOT_REQUESTED"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(IdentityError, "apksigner verification"):
-                MODULE.validate_artifact(apk, manifest_path, identity)
+                MODULE.validate_artifact(apk, manifest_path, identity, root)
 
     def test_ledger_never_adds_prior_stage_action_counts(self):
         identity = {"source": "Bare", "chromium_commit": "pinned", "gn_args_sha256": "gn"}
