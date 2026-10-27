@@ -344,8 +344,17 @@ python3 "$CONTROL/ci/bare/output_checkpoint.py" verify-reuse \
   --root "$ROOT" --stage "$STAGE" --metrics "$METRICS" --report "$STATE_REPORT"
 
 grep -oE '\[[[:space:]]*[0-9]+/[0-9]+\]' "$LOG" 2>/dev/null | sed -E 's/\[//;s/\]//;s/[[:space:]]//g' > "$ROOT/progress-$STAGE.txt" || true
-DONE="$(awk -F/ 'BEGIN{m=0} NF==2 && $1+0>m {m=$1+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
-OBSERVED_TOTAL="$(awk -F/ 'BEGIN{m=0} NF==2 && $2+0>m {m=$2+0} END{print m}' "$ROOT/progress-$STAGE.txt")"
+# A Siso invocation can regenerate its graph and emit more than one [done/total]
+# denominator. Taking the maximum numerator and maximum denominator independently
+# mixes counters from different graph versions (e.g. done=55304/65340 while an
+# earlier graph advertised 109068). Use the final complete counter pair instead.
+# Cross-stage denominator compatibility is still validated by normalize_progress_total.py.
+LAST_PROGRESS="$(awk -F/ 'NF==2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { last=$0 } END{ print last }' "$ROOT/progress-$STAGE.txt")"
+[[ -n "$LAST_PROGRESS" ]] || { echo "SANDIUM_PROGRESS_COUNTER_PARSE=FAIL no complete Siso progress pair" >&2; exit 52; }
+DONE="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f1)"
+OBSERVED_TOTAL="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f2)"
+echo "SANDIUM_PROGRESS_COUNTER_SOURCE=LAST_COMPLETE_PAIR"
+echo "SANDIUM_PROGRESS_COUNTER_PAIR=$DONE/$OBSERVED_TOTAL"
 if [[ "$STAGE" -eq 1 ]]; then
   TOTAL="$(python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage "$STAGE" --observed-total "$OBSERVED_TOTAL" --control "$CONTROL" --root "$ROOT")"
 else
