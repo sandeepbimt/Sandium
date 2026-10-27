@@ -8,7 +8,9 @@ from typing import Any
 OUTPUT_RELATIVE = Path("src/out/android_Debug_arm64")
 SISO_CONFIG_RELATIVE = Path("src/build/config/siso")
 SISO_INPUT_NAMES = (".sisoenv", ".sisorc")
-COMPILED_SUFFIXES = {".o", ".a", ".so"}
+# Only leaf object files are suitable samples for local compile reuse.
+# Archives/shared objects are aggregate outputs and may legitimately be relinked.
+COMPILED_SUFFIXES = {".o"}
 MIN_SAMPLE_COUNT = 8
 
 class ReusePreflightError(RuntimeError):
