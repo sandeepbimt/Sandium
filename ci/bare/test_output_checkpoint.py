@@ -254,19 +254,19 @@ class OutputCheckpointTests(unittest.TestCase):
                 "remote_action_cache_reuse_proven": True,
                 "artifact_verified": False,
             }), encoding="utf-8")
-            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \\
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
                  patch.object(M, "source_identity", return_value=IDENTITY):
                 self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
                 checkpoint = root / M.CHECKPOINT_NAME
                 output.mkdir(parents=True)
-                (output / "args.gn").write_text("use_siso=true\\n", encoding="utf-8")
-                (output / "build.ninja").write_text("different graph\\n", encoding="utf-8")
-                (output / "build.ninja.stamp").write_text("fresh stamp\\n", encoding="utf-8")
+                (output / "args.gn").write_text("use_siso=true\n", encoding="utf-8")
+                (output / "build.ninja").write_text("different graph\n", encoding="utf-8")
+                (output / "build.ninja.stamp").write_text("fresh stamp\n", encoding="utf-8")
                 with self.assertRaisesRegex(M.CheckpointError, "Fresh GN build.ninja differs"):
                     M.command_restore(root, control, 2, "wf-1", required=True)
                 self.assertTrue(checkpoint.is_dir(), "incompatible checkpoint must be preserved for diagnosis")
                 self.assertTrue(output.is_dir(), "fresh GN output must remain untouched on early rejection")
-                self.assertTrue((output / "build.ninja").read_text(encoding="utf-8") == "different graph\\n")
+                self.assertTrue((output / "build.ninja").read_text(encoding="utf-8") == "different graph\n")
 
     def test_local_compiled_output_reuse_requires_unchanged_prior_action_outputs(self):
         with tempfile.TemporaryDirectory() as temp:
