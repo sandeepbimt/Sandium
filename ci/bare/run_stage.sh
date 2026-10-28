@@ -146,7 +146,10 @@ fi
 python3 "$STATE_TOOL" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
 if [[ "$STAGE" -eq 1 ]]; then
   set +e
-  python3 "$CONTROL/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+  # Preserve a rejected Stage 1 candidate until the source-aware quality gate
+  # reports the concrete incompatibility. The old preflight quarantined it first,
+  # making the later gate misleadingly report only "directory missing".
+  python3 "$CONTROL/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --preserve-on-miss
   CHECKPOINT_PREFLIGHT_RC=$?
   set -e
   echo "SANDIUM_OUTPUT_CHECKPOINT_PREFLIGHT_EXIT_CODE=$CHECKPOINT_PREFLIGHT_RC"
