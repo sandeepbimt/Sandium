@@ -123,6 +123,10 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
         raise ReusePreflightError(f"State-handoff report is unreadable: {exc}") from exc
     if not isinstance(report, dict):
         raise ReusePreflightError("State-handoff report must be a JSON object")
+    if report.get("local_compiled_outputs_restored") is not True:
+        raise ReusePreflightError(
+            "No restored compiled-output checkpoint; full compile was not started"
+        )
     targets = safe_sample_paths(report, output)
     if not targets:
         raise ReusePreflightError(
