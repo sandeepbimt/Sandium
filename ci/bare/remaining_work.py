@@ -17,7 +17,7 @@ PAIR = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]\s+\S", re.M)
 NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
 SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps(?:\s+-\s+[\d.]+/s)?\s*$", re.M)
 SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
-SISO_SCHEDULE_EDGE = re.compile(r"schedule\\s+pending:\\d+\\+ready:\\d+\\s+\\(node:\\d+\\s+edge:(\\d+)\\)", re.I)
+SISO_SCHEDULE_EDGE = re.compile(r"schedule\s+pending:\d+\+ready:\d+\s+\(node:\d+\s+edge:(\d+)\)", re.I)
 
 
 class RemainingWorkError(RuntimeError):
