@@ -91,13 +91,16 @@ def gate_from_files(
 ) -> dict[str, int | str | None]:
     prior_remaining = None
     prior_graph_total = None
+    if state_report_path is None:
+        raise StageWorkGateError("restored-output handoff report path is required")
+    report = _read_object(state_report_path, "restored checkpoint handoff report")
+    if report.get("local_compiled_outputs_restored") is not True:
+        raise StageWorkGateError("handoff report does not prove full compiled-output checkpoint restoration")
     if stage == 1:
-        if state_report_path is not None and state_report_path.exists():
-            report = _read_object(state_report_path, "restored checkpoint handoff report")
-            prior_remaining = _optional_count(report, "source_remaining_actions_after_window")
-            prior_graph_total = _optional_count(
-                report, "source_graph_action_count", "source_total_action_count"
-            )
+        prior_remaining = _optional_count(report, "source_remaining_actions_after_window")
+        prior_graph_total = _optional_count(
+            report, "source_graph_action_count", "source_total_action_count"
+        )
     else:
         if previous_ledger_path is None:
             raise StageWorkGateError(f"Stage {stage} requires the immediate predecessor ledger")

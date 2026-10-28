@@ -73,6 +73,7 @@ class StageWorkGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "handoff.json"
             report.write_text(json.dumps({
+                "local_compiled_outputs_restored": True,
                 "source_remaining_actions_after_window": 52001,
                 "source_graph_action_count": 109040,
             }), encoding="utf-8")
@@ -81,6 +82,30 @@ class StageWorkGateTests(unittest.TestCase):
                 state_report_path=report, previous_ledger_path=None,
             )
             self.assertEqual(result["previous_remaining_actions"], 52001)
+
+    def test_saved_zero_remainder_is_not_treated_as_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "handoff.json"
+            report.write_text(json.dumps({
+                "local_compiled_outputs_restored": True,
+                "source_remaining_actions_after_window": 0,
+                "source_graph_action_count": 109040,
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(M.StageWorkGateError, "differs from saved previous remaining work"):
+                M.gate_from_files(
+                    stage=1, pending=1000, graph_total=109040,
+                    state_report_path=report, previous_ledger_path=None,
+                )
+
+    def test_stage_one_cannot_pass_using_placeholder_handoff_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "handoff.json"
+            report.write_text(json.dumps({"SANDIUM_STATE_HANDOFF": "NOT_RUN"}), encoding="utf-8")
+            with self.assertRaisesRegex(M.StageWorkGateError, "does not prove full compiled-output checkpoint restoration"):
+                M.gate_from_files(
+                    stage=1, pending=52001, graph_total=109040,
+                    state_report_path=report, previous_ledger_path=None,
+                )
 
     def test_gate_reads_stage_two_count_from_predecessor_ledger(self):
         with tempfile.TemporaryDirectory() as directory:

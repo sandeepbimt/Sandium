@@ -855,11 +855,14 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "max_completed_actions": int(ledger.get("max_completed_actions", 0) or 0),
             "total_action_count": int(ledger.get("total_action_count", 0) or 0),
             "graph_action_count": int(ledger.get("graph_action_count", ledger.get("total_action_count", 0)) or 0),
+            # Zero is meaningful evidence (no pending actions); do not turn it into unknown.
             "required_actions_at_start": (
-                int(ledger.get("required_actions_at_start", 0) or 0) or None
+                int(ledger["required_actions_at_start"])
+                if ledger.get("required_actions_at_start") is not None else None
             ),
             "remaining_actions_after_window": (
-                int(ledger.get("remaining_actions_after_window", 0) or 0) or None
+                int(ledger["remaining_actions_after_window"])
+                if ledger.get("remaining_actions_after_window") is not None else None
             ),
             "build_ninja_sha256": files.get("build.ninja"),
             "remote_execution_proven": bool(ledger.get("remote_execution_proven", False)),

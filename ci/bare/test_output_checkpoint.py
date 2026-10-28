@@ -248,6 +248,35 @@ class OutputCheckpointTests(unittest.TestCase):
             self.assertIn(".siso_fs_state.journal", manifest)
             self.assertNotIn(".siso_fs_state", manifest)
 
+    def test_pack_preserves_zero_remaining_actions_as_measured_zero(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            add_checkpoint_evidence(root, output)
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 100,
+                "total_action_count": 1000,
+                "graph_action_count": 1000,
+                "required_actions_at_start": 100,
+                "remaining_actions_after_window": 0,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": True,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \\
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+            metadata = M.read_json(root / M.CHECKPOINT_NAME / M.META_NAME)
+            self.assertEqual(metadata["remaining_actions_after_window"], 0)
+            self.assertEqual(metadata["required_actions_at_start"], 100)
+            self.assertEqual(metadata["graph_action_count"], 1000)
+
     def test_pack_and_restore_full_output_checkpoint_end_to_end(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

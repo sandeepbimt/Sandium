@@ -219,7 +219,8 @@ jobs:
           assert "stage_work_gate.py" in runner, "compile must pass the measured-work acceptance gate before starting"
           assert "SANDIUM_STAGE_WORK_GATE=PASS" in stage_work_gate
           assert "source_remaining_actions_after_window" in stage_work_gate
-          assert "pending_compile count differs from saved" not in stage_work_gate
+          assert "measured pending compile count differs from saved previous remaining work" in stage_work_gate
+          assert 'report.get("local_compiled_outputs_restored") is not True' in stage_work_gate
           remaining_work = Path("ci/bare/remaining_work.py").read_text(encoding="utf-8")
           assert "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" in remaining_work
           assert '"graph_action_count"' in remaining_work and '"pending_actions"' in remaining_work
