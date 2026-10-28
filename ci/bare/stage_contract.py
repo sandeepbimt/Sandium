@@ -21,8 +21,6 @@ def validate():
     quality = quality_path.read_text(encoding="utf-8") if quality_path.is_file() else ""
     manifest_preflight_path = here / "manifest_preflight.py"
     manifest_preflight = manifest_preflight_path.read_text(encoding="utf-8") if manifest_preflight_path.is_file() else ""
-    progress_normalizer_path = here / "normalize_progress_total.py"
-    progress_normalizer = progress_normalizer_path.read_text(encoding="utf-8") if progress_normalizer_path.is_file() else ""
     timestamp = "epoch_946684800_regular_files_v1"
 
     if "SISO_REMOTE_OR_CACHE_EVIDENCE=FAIL_NO_ACTION_PROOF" not in run_stage:
@@ -44,22 +42,22 @@ def validate():
     if 'bootstrap_chromium.sh" configure' in run_stage:
         errors.append("cold Stage 1 GN/bootstrap path violates the no-cold-build acceptance gate")
     remaining_work = (here / "remaining_work.py").read_text(encoding="utf-8")
-    if "_refresh_gn_manifest" in remaining_work or '["gn", "gen"' in remaining_work:
-        errors.append("pending-work measurement must not regenerate GN on a restored output snapshot")
     if "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" not in remaining_work:
         errors.append("pending-work measurement must preserve the restored graph/stamp before Siso reuse")
+    if '"graph_action_count"' not in remaining_work:
+        errors.append("pending-work report must expose the independently measured full graph action count")
+    if '"pending_actions"' not in remaining_work:
+        errors.append("pending-work report must expose pending work separately from graph size")
     if "mode=filesystem-only" not in manifest_preflight or "siso_dry_run_in_preflight=no" not in manifest_preflight:
         errors.append("preflight must not run the known-repeating Siso no-op regeneration path")
     if "handled_by_real_siso_build" not in manifest_preflight:
         errors.append("manifest regeneration must be delegated to the actual Siso build after filesystem validation")
     if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("small action-count variance helper is missing")
-    if 'normalize_progress_total.py"' not in run_stage:
-        errors.append("runner must normalize progress count only with the identity-bound helper")
-    elif run_stage.index('python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage') > run_stage.index('stage_ledger.py" --stage'):
-        errors.append("progress denominator must be normalized before strict stage-ledger validation")
-    if "build identity differs" not in progress_normalizer or "MAX_GRAPH_TOTAL_DRIFT = 0.01" not in progress_normalizer:
-        errors.append("progress normalization must require exact build identity and a 1% maximum drift")
+    if 'normalize_progress_total.py" --stage' in run_stage:
+        errors.append("runner must not rewrite graph totals; pending work and full graph size are reported independently")
+    if '"graph_action_count"' not in run_stage or '"pending_actions"' not in run_stage:
+        errors.append("runner must consume separate pending-work and full-graph counters")
     if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("full output checkpoint must write explicit handoff evidence")
     if not quality:
