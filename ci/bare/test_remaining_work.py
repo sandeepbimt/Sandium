@@ -43,6 +43,18 @@ noexec:0 local:0 remote:0 cache:0 skip:52498
         with self.assertRaisesRegex(M.RemainingWorkError, "no Ninja action rows"):
             M.parse_pending_actions("Siso finished successfully\n")
 
+    def test_real_siso_manifest_regeneration_zero_steps_is_not_a_measurement(self):
+        output = """depot_tools/siso.py: ninja -re_cache_enable_write=true -n -C out chrome_public_apk
+schedule pending:1+ready:0 (node:591352 edge:2)
+build start: Ready 1 Pending 1
+../../buildtools/linux64/gn --root=../.. -q --regeneration gen .
+rebuild manifest finished
+ 0.07s Regenerating ninja files
+ 8.34s Build Succeeded: 0 steps - 0.00/s
+"""
+        with self.assertRaisesRegex(M.RemainingWorkError, "no Ninja action rows"):
+            M.parse_pending_actions(output)
+
     def test_mixed_denominators_fail_closed(self):
         with self.assertRaisesRegex(M.RemainingWorkError, "denominator changed"):
             M.parse_pending_actions("[1/2] compile a.o\n[1/3] compile b.o\n")

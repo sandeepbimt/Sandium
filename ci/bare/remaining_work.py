@@ -76,35 +76,63 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
     if not autoninja:
         raise RemainingWorkError("autoninja not found; cannot measure pending work safely")
     command = [autoninja, "-n", "-C", str(output_dir), "chrome_public_apk"]
-    try:
-        run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, errors="replace",
-                             timeout=timeout_seconds, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise RemainingWorkError(f"no-build dry run timed out after {timeout_seconds}s") from exc
-    if run.returncode != 0:
-        raise RemainingWorkError(f"no-build dry run failed with exit {run.returncode}")
-    output = run.stdout or ""
-    print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
-    print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
-    try:
-        count = parse_pending_actions(output)
-    except RemainingWorkError:
-        # The driver log is retained as a CircleCI artifact. Include a bounded
-        # sample so an unsupported Siso/autoninja -n format can be diagnosed
-        # without spending a compile window. Never proceed on an unknown format.
-        lines = output.splitlines()
-        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
-        for line in lines[:30]:
-            print(line[:500])
-        if len(lines) > 30:
-            print(f"... {len(lines) - 30} additional dry-run lines omitted ...")
-            for line in lines[-10:]:
-                print(line[:500])
-        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
-        raise
-    if sha256_file(graph) != graph_before or sha256_file(args_gn) != args_hash:
-        raise RemainingWorkError("GN/Ninja graph or args changed during pending-work measurement")
+    output = ""
+    count = None
+    # The pinned Siso version may use a no-build invocation only to regenerate
+    # GN manifests, then report "Build Succeeded: 0 steps" without showing the
+    # target's pending actions. Never interpret that as zero work. Retry as a
+    # fresh process after regeneration, and accept only a parseable measurement.
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        graph_before = sha256_file(graph)
+        args_hash = sha256_file(args_gn)
+        try:
+            run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, errors="replace",
+                                 timeout=timeout_seconds, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise RemainingWorkError(
+                f"no-build dry run attempt {attempt}/{max_attempts} timed out after {timeout_seconds}s"
+            ) from exc
+        output = run.stdout or ""
+        print(f"SANDIUM_PENDING_WORK_DRY_RUN_ATTEMPT={attempt}/{max_attempts}")
+        print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
+        print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
+        if run.returncode != 0:
+            raise RemainingWorkError(
+                f"no-build dry run attempt {attempt} failed with exit {run.returncode}"
+            )
+        try:
+            count = parse_pending_actions(output)
+            if sha256_file(graph) != graph_before or sha256_file(args_gn) != args_hash:
+                raise RemainingWorkError(
+                    "GN/Ninja graph or args changed during pending-work measurement"
+                )
+            break
+        except RemainingWorkError as exc:
+            regen_only = (
+                "Regenerating ninja files" in output
+                and re.search(r"Build Succeeded: 0 steps", output) is not None
+            )
+            if not regen_only or attempt == max_attempts:
+                lines = output.splitlines()
+                print(f"SANDIUM_PENDING_WORK_DRY_RUN_PARSE_ERROR={exc}")
+                print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
+                for line in lines[:30]:
+                    print(line[:500])
+                if len(lines) > 30:
+                    print(f"... {len(lines) - 30} additional dry-run lines omitted ...")
+                    for line in lines[-10:]:
+                        print(line[:500])
+                print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
+                raise
+            print(
+                "SANDIUM_PENDING_WORK_DRY_RUN_RETRY=MANIFEST_REGENERATION_ONLY "
+                f"next_attempt={attempt + 1}"
+            )
+    else:
+        raise RemainingWorkError("pending-work dry run exhausted retries without a measurement")
+    assert count is not None
     report = {
         "schema": 1, "stage": stage, "phase": phase,
         "pending_actions": count,
