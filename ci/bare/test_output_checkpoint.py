@@ -116,7 +116,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
             }), encoding="utf-8")
-            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
                 meta = M.validate_candidate(root, control, 2, "wf-1", pre_source=True, required=True)
             self.assertIsNotNone(meta)
             self.assertEqual(meta["stage"], 1)
@@ -136,7 +136,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "old-wf", "stage_record_valid": True,
             }), encoding="utf-8")
-            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
                 with self.assertRaises(M.CheckpointError):
                     M.validate_candidate(root, control, 2, "new-wf", pre_source=True, required=True)
 
@@ -155,7 +155,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "control_inputs": CONTROL_HASHES, "output_files": files, "output_mtime_ns": M.output_mtime_manifest(checkpoint),
                 "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
             }), encoding="utf-8")
-            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
                 result = M.validate_candidate(root, control, 1, "new-wf", pre_source=True, required=False)
             self.assertIsNone(result)
             self.assertFalse(checkpoint.exists())
