@@ -145,7 +145,7 @@ class Tests(unittest.TestCase):
             }))
             with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
                  patch.object(M.subprocess, "run") as run:
-                with self.assertRaisesRegex(M.ReusePreflightError, "no verified leaf-object samples"):
+                with self.assertRaisesRegex(M.ReusePreflightError, "too few verified leaf-object action samples"):
                     M.verify_restored_output_reuse(root=root, source_root=source, stage=1,
                                                    report_path=report, epoch=946684800)
             run.assert_not_called()
@@ -163,7 +163,7 @@ class Tests(unittest.TestCase):
             (root/M.OUTPUT_RELATIVE/"build.ninja.stamp").write_text("stamp\n")
             report=root/"sandium-state-handoff-report.json"
             report.write_text(json.dumps({"local_compiled_outputs_restored":False,"compiled_output_action_samples":[]}))
-            with self.assertRaisesRegex(M.ReusePreflightError,"no restored compiled-output checkpoint"):
+            with self.assertRaisesRegex(M.ReusePreflightError,"[Nn]o restored compiled-output checkpoint"):
                 M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
     def test_symlinked_or_missing_siso_config_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
