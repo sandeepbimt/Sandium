@@ -187,7 +187,7 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
             partial = exc.stdout or ""
             if isinstance(partial, bytes):
                 partial = partial.decode("utf-8", errors="replace")
-            explain_path.write_text(str(partial) + f"\\nREUSE_EXPLAIN_TIMEOUT_SECONDS={timeout_seconds}\\n", encoding="utf-8")
+            explain_path.write_text(str(partial) + f"\nREUSE_EXPLAIN_TIMEOUT_SECONDS={timeout_seconds}\n", encoding="utf-8")
             print(f"SANDIUM_LOCAL_OUTPUT_REUSE_EXPLAIN=TIMEOUT after {timeout_seconds}s")
         raise ReusePreflightError(f"Restored outputs are scheduled for rebuild ({len(scheduled)}/{len(targets)} samples); full build was not started: {details}; see {log_path} and {explain_path}")
     # No matching target row is not proof of a no-op. Siso may emit wrapper or
