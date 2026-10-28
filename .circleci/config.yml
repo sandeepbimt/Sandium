@@ -206,6 +206,9 @@ jobs:
                   # Safe cross-fingerprint fallback: strict checkpoint identity/control-file validation runs
                   # before any candidate can be restored into the active build tree or used for compilation.
                   - sandium-output-good-v5-
+                  # Recovery fallback for a saved interrupted-stage snapshot. The Stage 1
+                  # checkpoint preflight and source/build identity checks remain mandatory.
+                  - sandium-output-partial-v1-
                   # One-time migration fallback; only the known-good legacy Stage 1 key is eligible.
                   # Its old full-CI fingerprint is fixed here so orchestration edits do not orphan it.
                   - sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-
