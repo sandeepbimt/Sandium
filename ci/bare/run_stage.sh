@@ -480,9 +480,10 @@ DONE="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f1)"
 OBSERVED_TOTAL="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f2)"
 echo "SANDIUM_PROGRESS_COUNTER_SOURCE=LAST_COMPLETE_PAIR"
 echo "SANDIUM_PROGRESS_COUNTER_PAIR=$DONE/$OBSERVED_TOTAL"
-TOTAL="$START_GRAPH_TOTAL"
-echo "SANDIUM_SISO_PROGRESS_DISPLAY_TOTAL=$OBSERVED_TOTAL"
-echo "SANDIUM_GRAPH_ACTION_COUNT=$TOTAL"
+GRAPH_TOTAL="$START_GRAPH_TOTAL"
+echo "SANDIUM_RAW_GRAPH_PROGRESS_DISPLAY_TOTAL=$OBSERVED_TOTAL"
+echo "SANDIUM_PROGRESS_DISPLAY_DENOMINATOR_IS_NOT_EFFECTIVE_COMPILE_TOTAL=true"
+echo "SANDIUM_GRAPH_ACTION_COUNT=$GRAPH_TOTAL"
 echo "SANDIUM_TOTAL_ACTION_COUNT=$START_PENDING"
 echo "SANDIUM_TOTAL_COMPILE_ACTIONS_AFTER_REUSE=$START_PENDING"
 APK="$OUT/apks/ChromePublic.apk"; COMPLETE=false
@@ -493,9 +494,9 @@ else
   PREV_ARGS=(--previous "$PREV")
 fi
 if [[ "$COMPLETE" == true ]]; then
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$GRAPH_TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}" --apk "$ROOT/sandium-output/Sandium-debug-arm64.apk" --manifest "$ROOT/sandium-output/build-manifest.json"
 else
-  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
+  python3 "$CONTROL/ci/bare/stage_ledger.py" --stage "$STAGE" --metrics "$METRICS" --siso-log "$LOG" --output "$LEDGER" --root "$ROOT" --completed-actions "$DONE" --total-actions "$GRAPH_TOTAL" --required-actions-at-start "$START_PENDING" --remaining-actions-after-window "$END_PENDING" --source-timestamp-policy "$TS_POLICY" --state-handoff-report "$STATE_REPORT" "${PREV_ARGS[@]}"
 fi
 CUMULATIVE_DONE="$(python3 - "$LEDGER" <<'PY'
 import json,sys
@@ -516,10 +517,10 @@ import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_identity_sha256"])
 PY
 )"
-  printf 'BUILD_FINISHED=true\nAPK_ARCHIVE_VALID=true\nAPK_SIGNATURE_VERIFIED=true\nAPK_SHA256=%s\nAPK_SIZE_BYTES=%s\nBUILD_IDENTITY_SHA256=%s\nSTAGE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$HASH" "$BYTES" "$ID" "$STAGE" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$TOTAL" > "$STATUS"
+  printf 'BUILD_FINISHED=true\nAPK_ARCHIVE_VALID=true\nAPK_SIGNATURE_VERIFIED=true\nAPK_SHA256=%s\nAPK_SIZE_BYTES=%s\nBUILD_IDENTITY_SHA256=%s\nSTAGE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_GRAPH_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\nTOTAL_COMPILE_ACTIONS_AFTER_REUSE=%s\nGRAPH_ACTION_COUNT=%s\nREMAINING_ACTIONS_AFTER_WINDOW=%s\n' "$HASH" "$BYTES" "$ID" "$STAGE" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$START_PENDING" "$START_PENDING" "$GRAPH_TOTAL" "$END_PENDING" > "$STATUS"
   echo "SANDIUM_APK_READY=true"; echo "SANDIUM_APK_SHA256=$HASH"; echo "SANDIUM_APK_BYTES=$BYTES"
 else
-  printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\n' "$STAGE" "$RET" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$TOTAL" > "$STATUS"
+  printf 'BUILD_FINISHED=false\nSTAGE=%s\nBUILD_EXIT_CODE=%s\nMAX_COMPLETED_ACTIONS=%s\nSTAGE_COMPLETED_ACTIONS=%s\nCUMULATIVE_COMPLETED_ACTIONS=%s\nESTIMATED_REMAINING_GRAPH_ACTIONS=%s\nTOTAL_ACTION_COUNT=%s\nTOTAL_COMPILE_ACTIONS_AFTER_REUSE=%s\nGRAPH_ACTION_COUNT=%s\nREMAINING_ACTIONS_AFTER_WINDOW=%s\n' "$STAGE" "$RET" "$CUMULATIVE_DONE" "$DONE" "$CUMULATIVE_DONE" "$REMAINING_ESTIMATE" "$START_PENDING" "$START_PENDING" "$GRAPH_TOTAL" "$END_PENDING" > "$STATUS"
   echo SANDIUM_APK_READY=false
 fi
 echo "DIAG_SISO_STATE_FILES_BEGIN"

@@ -96,6 +96,30 @@ def progress_accounting_fields(stage_done: int, watermark: int, total: int) -> d
     }
 
 
+
+def graph_action_count_from_ledger(ledger: dict) -> int:
+    """Read the raw graph denominator, migrating older ledgers with the former field semantics."""
+    return int(ledger.get("graph_action_count", ledger.get("total_action_count", 0)) or 0)
+
+
+def stage_count_fields(graph_total: int, effective_total: int, remaining_after_window: int) -> dict:
+    """Keep total_action_count tied to real measured pending compile actions."""
+    if graph_total <= 0:
+        raise IdentityError("Graph action count must be positive")
+    if effective_total < 0 or effective_total > graph_total:
+        raise IdentityError("Effective compile total must be between zero and the graph action count")
+    if remaining_after_window < 0 or remaining_after_window > effective_total:
+        raise IdentityError("Remaining compile actions must be between zero and effective stage-start work")
+    return {
+        "total_action_count": effective_total,
+        "graph_action_count": graph_total,
+        "total_compile_actions_at_stage_start": effective_total,
+        "pending_compile_actions_after_window": remaining_after_window,
+        "actions_not_pending_at_stage_start": graph_total - effective_total,
+        "total_action_count_basis": "measured_siso_pending_steps_after_restored_output_reuse",
+    }
+
+
 def required_work_accounting(total: int, watermark: int, previous: dict | None,
                             handoff: dict, measured_start: int | None = None,
                             measured_end: int | None = None) -> dict:
@@ -186,7 +210,7 @@ def cumulative_progress(stage: int, done: int, total: int, previous: dict | None
     else:
         if previous is None:
             raise IdentityError("Continuation stage requires previous ledger")
-        prior_total = int(previous.get("total_action_count", 0) or 0)
+        prior_total = graph_action_count_from_ledger(previous)
         if prior_total and prior_total != total:
             raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
         if handoff.get("local_compiled_outputs_restored") is not True:
@@ -230,7 +254,7 @@ def validate_progress(stage: int, metrics: dict, done: int, total: int,
         return "REMOTE_EXECUTION_OR_CACHE_WITH_PROGRESS"
     if previous is None:
         raise IdentityError("Continuation stage requires previous ledger")
-    prior_total = int(previous.get("total_action_count", 0))
+    prior_total = graph_action_count_from_ledger(previous)
     if prior_total and prior_total != total:
         raise IdentityError(f"Build graph action count changed: prior={prior_total} current={total}")
     # In an incremental continuation the remaining slice should get smaller,
@@ -332,13 +356,9 @@ def main() -> int:
               **work_accounting,
               "build_ninja_sha256": graph_hash,
               **accounting,
-              # Legacy field kept for consumers as the maximum graph/action
-              # denominator observed in this stage. Stage-to-stage compile work
-              # is recorded separately because valid local reuse reduces it.
-              "total_action_count": a.total_actions,
-              "graph_action_count": a.total_actions,
-              "total_compile_actions_at_stage_start": required_at_start,
-              "pending_compile_actions_after_window": remaining_after_window,
+              # User-facing total is the measured pending work after restored outputs.
+              # Raw build graph size stays separate for graph identity/continuity checks.
+              **stage_count_fields(a.total_actions, required_at_start, remaining_after_window),
               "evidence": evidence,
               "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
               "state_handoff": handoff, "state_handoff_report_sha256": sha(a.state_handoff_report), **artifact}

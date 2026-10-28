@@ -741,6 +741,7 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
         "checkpoint_kind": meta.get("checkpoint_kind", "unknown"),
         "source_max_completed_actions": meta.get("max_completed_actions", 0),
         "source_total_action_count": meta.get("total_action_count", 0),
+        "source_graph_action_count": meta.get("graph_action_count", meta.get("total_action_count", 0)),
         "source_required_actions_at_start": meta.get("required_actions_at_start"),
         "source_remaining_actions_after_window": meta.get("remaining_actions_after_window"),
         "build_ninja_sha256": meta.get("output_files", {}).get("build.ninja"),
@@ -829,6 +830,7 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             ),
             "max_completed_actions": int(ledger.get("max_completed_actions", 0) or 0),
             "total_action_count": int(ledger.get("total_action_count", 0) or 0),
+            "graph_action_count": int(ledger.get("graph_action_count", ledger.get("total_action_count", 0)) or 0),
             "required_actions_at_start": (
                 int(ledger.get("required_actions_at_start", 0) or 0) or None
             ),

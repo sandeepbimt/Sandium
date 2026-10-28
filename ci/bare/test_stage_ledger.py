@@ -121,6 +121,28 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(next_stage["remaining_actions_after_window"], 35)
         self.assertEqual(next_stage["required_work_reduction_vs_predecessor_remaining"], 25)
 
+    def test_user_total_is_measured_remaining_compile_work_not_raw_graph_size(self):
+        fields = M.stage_count_fields(
+            graph_total=109040,
+            effective_total=53587,
+            remaining_after_window=52001,
+        )
+        self.assertEqual(fields["total_action_count"], 53587)
+        self.assertEqual(fields["total_compile_actions_at_stage_start"], 53587)
+        self.assertEqual(fields["graph_action_count"], 109040)
+        self.assertEqual(fields["actions_not_pending_at_stage_start"], 55453)
+        self.assertEqual(fields["pending_compile_actions_after_window"], 52001)
+        self.assertEqual(
+            fields["total_action_count_basis"],
+            "measured_siso_pending_steps_after_restored_output_reuse",
+        )
+
+    def test_new_ledger_graph_continuity_uses_graph_count_not_effective_total(self):
+        previous = {"total_action_count": 53587, "graph_action_count": 109040}
+        self.assertEqual(M.graph_action_count_from_ledger(previous), 109040)
+        legacy = {"total_action_count": 109040}
+        self.assertEqual(M.graph_action_count_from_ledger(legacy), 109040)
+
     def test_required_work_estimate_rejects_invalid_watermark(self):
         with self.assertRaisesRegex(M.IdentityError, "Invalid graph total or progress watermark"):
             M.required_work_accounting(100, 101, None, {})

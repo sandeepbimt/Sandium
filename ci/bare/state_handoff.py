@@ -69,7 +69,7 @@ def useful(meta: dict) -> bool:
     if not isinstance(ledger, dict):
         return False
     progress = int(ledger.get("max_completed_actions", 0) or 0)
-    total = int(ledger.get("total_action_count", 0) or 0)
+    total = int(ledger.get("graph_action_count", ledger.get("total_action_count", 0)) or 0)
     metrics = ledger.get("metrics", {})
     remote = bool(
         ledger.get("remote_execution_proven")
@@ -413,6 +413,7 @@ def restore(root: Path, control: Path, archive: Path, meta_path: Path,
             "build_identity_sha256": ident_hash, "state_files_restored": restored,
             "source_max_completed_actions": int(ledger.get("max_completed_actions", 0)),
             "source_total_action_count": int(ledger.get("total_action_count", 0)),
+            "source_graph_action_count": int(ledger.get("graph_action_count", ledger.get("total_action_count", 0)) or 0),
             "source_remote_execution_proven": bool(ledger.get("remote_execution_proven")),
             "source_remote_action_cache_reuse_proven": bool(ledger.get("remote_action_cache_reuse_proven")),
             "local_compiled_outputs_restored": False,

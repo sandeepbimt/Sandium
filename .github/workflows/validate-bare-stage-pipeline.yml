@@ -113,16 +113,20 @@ jobs:
           assert "sandium-state-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
           legacy_output_key = "sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-"
           assert legacy_output_key in config, "the known-good legacy Stage 1 output checkpoint must remain reachable"
-          generic_good_fallback = config.index("\n                  - sandium-output-good-v5-\n")
-          assert generic_good_fallback > config.index("Restore the best green validated compiled-output checkpoint")
-          assert generic_good_fallback < config.index(legacy_output_key), (
-              "broad fallback may select only a good v5 checkpoint and must precede the older v3 migration key"
+          restore_start = config.index("name: Restore the best green validated compiled-output checkpoint")
+          restore_end = config.index("      - when:", restore_start)
+          restore_block = config[restore_start:restore_end]
+          legacy_output_key = "sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-"
+          assert legacy_output_key in restore_block, "known-good legacy Stage 1 cache must remain reachable"
+          green_lines = [i for i, line in enumerate(restore_block.splitlines()) if "- sandium-output-good-v5-" in line]
+          partial_lines = [i for i, line in enumerate(restore_block.splitlines()) if "- sandium-output-partial-v1-" in line]
+          assert green_lines and partial_lines and max(green_lines) < min(partial_lines), (
+              "all green checkpoint keys must precede every partial key because restore_cache stops at its first match"
           )
-          generic_partial_fallback = config.index("\n                  - sandium-output-partial-v1-\n")
-          assert generic_good_fallback < generic_partial_fallback < config.index(legacy_output_key), (
-              "interrupted-stage recovery must be attempted after green output caches and before the legacy migration key"
-          )
-          assert "Recovery fallback for a saved interrupted-stage snapshot" in config
+          legacy_line = next(i for i, line in enumerate(restore_block.splitlines()) if legacy_output_key in line)
+          assert legacy_line < min(partial_lines), "known-good legacy checkpoint must not be shadowed by partial cache"
+          assert "Cross-fingerprint green fallback" in restore_block
+          assert "Only if no green checkpoint exists, try interrupted snapshots" in restore_block
           assert "strict checkpoint identity/control-file validation runs" in config
           for failed_stage in (2, 3, 4, 5):
               assert f"sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-{failed_stage}-" not in config
@@ -161,6 +165,9 @@ jobs:
           assert "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=MISS_OR_WRONG_PATH" in config
           assert "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=SYMLINK" in config
           assert "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE" in config
+          assert 'TOTAL_ACTION_COUNT=%s\\nTOTAL_COMPILE_ACTIONS_AFTER_REUSE=%s\\nGRAPH_ACTION_COUNT=%s' in runner
+          assert 'SANDIUM_RAW_GRAPH_PROGRESS_DISPLAY_TOTAL=$OBSERVED_TOTAL' in runner
+          assert '"total_action_count": effective_total' in Path("ci/bare/stage_ledger.py").read_text(encoding="utf-8")
           build_step = config.index("Build one bounded incremental window")
           good_output_save = config.index("Save only a quality-validated green compiled-output checkpoint for reuse")
           good_state_save = config.index("Save only successful stage metadata and state capsule for future selection")
