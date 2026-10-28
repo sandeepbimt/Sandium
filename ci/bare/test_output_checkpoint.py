@@ -137,38 +137,29 @@ class OutputCheckpointTests(unittest.TestCase):
             self.assertIsNotNone(meta)
             self.assertEqual(meta["stage"], 1)
 
-    def test_stage_one_migrates_legacy_checkpoint_without_mtime_manifest_but_requires_live_reuse_proof(self):
+    def test_stage_one_rejects_legacy_checkpoint_without_original_mtime_manifest(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             control = root / "control"
             control.mkdir()
             checkpoint = root / M.CHECKPOINT_NAME
             files = make_output(checkpoint)
-            evidence = add_checkpoint_evidence(root, checkpoint)
-            meta_path = checkpoint / M.META_NAME
             meta = {
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
                 "control_inputs": CONTROL_HASHES, "output_files": files,
-                **evidence,
+                **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "old-wf", "stage_record_valid": True,
             }
-            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+            (checkpoint / M.META_NAME).write_text(json.dumps(meta), encoding="utf-8")
             with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
-                migrated = M.validate_candidate(
+                result = M.validate_candidate(
                     root, control, 1, "new-wf", pre_source=True, required=False,
                     preserve_on_miss=True,
                 )
-            self.assertIsNotNone(migrated)
-            self.assertEqual(
-                migrated["output_mtime_migration"],
-                "reconstructed_from_restored_cache; requires_live_siso_reuse_preflight",
-            )
-            self.assertTrue(migrated["output_mtime_ns"])
-            persisted = json.loads(meta_path.read_text(encoding="utf-8"))
-            self.assertEqual(persisted["output_mtime_ns"], migrated["output_mtime_ns"])
-            self.assertNotIn(M.META_NAME, migrated["output_mtime_ns"])
+            self.assertIsNone(result)
+            self.assertTrue(checkpoint.is_dir(), "rejected checkpoint must remain available for diagnosis")
 
     def test_continuation_stage_rejects_legacy_checkpoint_without_mtime_manifest(self):
         with tempfile.TemporaryDirectory() as temp:
