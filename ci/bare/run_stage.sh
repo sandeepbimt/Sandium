@@ -296,9 +296,9 @@ python3 "$CONTROL/ci/bare/manifest_preflight.py" \
   --control "$CONTROL" --root "$ROOT" --source-root "$SRC" --output-dir "$OUT" \
   --stage "$STAGE" --log "$ROOT/stage-$STAGE-manifest-preflight.log" --timeout-seconds 180
 
-# remaining_work.py explicitly refreshes GN manifests before the full-target
-# dry run. Its measured graph hash must match the sampled compiled-output reuse
-# proof below; an unmeasured regeneration-only dry run is a hard failure.
+# Measure pending work against the identity-validated restored graph. The
+# restored-graph path must preserve build.ninja and its stamp; its graph hash
+# must match the independent compiled-output reuse proof below.
 START_WORK_REPORT="$ROOT/pending-work-$STAGE-start.json"
 python3 "$CONTROL/ci/bare/remaining_work.py" \
   --source-root "$SRC" --output-dir "$OUT" --stage "$STAGE" --phase start \
@@ -468,10 +468,9 @@ echo "SANDIUM_REQUIRED_WORK_REDUCTION_VS_PREDECESSOR_REMAINING=$(( START_PENDING
 
 grep -oE '\[[[:space:]]*[0-9]+/[0-9]+\]' "$LOG" 2>/dev/null | sed -E 's/\[//;s/\]//;s/[[:space:]]//g' > "$ROOT/progress-$STAGE.txt" || true
 # A Siso invocation can regenerate its graph and emit more than one [done/total]
-# denominator. Taking the maximum numerator and maximum denominator independently
-# mixes counters from different graph versions (e.g. done=55304/65340 while an
-# earlier graph advertised 109068). Use the final complete counter pair instead.
-# Cross-stage denominator compatibility is still validated by normalize_progress_total.py.
+# denominator. Taking independent maxima mixes counters from different graph
+# versions. Keep the final complete pair for diagnostics only; stage continuity
+# is governed by identity-bound pending-work and graph-action measurements.
 LAST_PROGRESS="$(awk -F/ 'NF==2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { last=$0 } END{ print last }' "$ROOT/progress-$STAGE.txt")"
 [[ -n "$LAST_PROGRESS" ]] || { echo "SANDIUM_PROGRESS_COUNTER_PARSE=FAIL no complete Siso progress pair" >&2; exit 52; }
 DONE="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f1)"
