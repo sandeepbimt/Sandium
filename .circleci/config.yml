@@ -285,16 +285,39 @@ jobs:
             find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\n' | sed -n '1,30p'
             if [[ ! -f "$META" || -L "$META" ]]; then
               echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE"
-              exit 59
-            fi
-            echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=FOUND"
-            stat -c 'metadata_bytes=%s metadata_mtime=%y' "$META"
-            if [[ "<< parameters.stage_index >>" == "1" ]]; then
-              python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage 1 --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --preserve-on-miss
+              if [[ "<< parameters.stage_index >>" != "1" || -L "$META" ]]; then
+                exit 59
+              fi
+              CHECKPOINT_RC=1
+              echo "SANDIUM_OUTPUT_CHECKPOINT_PREFLIGHT=MISS_LEGACY_STAGE1"
             else
-              python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "<< parameters.stage_index >>" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
+              echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=FOUND"
+              stat -c 'metadata_bytes=%s metadata_mtime=%y' "$META"
+              if [[ "<< parameters.stage_index >>" == "1" ]]; then
+                set +e
+                python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage 1 --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --preserve-on-miss
+                CHECKPOINT_RC=$?
+                set -e
+              else
+                python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "<< parameters.stage_index >>" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
+                CHECKPOINT_RC=0
+              fi
             fi
-            echo "SANDIUM_OUTPUT_CHECKPOINT_EARLY_PREFLIGHT=PASS"
+            if [[ "$CHECKPOINT_RC" -ne 0 ]]; then
+              # A legacy Stage 1 snapshot is not trusted for incremental reuse.
+              # Keep a diagnostic copy in this job, free the canonical path, and
+              # continue via the controlled cold/recovery path instead of failing
+              # before the pinned source cache can even be restored.
+              [[ "<< parameters.stage_index >>" == "1" ]] || exit 59
+              REJECTED="$ROOT/sandium-rejected-output-checkpoints/legacy-stage1-${CIRCLE_BUILD_NUM:-unknown}-${CIRCLE_WORKFLOW_ID:-unknown}"
+              mkdir -p "$(dirname "$REJECTED")"
+              mv "$CHECKPOINT" "$REJECTED"
+              echo "SANDIUM_OUTPUT_CHECKPOINT_RECOVERY=LEGACY_QUARANTINED"
+              echo "SANDIUM_OUTPUT_CHECKPOINT_RECOVERY_PATH=$REJECTED"
+              echo "SANDIUM_OUTPUT_CHECKPOINT_EARLY_PREFLIGHT=MISS_CONTINUE_STAGE1"
+            else
+              echo "SANDIUM_OUTPUT_CHECKPOINT_EARLY_PREFLIGHT=PASS"
+            fi
       - restore_cache:
           name: Restore the pinned Chromium/Bare source and dependency cache
           keys:
