@@ -167,7 +167,29 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
     scheduled = scheduled_sample_targets(log, targets)
     if scheduled:
         details = "; ".join(f"{target}: {lines[0]}" for target, lines in list(scheduled.items())[:5])
-        raise ReusePreflightError(f"Restored outputs are scheduled for rebuild ({len(scheduled)}/{len(targets)} samples); full build was not started: {details}; see {log_path}")
+        # Capture Ninja/Siso's own dirty-reason explanations in a second no-build
+        # invocation. The normal dry-run proves the checkpoint is not currently
+        # reusable; this diagnostic identifies which input/mtime made it dirty.
+        explain_path = root / f"stage-{stage}-reuse-explain.log"
+        explain_command = [autoninja, "-n", "-d", "explain", "-C", str(output), *targets]
+        print("SANDIUM_LOCAL_OUTPUT_REUSE_EXPLAIN_COMMAND=" + " ".join(explain_command))
+        try:
+            explain = subprocess.run(explain_command, cwd=source_root, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True, errors="replace",
+                timeout=timeout_seconds, check=False)
+            explain_text = explain.stdout or ""
+            explain_path.write_text(explain_text, encoding="utf-8")
+            print(f"SANDIUM_LOCAL_OUTPUT_REUSE_EXPLAIN_EXIT={explain.returncode}")
+            print(f"SANDIUM_LOCAL_OUTPUT_REUSE_EXPLAIN_LOG={explain_path}")
+            for line in explain_text.splitlines()[:24]:
+                print("SANDIUM_REUSE_EXPLAIN: " + line[:500])
+        except subprocess.TimeoutExpired as exc:
+            partial = exc.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", errors="replace")
+            explain_path.write_text(str(partial) + f"\\nREUSE_EXPLAIN_TIMEOUT_SECONDS={timeout_seconds}\\n", encoding="utf-8")
+            print(f"SANDIUM_LOCAL_OUTPUT_REUSE_EXPLAIN=TIMEOUT after {timeout_seconds}s")
+        raise ReusePreflightError(f"Restored outputs are scheduled for rebuild ({len(scheduled)}/{len(targets)} samples); full build was not started: {details}; see {log_path} and {explain_path}")
     # No matching target row is not proof of a no-op. Siso may emit wrapper or
     # summary output that the target matcher cannot interpret. Only accept an
     # explicit no-work response; otherwise stop before the compile window.
