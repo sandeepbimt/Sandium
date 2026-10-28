@@ -200,7 +200,6 @@ jobs:
           assert 'stamp = output / "build.ninja.stamp"' in checkpoint
           assert 'hashes["build.ninja.stamp"] = sha256_file(stamp)' in checkpoint
           assert "Required GN generator stamp missing/unsafe" in checkpoint
-          assert "SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS" in remaining_work
           assert 'test -s "$SDIR/.sisoenv"' in runner
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
           assert 'output_checkpoint.py" restore' in runner and 'output_checkpoint.py" pack' in runner
@@ -227,6 +226,7 @@ jobs:
           assert "measured pending compile count differs from saved previous remaining work" in stage_work_gate
           assert 'report.get("local_compiled_outputs_restored") is not True' in stage_work_gate
           remaining_work = Path("ci/bare/remaining_work.py").read_text(encoding="utf-8")
+          assert "SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS" in remaining_work
           assert "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" in remaining_work
           assert '"graph_action_count"' in remaining_work and '"pending_actions"' in remaining_work
           assert '["graph_action_count"]' in runner and '["pending_actions"]' in runner
