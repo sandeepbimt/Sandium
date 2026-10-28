@@ -25,7 +25,13 @@ CONTROL_HASHES = {name: hashlib.sha256(name.encode()).hexdigest() for name in M.
 
 def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str]:
     path.mkdir(parents=True)
-    files = {"args.gn": "use_siso=true\n", "build.ninja": "build edge\n", state_name: "siso resumable state\n"}
+    files = {
+        "args.gn": "use_siso=true\n",
+        "build.ninja": "build edge\n",
+        state_name: "siso resumable state\n",
+        ".ninja_log": "# ninja log fixture\n",
+        ".ninja_deps": "ninja deps fixture\n",
+    }
     for name, contents in files.items():
         (path / name).write_text(contents, encoding="utf-8")
     # The generator stamp belongs to the same snapshot as build.ninja, Siso state,
