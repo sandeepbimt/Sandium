@@ -127,6 +127,11 @@ jobs:
           legacy_line = next(i for i, line in enumerate(restore_block.splitlines()) if legacy_output_key in line)
           assert legacy_line < min(partial_lines), "known-good legacy checkpoint must not be shadowed by partial cache"
           assert "Cross-fingerprint green fallback" in restore_block
+          observed_checkpoint_key = "sandium-output-good-v5-JTpNyIRYpPmms_rW8gpimT_lYvQYmDadADPhyEJDgyg=-stage-1-"
+          assert observed_checkpoint_key in restore_block, "the previously observed 1.8 GiB compiled-output cache must stay reachable"
+          observed_cache_line = next(i for i, line in enumerate(restore_block.splitlines()) if observed_checkpoint_key in line)
+          generic_cache_line = next(i for i, line in enumerate(restore_block.splitlines()) if line.strip() == "- sandium-output-good-v5-")
+          assert observed_cache_line < generic_cache_line, "known candidate must be tried before broad prefix selects only the most recent unrelated cache"
           assert "Only if no green checkpoint exists, try interrupted snapshots" in restore_block
           assert "exact source/build identity is still validated" in config
           for failed_stage in (2, 3, 4, 5):
