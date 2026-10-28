@@ -334,6 +334,14 @@ jobs:
           path: stage-<< parameters.stage_index >>-driver.log
           destination: diagnostics/stage-<< parameters.stage_index >>/driver.log
       - store_artifacts:
+          name: Upload compiled-output reuse dry-run and dirty-reason diagnostics
+          path: stage-<< parameters.stage_index >>-reuse-preflight.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/reuse-preflight.log
+      - store_artifacts:
+          name: Upload no-build dirty-reason explanation when reuse fails
+          path: stage-<< parameters.stage_index >>-reuse-explain.log
+          destination: diagnostics/stage-<< parameters.stage_index >>/reuse-explain.log
+      - store_artifacts:
           name: Upload Siso metrics
           path: stage-<< parameters.stage_index >>-metrics.jsonl
           destination: diagnostics/stage-<< parameters.stage_index >>/metrics.jsonl
