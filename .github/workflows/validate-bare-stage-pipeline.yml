@@ -113,7 +113,7 @@ jobs:
           assert "sandium-state-v3-{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}-stage-1-" in config
           legacy_output_key = "sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-1-"
           assert legacy_output_key in config, "the known-good legacy Stage 1 output checkpoint must remain reachable"
-          generic_good_fallback = config.index("\\n                  - sandium-output-good-v5-\\n")
+          generic_good_fallback = config.index("\n                  - sandium-output-good-v5-\n")
           assert generic_good_fallback > config.index("Restore the best green validated compiled-output checkpoint")
           assert generic_good_fallback < config.index(legacy_output_key), (
               "broad fallback may select only a good v5 checkpoint and must precede the older v3 migration key"
