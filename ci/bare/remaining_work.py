@@ -39,8 +39,9 @@ def parse_siso_summary(output: str) -> dict[str, int] | None:
         return None
     if len(summaries) != 1 or len(skips) != 1:
         raise RemainingWorkError(
-            "Siso dry-run requires exactly one completed Build Succeeded summary "
-            "and one explicit skip counter"
+            "Siso dry-run requires an unambiguous completed Siso measurement: "
+            "exactly one Build Succeeded summary and one explicit skip counter; "
+            "otherwise no Ninja action rows provide a safe fallback"
         )
     pending, skipped = summaries[0], skips[0]
     if pending < 0 or skipped < 0:
