@@ -243,7 +243,7 @@ jobs:
           assert "ci/bare/source_cache_fingerprint.py" in build_fingerprint
           assert ".circleci/config.yml" not in build_fingerprint, "routine pipeline config edits must not change build cache identity"
           assert "ci/bare/gn_args.gn" in output_fingerprint and "ci/bare/source-pin.txt" in output_fingerprint
-          for orchestration_file in ("build_identity.py", "stage_ledger.py", "state_handoff.py", "output_checkpoint.py", "cache_fingerprint.py", "source_cache_fingerprint.py", "checkpoint_quality.py"):
+          for orchestration_file in ("build_identity.py", "stage_ledger.py", "state_handoff.py", "output_checkpoint.py", "cache_fingerprint.py", "source_cache_fingerprint.py", "checkpoint_quality.py", "prepare_source.sh", "configure_siso.py", "bootstrap_chromium.sh", "package_artifact.sh"):
               assert orchestration_file not in output_fingerprint, f"output cache identity must not rotate for CI implementation changes: {orchestration_file}"
           assert ".circleci/config.yml" not in output_fingerprint
           assert ".circleci/config.yml" not in checkpoint, "routine pipeline config edits must not invalidate compatible output checkpoints"

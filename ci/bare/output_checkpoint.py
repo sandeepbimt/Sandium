@@ -29,15 +29,13 @@ OUT_RELATIVE = Path("src/out/android_Debug_arm64")
 CHECKPOINT_NAME = "sandium-build-output-checkpoint"
 META_NAME = ".sandium-output-checkpoint.meta.json"
 REPORT_NAME = "sandium-state-handoff-report.json"
-# Only source, GN, Siso and packaging inputs that affect build compatibility.
-# CI orchestration/ledger implementation changes must not invalidate compatible output.
+# Actual source/toolchain/GN/Siso compatibility is independently checked by
+# source_identity(). Keep this set to stable pinned inputs; older metadata may
+# carry additional hashes for scripts, which verify_control_inputs ignores.
+# Packaging/orchestration edits must not orphan compiled Chromium outputs.
 CONTROL_INPUTS = (
     "ci/bare/source-pin.txt",
     "ci/bare/gn_args.gn",
-    "ci/bare/prepare_source.sh",
-    "ci/bare/configure_siso.py",
-    "ci/bare/bootstrap_chromium.sh",
-    "ci/bare/package_artifact.sh",
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )

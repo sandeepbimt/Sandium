@@ -61,6 +61,7 @@ jobs:
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py
             python3 ci/bare/test_output_checkpoint.py
+            python3 ci/bare/test_output_cache_fingerprint.py
             python3 ci/bare/test_compiled_output_reuse_preflight.py
             python3 ci/bare/test_fast_apk.py
             python3 ci/bare/stage_contract.py

@@ -36,6 +36,10 @@ class OutputCacheFingerprintTests(unittest.TestCase):
             "ci/bare/checkpoint_quality.py",
             "ci/bare/cache_fingerprint.py",
             "ci/bare/source_cache_fingerprint.py",
+            "ci/bare/prepare_source.sh",
+            "ci/bare/configure_siso.py",
+            "ci/bare/bootstrap_chromium.sh",
+            "ci/bare/package_artifact.sh",
         }
         self.assertTrue({"ci/bare/source-pin.txt", "ci/bare/gn_args.gn"}.issubset(set(FP.INPUTS)))
         self.assertTrue(excluded.isdisjoint(set(FP.INPUTS)))
@@ -59,17 +63,50 @@ class OutputCacheFingerprintTests(unittest.TestCase):
             self.make_control_tree(control)
             first, _ = FP.calculate_fingerprint(control)
             args = control / "ci/bare/gn_args.gn"
-            args.write_text(args.read_text(encoding="utf-8") + "is_component_build = false\n")
+            args.write_text(args.read_text(encoding="utf-8") + "is_component_build = false\\n")
             second, _ = FP.calculate_fingerprint(control)
             self.assertNotEqual(first, second)
+
+    def test_source_preparation_and_packaging_script_edits_do_not_rotate_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            control = Path(directory)
+            self.make_control_tree(control)
+            excluded = (
+                "ci/bare/prepare_source.sh",
+                "ci/bare/configure_siso.py",
+                "ci/bare/bootstrap_chromium.sh",
+                "ci/bare/package_artifact.sh",
+            )
+            for relative in excluded:
+                path = control / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("original implementation\\n", encoding="utf-8")
+            first, _ = FP.calculate_fingerprint(control)
+            for relative in excluded:
+                (control / relative).write_text("revised CI implementation\\n", encoding="utf-8")
+            second, _ = FP.calculate_fingerprint(control)
+            self.assertEqual(first, second)
 
     def test_legacy_checkpoint_allows_extra_orchestration_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             control = Path(directory)
             self.make_control_tree(control)
             saved = OC.control_inputs(control)
-            saved["ci/bare/build_identity.py"] = "legacy-code-hash"
-            saved["ci/bare/stage_ledger.py"] = "legacy-ledger-hash"
+            legacy_script_hashes = (
+                "ci/bare/prepare_source.sh",
+                "ci/bare/configure_siso.py",
+                "ci/bare/bootstrap_chromium.sh",
+                "ci/bare/package_artifact.sh",
+            )
+            for relative in legacy_script_hashes:
+                path = control / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("old checkpoint input\\n", encoding="utf-8")
+                saved[relative] = FP.hashlib.sha256(path.read_bytes()).hexdigest()
+            OC.verify_control_inputs(saved, control)
+            for relative in legacy_script_hashes:
+                (control / relative).write_text("changed CI-only implementation\\n", encoding="utf-8")
+            # Legacy extras are ignored; retained build inputs are still checked.
             OC.verify_control_inputs(saved, control)
             (control / "ci/bare/gn_args.gn").write_text("changed GN arguments")
             with self.assertRaises(OC.CheckpointError):

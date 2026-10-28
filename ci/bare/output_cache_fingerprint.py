@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Fingerprint only build-compatible inputs for reusable compiled-output checkpoints.
+"""Fingerprint stable source, GN and remote-backend inputs for output reuse.
 
-CI orchestration and validator implementation files intentionally do not belong
-in this fingerprint: changing stage bookkeeping must not orphan a compatible
-multi-gigabyte output checkpoint. The authoritative checkpoint validator still
-checks these build inputs and the generated source/toolchain/GN/Siso identity.
+Do not hash shell orchestration or APK packaging scripts here: fixing a CI
+runner must not make an otherwise compatible multi-gigabyte output cache
+unreachable. The checkpoint's independent source/toolchain/GN/Siso identity,
+manifest hashes, compiled-object inventory and live no-rebuild preflight remain
+the authoritative compatibility gate. Removed script hashes in legacy
+checkpoint metadata are tolerated as extra fields during migration.
 """
 from __future__ import annotations
 
@@ -13,14 +15,10 @@ import hashlib
 import json
 from pathlib import Path
 
-SCHEMA = 1
+SCHEMA = 2
 INPUTS = (
     "ci/bare/source-pin.txt",
     "ci/bare/gn_args.gn",
-    "ci/bare/prepare_source.sh",
-    "ci/bare/configure_siso.py",
-    "ci/bare/bootstrap_chromium.sh",
-    "ci/bare/package_artifact.sh",
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )
