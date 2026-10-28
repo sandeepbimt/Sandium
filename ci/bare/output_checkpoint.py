@@ -41,7 +41,7 @@ CONTROL_INPUTS = (
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )
-CRITICAL_ALWAYS = ("args.gn", "build.ninja", "build.ninja.stamp")
+CRITICAL_ALWAYS = ("args.gn", "build.ninja")
 # Ninja's command and dependency histories must travel with the object files.
 # A checkpoint without these logs can make valid outputs appear dirty or leave
 # Siso unable to prove that a restored action is up to date.
@@ -188,6 +188,12 @@ def output_manifest(output: Path) -> dict[str, str]:
         path = output / name
         require_regular_nonempty(path)
         hashes[name] = sha256_file(path)
+    # GN creates build.ninja.stamp as an empty file. Its existence and hash are
+    # required for snapshot integrity, but its zero-byte payload is intentional.
+    stamp = output / "build.ninja.stamp"
+    if not stamp.is_file() or stamp.is_symlink():
+        raise CheckpointError(f"Required GN generator stamp missing/unsafe: {stamp}")
+    hashes["build.ninja.stamp"] = sha256_file(stamp)
     state_name = next((name for name in SISO_STATE_NAMES if (output / name).is_file()
                        and not (output / name).is_symlink()
                        and (output / name).stat().st_size > 0), None)
@@ -524,7 +530,13 @@ def verify_manifest_files(output: Path, entries: Any) -> None:
         if rel.is_absolute() or ".." in rel.parts:
             raise CheckpointError(f"Unsafe output manifest path: {relative}")
         path = output / rel
-        require_regular_nonempty(path)
+        if relative == "build.ninja.stamp":
+            # GN's generator stamp is a valid empty file; require a regular file
+            # but do not require nonzero payload.
+            if not path.is_file() or path.is_symlink():
+                raise CheckpointError(f"Required GN generator stamp missing/unsafe: {path}")
+        else:
+            require_regular_nonempty(path)
         if sha256_file(path) != expected:
             raise CheckpointError(f"Checkpoint file hash mismatch: {relative}")
 

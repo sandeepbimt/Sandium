@@ -233,6 +233,14 @@ class OutputCheckpointTests(unittest.TestCase):
             self.assertFalse(checkpoint.exists())
             self.assertTrue((root / "sandium-rejected-output-checkpoints").is_dir())
 
+    def test_output_manifest_accepts_gn_generator_stamp_when_empty(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "out"
+            make_output(output)
+            (output / "build.ninja.stamp").write_bytes(b"")
+            manifest = M.output_manifest(output)
+            self.assertEqual(manifest["build.ninja.stamp"], hashlib.sha256(b"").hexdigest())
+
     def test_new_checkpoint_requires_generator_stamp(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "out"
@@ -299,7 +307,8 @@ class OutputCheckpointTests(unittest.TestCase):
             output.mkdir()
             (output / "args.gn").write_text("args\n")
             (output / "build.ninja").write_text("build\n")
-            with self.assertRaises(M.CheckpointError):
+            (output / "build.ninja.stamp").write_bytes(b"")
+            with self.assertRaisesRegex(M.CheckpointError, "Siso filesystem state or recovery journal"):
                 M.output_manifest(output)
 
     def test_output_accepts_nonempty_journal_when_base_state_is_absent(self):

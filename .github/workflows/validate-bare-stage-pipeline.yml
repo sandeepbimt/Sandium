@@ -196,7 +196,10 @@ jobs:
           assert 'bootstrap_chromium.sh" configure' not in runner, "cold GN/bootstrap path is forbidden"
           assert "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN" in runner, "warm restore must precede GN"
           assert "SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS" in checkpoint, "cached graph/stamp/state/objects must be restored as one snapshot"
-          assert 'CRITICAL_ALWAYS = ("args.gn", "build.ninja", "build.ninja.stamp")' in checkpoint
+          assert 'CRITICAL_ALWAYS = ("args.gn", "build.ninja")' in checkpoint
+          assert 'stamp = output / "build.ninja.stamp"' in checkpoint
+          assert 'hashes["build.ninja.stamp"] = sha256_file(stamp)' in checkpoint
+          assert "Required GN generator stamp missing/unsafe" in checkpoint
           assert "SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS" in remaining_work
           assert 'test -s "$SDIR/.sisoenv"' in runner
           assert "SANDIUM_OUTPUT_CHECKPOINT=pack" not in runner
