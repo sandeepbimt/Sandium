@@ -17,7 +17,7 @@ PAIR = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]\s+\S", re.M)
 NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
 SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps(?:\s+-\s+[\d.]+/s)?\s*$", re.M)
 SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
-SISO_EDGE = re.compile(r"\bedge:(\d+)\b", re.I)
+SISO_SCHEDULE_EDGE = re.compile(r"schedule\\s+pending:\\d+\\+ready:\\d+\\s+\\(node:\\d+\\s+edge:(\\d+)\\)", re.I)
 
 
 class RemainingWorkError(RuntimeError):
@@ -48,21 +48,22 @@ def parse_siso_summary(output: str) -> dict[str, int] | None:
     if pending < 0 or skipped < 0:
         raise RemainingWorkError(f"negative Siso dry-run counters: steps={pending}, skip={skipped}")
     graph_total = pending + skipped
-    edges = [int(n) for n in SISO_EDGE.findall(output)]
-    if edges and edges[-1] != graph_total:
+    # Siso's "schedule pending/ready ... edge:N" is a transient scheduler
+    # snapshot, not the completed dry-run graph total. It can report edge:2
+    # while the completed summary later reports tens of thousands of steps.
+    # Treat Build Succeeded steps + explicit skip as the completed accounting;
+    # never compare it to that transient scheduler edge counter.
+    schedule_edges = [int(n) for n in SISO_SCHEDULE_EDGE.findall(output)]
+    if pending == 0 and not (graph_total > 0 and NO_WORK.search(output)):
         raise RemainingWorkError(
-            "Siso dry-run graph accounting mismatch: "
-            f"steps={pending} skip={skipped} sum={graph_total} last_graph_edge_count={edges[-1]}"
-        )
-    if pending == 0 and not (graph_total > 0 and edges and edges[-1] == graph_total):
-        raise RemainingWorkError(
-            "zero Siso steps without an explicit no-work result and reconciled graph"
+            "zero Siso steps without an explicit no-work result and nonzero skipped graph"
         )
     return {
         "pending_actions": pending,
         "siso_pending_steps": pending,
         "siso_skipped_actions": skipped,
         "graph_action_count": graph_total,
+        "scheduler_edge_snapshot": schedule_edges[-1] if schedule_edges else None,
     }
 
 
