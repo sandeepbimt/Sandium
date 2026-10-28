@@ -124,6 +124,58 @@ def require_regular_nonempty(path: Path) -> None:
     if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
         raise CheckpointError(f"Required regular nonempty file missing/unsafe: {path}")
 
+def output_mtime_manifest(output: Path) -> dict[str, int]:
+    """Capture nanosecond mtimes for every regular output file.
+
+    CircleCI cache transport may round file mtimes to whole seconds. Siso/Ninja
+    uses output mtimes together with .ninja_deps and generator logs; losing the
+    fractional part makes restored object files look older/newer than their
+    dependency records and triggers thousands of unnecessary rebuilds.
+    Store the original mtimes as metadata and restore them after cache transport.
+    """
+    result: dict[str, int] = {}
+    for path in output.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        relative = path.relative_to(output).as_posix()
+        result[relative] = path.stat().st_mtime_ns
+    if not result:
+        raise CheckpointError("Cannot checkpoint an output tree with no regular files")
+    return result
+
+
+def validate_output_mtime_manifest(output: Path, entries: Any) -> dict[str, int]:
+    """Validate timestamp metadata before applying it to a restored output tree."""
+    if not isinstance(entries, dict) or not entries:
+        raise CheckpointError("Checkpoint nanosecond-mtime manifest is missing")
+    result: dict[str, int] = {}
+    for relative, mtime_ns in entries.items():
+        rel = Path(relative) if isinstance(relative, str) else Path("/")
+        if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+            raise CheckpointError(f"Unsafe output mtime path: {relative}")
+        if relative == META_NAME:
+            raise CheckpointError("Checkpoint mtime manifest must not include its own metadata file")
+        if not isinstance(mtime_ns, int) or isinstance(mtime_ns, bool) or mtime_ns < 0:
+            raise CheckpointError(f"Invalid nanosecond mtime for output: {relative}")
+        path = output / rel
+        if not path.is_file() or path.is_symlink():
+            raise CheckpointError(f"Missing/unsafe file in checkpoint mtime manifest: {relative}")
+        result[rel.as_posix()] = mtime_ns
+    return result
+
+
+def restore_output_mtimes(output: Path, entries: dict[str, int]) -> None:
+    """Restore exact file mtimes lost during cache archive transport."""
+    for relative, mtime_ns in entries.items():
+        path = output / relative
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, mtime_ns), follow_symlinks=False)
+        if path.stat().st_mtime_ns != mtime_ns:
+            raise CheckpointError(f"Could not restore exact nanosecond mtime: {relative}")
+    print("SANDIUM_OUTPUT_CHECKPOINT_MTIME_RESTORE=PASS")
+    print("SANDIUM_OUTPUT_CHECKPOINT_MTIME_FILES=" + str(len(entries)))
+
+
 def output_manifest(output: Path) -> dict[str, str]:
     if not output.is_dir() or output.is_symlink():
         raise CheckpointError(f"Output directory missing/unsafe: {output}")
@@ -501,6 +553,7 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             return miss("build_identity_digest_mismatch")
         verify_control_inputs(meta.get("control_inputs"), control)
         verify_manifest_files(checkpoint, meta.get("output_files"))
+        validate_output_mtime_manifest(checkpoint, meta.get("output_mtime_ns"))
         inventory = meta.get("compiled_output_inventory")
         if inventory is None:
             # One-time Stage 1 migration fallback: old caches are preserved and
@@ -607,6 +660,11 @@ def command_restore(root: Path, control: Path, stage: int, workflow_id: str, req
 
     try:
         os.replace(checkpoint, output)
+        # Reapply the original nanosecond timestamps before Siso sees the tree.
+        # Without this, cache archive timestamp rounding makes .o mtimes disagree
+        # with .ninja_deps and invalidates otherwise reusable compiled outputs.
+        mtime_manifest = validate_output_mtime_manifest(output, meta.get("output_mtime_ns"))
+        restore_output_mtimes(output, mtime_manifest)
         verify_manifest_files(output, meta["output_files"])
         restored_identity = source_identity(control, root, require_gn=True)
         if identity_digest(restored_identity) != meta["build_identity_sha256"]:
@@ -748,6 +806,8 @@ def command_pack(root: Path, control: Path, stage: int, workflow_id: str,
             "build_identity_sha256": identity_hash,
             "control_inputs": control_inputs(control),
             "output_files": files,
+            # Persist exact nanosecond mtimes; CircleCI cache transport may round them.
+            "output_mtime_ns": output_mtime_manifest(output),
             "output_bytes": output_bytes,
             "compiled_output_inventory": inventory,
             "compiled_output_action_sample_schema": ACTION_SAMPLE_SCHEMA,
