@@ -106,7 +106,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
-                "control_inputs": CONTROL_HASHES, "output_files": files, "output_bytes": 30,
+                "control_inputs": CONTROL_HASHES, "output_files": files, "output_mtime_ns": M.output_mtime_manifest(checkpoint), "output_bytes": 30,
                 **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
             }), encoding="utf-8")
@@ -126,7 +126,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
-                "control_inputs": CONTROL_HASHES, "output_files": files,
+                "control_inputs": CONTROL_HASHES, "output_files": files, "output_mtime_ns": M.output_mtime_manifest(checkpoint),
                 **add_checkpoint_evidence(root, checkpoint),
                 "stage": 1, "workflow_id": "old-wf", "stage_record_valid": True,
             }), encoding="utf-8")
@@ -146,7 +146,7 @@ class OutputCheckpointTests(unittest.TestCase):
                 "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
                 "output_relative_path": M.OUT_RELATIVE.as_posix(),
                 "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
-                "control_inputs": CONTROL_HASHES, "output_files": files,
+                "control_inputs": CONTROL_HASHES, "output_files": files, "output_mtime_ns": M.output_mtime_manifest(checkpoint),
                 "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
             }), encoding="utf-8")
             with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
@@ -228,6 +228,46 @@ class OutputCheckpointTests(unittest.TestCase):
                 report = json.loads((root / M.REPORT_NAME).read_text(encoding="utf-8"))
                 self.assertTrue(report["local_compiled_outputs_restored"])
                 self.assertEqual(report["source_stage"], 1)
+
+    def test_pack_and_restore_recovers_subsecond_mtimes_lost_by_cache_transport(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            output = root / M.OUT_RELATIVE
+            make_output(output)
+            # Keep Ninja's dependency/build logs in the snapshot too.
+            for name in (".ninja_log", ".ninja_deps"):
+                (output / name).write_text("fixture state\\n", encoding="utf-8")
+            add_checkpoint_evidence(root, output)
+            ledger = root / "ledger.json"
+            ledger.write_text(json.dumps({
+                "stage": 1,
+                "build_identity_sha256": M.identity_digest(IDENTITY),
+                "max_completed_actions": 25,
+                "total_action_count": 100,
+                "remote_execution_proven": True,
+                "remote_action_cache_reuse_proven": True,
+                "artifact_verified": False,
+            }), encoding="utf-8")
+            obj = output / "obj" / "checkpoint_test" / "unit_005.o"
+            state = output / ".ninja_deps"
+            expected = {p.relative_to(output).as_posix(): p.stat().st_mtime_ns
+                        for p in (obj, state, output / "build.ninja", output / "build.ninja.stamp")}
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \\
+                 patch.object(M, "source_identity", return_value=IDENTITY):
+                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+                checkpoint = root / M.CHECKPOINT_NAME
+                # Simulate cache transport rounding archived mtimes to whole seconds.
+                for path in checkpoint.rglob("*"):
+                    if path.is_symlink() or not path.is_file() or path.name == M.META_NAME:
+                        continue
+                    stat = path.stat()
+                    rounded = (stat.st_mtime_ns // 1_000_000_000) * 1_000_000_000
+                    os.utime(path, ns=(stat.st_atime_ns, rounded))
+                self.assertEqual(M.command_restore(root, control, 2, "wf-1", required=True), 0)
+                for relative, expected_ns in expected.items():
+                    self.assertEqual((output / relative).stat().st_mtime_ns, expected_ns, relative)
 
     def test_restore_full_snapshot_without_gn_first(self):
         with tempfile.TemporaryDirectory() as temp:
