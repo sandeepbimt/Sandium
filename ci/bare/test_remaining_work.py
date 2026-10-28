@@ -144,25 +144,25 @@ noexec:0 local:0 remote:0 cache:0 skip:2
         report_path = Path(tmp.name) / "report.json"
         (out / "build.ninja.stamp").unlink()
         dry_run = (
-            "schedule pending:2+ready:2 (node:10 edge:4)\\n"
-            "1.00s Build Succeeded: 2 steps\\nnoexec:0 local:0 remote:0 cache:0 skip:2\\n"
+            "schedule pending:2+ready:2 (node:10 edge:4)\n"
+            "1.00s Build Succeeded: 2 steps\nnoexec:0 local:0 remote:0 cache:0 skip:2\n"
         )
         calls = []
 
         def fake_refresh(**kwargs):
             calls.append("gn-gen")
-            (out / "build.ninja.stamp").write_text("recreated stamp\\n", encoding="utf-8")
+            (out / "build.ninja.stamp").write_text("recreated stamp\n", encoding="utf-8")
             return M.sha256_file(out / "build.ninja"), M.sha256_file(out / "args.gn")
 
         def fake_run(command, **kwargs):
             calls.append(list(command))
             return subprocess.CompletedProcess(command, 0, dry_run)
 
-        with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \\
-             mock.patch.object(M, "_refresh_gn_manifest", side_effect=fake_refresh), \\
-             mock.patch.object(M.subprocess, "run", side_effect=fake_run):
-            report = M.measure(source_root=source, output_dir=out, stage=1, phase="start",
-                               report_path=report_path, timeout_seconds=30)
+        with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None) as _which:
+            with mock.patch.object(M, "_refresh_gn_manifest", side_effect=fake_refresh) as _refresh:
+                with mock.patch.object(M.subprocess, "run", side_effect=fake_run) as _run:
+                    report = M.measure(source_root=source, output_dir=out, stage=1, phase="start",
+                                       report_path=report_path, timeout_seconds=30)
         self.assertEqual(report["pending_actions"], 2)
         self.assertEqual(calls[0], "gn-gen")
         self.assertEqual(len(calls), 2)
@@ -175,8 +175,8 @@ noexec:0 local:0 remote:0 cache:0 skip:2
         (out / "build.ninja.stamp").unlink()
 
         def fake_refresh(**kwargs):
-            (out / "build.ninja.stamp").write_text("recreated stamp\\n", encoding="utf-8")
-            (out / "build.ninja").write_text("changed graph\\n", encoding="utf-8")
+            (out / "build.ninja.stamp").write_text("recreated stamp\n", encoding="utf-8")
+            (out / "build.ninja").write_text("changed graph\n", encoding="utf-8")
             return M.sha256_file(out / "build.ninja"), M.sha256_file(out / "args.gn")
 
         with mock.patch.object(M, "_refresh_gn_manifest", side_effect=fake_refresh):
