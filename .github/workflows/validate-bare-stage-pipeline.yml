@@ -127,7 +127,7 @@ jobs:
           assert legacy_line < min(partial_lines), "known-good legacy checkpoint must not be shadowed by partial cache"
           assert "Cross-fingerprint green fallback" in restore_block
           assert "Only if no green checkpoint exists, try interrupted snapshots" in restore_block
-          assert "strict checkpoint identity/control-file validation runs" in config
+          assert "exact source/build identity is still validated" in config
           for failed_stage in (2, 3, 4, 5):
               assert f"sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-{failed_stage}-" not in config
               assert f"sandium-state-v3-{{{{ checksum \"sandium-control/.sandium-cache-fingerprint.txt\" }}}}-stage-{failed_stage}-" not in config
