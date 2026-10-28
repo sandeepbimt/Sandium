@@ -580,28 +580,13 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             return miss("previous_stage_checkpoint_missing_generator_stamp_manifest")
         mtime_entries = meta.get("output_mtime_ns")
         if mtime_entries is None:
-            # Older saved caches predate the nanosecond-mtime manifest. Do not
-            # invent the original timestamps: record the timestamps actually
-            # present after cache transport, then let the real Siso no-rebuild
-            # preflight decide whether any compiled actions are reusable.
-            # This one-time migration is Stage 1 only; continuations must use
-            # checkpoints produced with the current complete metadata contract.
-            if stage > 1:
-                return miss("nanosecond_mtime_manifest_missing_from_predecessor_checkpoint")
-            mtime_entries = {
-                path.relative_to(checkpoint).as_posix(): path.stat().st_mtime_ns
-                for path in checkpoint.rglob("*")
-                if path.is_file() and not path.is_symlink()
-                and path.relative_to(checkpoint).as_posix() != META_NAME
-            }
-            if not mtime_entries:
-                return miss("legacy_checkpoint_has_no_regular_files_for_mtime_migration")
-            meta["output_mtime_ns"] = mtime_entries
-            meta["output_mtime_migration"] = "reconstructed_from_restored_cache; requires_live_siso_reuse_preflight"
-            write_json_atomic(meta_path, meta)
-            print("SANDIUM_OUTPUT_CHECKPOINT_MTIME_MANIFEST=LEGACY_RECONSTRUCTED_FROM_RESTORED_CACHE")
-            print("SANDIUM_OUTPUT_CHECKPOINT_MTIME_ORIGINAL_PRECISION=UNAVAILABLE")
-            print("SANDIUM_OUTPUT_CHECKPOINT_MTIME_MIGRATION_REQUIRES_SISO_PREFLIGHT=true")
+            # Cache transport can round mtimes to whole seconds. Reconstructing
+            # them from the restored tree fabricates a new history and can make
+            # Ninja/Siso schedule thousands of otherwise reusable actions.
+            # A legacy checkpoint without original nanosecond mtimes is not a
+            # trustworthy incremental-build base; reject it and let the caller
+            # select a complete checkpoint or fail closed.
+            return miss("nanosecond_mtime_manifest_missing_legacy_checkpoint_not_reusable")
         validate_output_mtime_manifest(checkpoint, mtime_entries)
         inventory = meta.get("compiled_output_inventory")
         if inventory is None:
