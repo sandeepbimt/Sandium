@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure pending actions after an explicit GN manifest refresh."""
+"""Measure pending compile actions against the identity-validated restored graph."""
 from __future__ import annotations
 
 import argparse
@@ -65,12 +65,17 @@ def parse_siso_summary(output: str) -> dict[str, int] | None:
 
 
 def parse_pending_actions(output: str) -> int:
-    """Count actual pending work; summary has priority over noisy progress rows."""
-    if NO_WORK.search(output):
-        return 0
+    """Count actual pending work; contradictory summaries fail closed."""
     summary = parse_siso_summary(output)
     if summary is not None:
+        if NO_WORK.search(output) and summary["pending_actions"] != 0:
+            raise RemainingWorkError(
+                "contradictory dry-run output: explicit no-work marker conflicts "
+                "with nonzero Siso pending steps"
+            )
         return summary["pending_actions"]
+    if NO_WORK.search(output):
+        return 0
     pairs = [(int(a), int(b)) for a, b in PAIR.findall(output)]
     if not pairs:
         raise RemainingWorkError(
