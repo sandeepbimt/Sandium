@@ -276,7 +276,7 @@ jobs:
             fi
             echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=DIRECTORY"
             ls -ld "$CHECKPOINT"
-            find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\n' | head -n 30
+            find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\n' | sed -n '1,30p'
             if [[ ! -f "$META" || -L "$META" ]]; then
               echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE"
               exit 59
