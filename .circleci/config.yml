@@ -274,7 +274,13 @@ jobs:
               echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=MISS_OR_WRONG_PATH"
               ls -ld "$ROOT" || true
               find "$ROOT" -maxdepth 1 -mindepth 1 -name '*checkpoint*' -printf '%y %p\n' 2>/dev/null || true
-              exit 59
+              if [[ "<< parameters.stage_index >>" != "1" ]]; then
+                exit 59
+              fi
+              # Stage 1 is allowed to recover from a cache miss by using the
+              # pinned source cache and producing a new checkpoint from real work.
+              mkdir -p "$CHECKPOINT"
+              echo "SANDIUM_OUTPUT_CHECKPOINT_RECOVERY=STAGE1_CACHE_MISS"
             elif [[ ! -d "$CHECKPOINT" ]]; then
               echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=NOT_DIRECTORY"
               stat "$CHECKPOINT" || true
