@@ -141,7 +141,7 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source, out, report = fixture(root)
             report.write_text(json.dumps({
-                "local_compiled_outputs_restored": False, "compiled_output_action_samples": []
+                "local_compiled_outputs_restored": True, "compiled_output_action_samples": []
             }))
             with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
                  patch.object(M.subprocess, "run") as run:
