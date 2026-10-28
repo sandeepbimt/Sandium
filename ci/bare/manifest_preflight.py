@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Cheap filesystem-only preflight for a restored Siso/Ninja output tree.
 
-Siso v1.6.3 in the pinned Chromium build reports and successfully handles GN
-manifest regeneration on every no-op invocation in the current CircleCI image.
-Running autoninja -n twice therefore does not prove instability; it adds about
-two minutes of setup time and can falsely fail before useful compilation starts.
-This helper checks only invariant build/source identity and required generated
-files. Real Siso owns GN/Ninja manifest regeneration during the actual compile;
-that event is diagnostic, not a failure by itself.
+This helper deliberately does not invoke GN or Siso: it validates the restored
+build identity and generated files before modifying the checkpoint. The separate
+remaining-work measurement runs GN gen explicitly before autoninja -n. A
+regeneration-only, zero-step Siso result is not treated as a valid measurement.
+The real compile remains responsible for executing build actions.
 """
 from __future__ import annotations
 

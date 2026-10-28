@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure pending build actions with a no-build Siso/Ninja dry run."""
+"""Measure pending actions after an explicit GN manifest refresh."""
 from __future__ import annotations
 
 import argparse
@@ -63,6 +63,70 @@ def parse_pending_actions(output: str) -> int:
     return len(pairs)
 
 
+def _tail(output: str, limit: int = 30) -> str:
+    lines = output.splitlines()
+    return "\n".join(line[:500] for line in lines[-limit:]) or "<no output>"
+
+
+def _refresh_gn_manifest(*, source_root: Path, output_dir: Path,
+                         args_gn: Path, timeout_seconds: int) -> tuple[str, str]:
+    """Refresh GN directly so Siso's no-build mode doesn't own regeneration.
+
+    A stale GN manifest can become Siso's only scheduled node during autoninja
+    -n. The pinned Siso then repeats manifest regeneration and returns a
+    successful zero-step summary without measuring the requested target. Retrying
+    the same dry run repeats the condition. GN generation does not compile target
+    actions, so run it explicitly and measure in a separate Siso invocation.
+    """
+    gn = source_root / "buildtools" / "linux64" / "gn"
+    if not gn.is_file() or not gn.exists():
+        discovered = shutil.which("gn")
+        if discovered:
+            gn = Path(discovered)
+        else:
+            raise RemainingWorkError(
+                f"GN executable not found at {source_root / 'buildtools/linux64/gn'} or on PATH"
+            )
+    if gn.is_symlink() or not gn.is_file():
+        raise RemainingWorkError(f"GN executable is missing/unsafe: {gn}")
+
+    args_before = sha256_file(args_gn)
+    try:
+        output_arg = output_dir.relative_to(source_root).as_posix()
+    except ValueError:
+        output_arg = str(output_dir)
+    command = [str(gn), "gen", output_arg]
+    print("SANDIUM_PENDING_WORK_GN_GEN=START")
+    try:
+        run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, errors="replace",
+                             timeout=timeout_seconds, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RemainingWorkError(
+            f"GN manifest generation timed out after {timeout_seconds}s; compile was not started"
+        ) from exc
+    output = run.stdout or ""
+    print(f"SANDIUM_PENDING_WORK_GN_GEN_EXIT={run.returncode}")
+    print(f"SANDIUM_PENDING_WORK_GN_GEN_OUTPUT_LINES={len(output.splitlines())}")
+    if run.returncode != 0:
+        raise RemainingWorkError(
+            f"GN manifest generation failed with exit {run.returncode}; tail: {_tail(output)}"
+        )
+    graph = output_dir / "build.ninja"
+    if not graph.is_file() or graph.is_symlink() or graph.stat().st_size == 0:
+        raise RemainingWorkError("GN generation did not leave a valid build.ninja")
+    if not args_gn.is_file() or args_gn.is_symlink() or args_gn.stat().st_size == 0:
+        raise RemainingWorkError("args.gn disappeared or became unsafe during GN generation")
+    args_after = sha256_file(args_gn)
+    if args_after != args_before:
+        raise RemainingWorkError("args.gn changed during GN manifest generation")
+    graph_hash = sha256_file(graph)
+    print("SANDIUM_PENDING_WORK_GN_GEN=PASS")
+    print(f"SANDIUM_PENDING_WORK_GN_GRAPH_SHA256={graph_hash}")
+    print(f"SANDIUM_PENDING_WORK_ARGS_SHA256={args_after}")
+    return graph_hash, args_after
+
+
 def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
             report_path: Path, timeout_seconds: int) -> dict[str, Any]:
     graph = output_dir / "build.ninja"
@@ -70,82 +134,78 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
     for path in (graph, args_gn):
         if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
             raise RemainingWorkError(f"required generated build input missing/unsafe: {path}")
-    graph_before = sha256_file(graph)
-    args_hash = sha256_file(args_gn)
+    if timeout_seconds <= 0:
+        raise RemainingWorkError("timeout must be positive")
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise RemainingWorkError("autoninja not found; cannot measure pending work safely")
+
+    # Do not let autoninja -n handle GN regeneration: Siso can repeatedly
+    # schedule just the regeneration node and report "Build Succeeded: 0 steps".
+    # GN gen does not compile targets. Measure only after it returns successfully.
+    graph_before, args_hash = _refresh_gn_manifest(
+        source_root=source_root, output_dir=output_dir, args_gn=args_gn,
+        timeout_seconds=timeout_seconds,
+    )
     command = [autoninja, "-n", "-C", str(output_dir), "chrome_public_apk"]
-    output = ""
-    count = None
-    # The pinned Siso version may use a no-build invocation only to regenerate
-    # GN manifests, then report "Build Succeeded: 0 steps" without showing the
-    # target's pending actions. Never interpret that as zero work. Retry as a
-    # fresh process after regeneration, and accept only a parseable measurement.
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        graph_before = sha256_file(graph)
-        args_hash = sha256_file(args_gn)
-        try:
-            run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, text=True, errors="replace",
-                                 timeout=timeout_seconds, check=False)
-        except subprocess.TimeoutExpired as exc:
-            raise RemainingWorkError(
-                f"no-build dry run attempt {attempt}/{max_attempts} timed out after {timeout_seconds}s"
-            ) from exc
-        output = run.stdout or ""
-        print(f"SANDIUM_PENDING_WORK_DRY_RUN_ATTEMPT={attempt}/{max_attempts}")
-        print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
-        print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
-        if run.returncode != 0:
-            raise RemainingWorkError(
-                f"no-build dry run attempt {attempt} failed with exit {run.returncode}"
-            )
-        try:
-            count = parse_pending_actions(output)
-            if sha256_file(graph) != graph_before or sha256_file(args_gn) != args_hash:
-                raise RemainingWorkError(
-                    "GN/Ninja graph or args changed during pending-work measurement"
-                )
-            break
-        except RemainingWorkError as exc:
-            regen_only = (
-                "Regenerating ninja files" in output
-                and re.search(r"Build Succeeded: 0 steps", output) is not None
-            )
-            if not regen_only or attempt == max_attempts:
-                lines = output.splitlines()
-                print(f"SANDIUM_PENDING_WORK_DRY_RUN_PARSE_ERROR={exc}")
-                print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
-                for line in lines[:30]:
-                    print(line[:500])
-                if len(lines) > 30:
-                    print(f"... {len(lines) - 30} additional dry-run lines omitted ...")
-                    for line in lines[-10:]:
-                        print(line[:500])
-                print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
-                raise
-            print(
-                "SANDIUM_PENDING_WORK_DRY_RUN_RETRY=MANIFEST_REGENERATION_ONLY "
-                f"next_attempt={attempt + 1}"
-            )
-    else:
-        raise RemainingWorkError("pending-work dry run exhausted retries without a measurement")
-    assert count is not None
+    try:
+        run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, errors="replace",
+                             timeout=timeout_seconds, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RemainingWorkError(
+            f"no-build dry run timed out after {timeout_seconds}s; compile was not started"
+        ) from exc
+    output = run.stdout or ""
+    print("SANDIUM_PENDING_WORK_DRY_RUN_ATTEMPT=1/1")
+    print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
+    print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
+    if run.returncode != 0:
+        raise RemainingWorkError(
+            f"no-build dry run failed with exit {run.returncode}; tail: {_tail(output)}"
+        )
+
+    # Siso must not alter the graph while measuring it. If it regenerates again,
+    # fail with a concrete diagnostic instead of retrying the same operation or
+    # interpreting a zero-step summary as proof that no compilation remains.
+    graph_after = sha256_file(graph)
+    args_after = sha256_file(args_gn)
+    if graph_after != graph_before or args_after != args_hash:
+        print("SANDIUM_PENDING_WORK_GRAPH_CHANGED_DURING_DRY_RUN=true")
+        raise RemainingWorkError(
+            "GN/Ninja graph or args changed during pending-work measurement; "
+            f"before_graph={graph_before} after_graph={graph_after} "
+            f"before_args={args_hash} after_args={args_after}; tail: {_tail(output)}"
+        )
+    try:
+        count = parse_pending_actions(output)
+    except RemainingWorkError as exc:
+        print(f"SANDIUM_PENDING_WORK_DRY_RUN_PARSE_ERROR={exc}")
+        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
+        lines = output.splitlines()
+        for line in lines[:30]:
+            print(line[:500])
+        if len(lines) > 30:
+            print(f"... {len(lines) - 30} additional dry-run lines omitted ...")
+            for line in lines[-10:]:
+                print(line[:500])
+        print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
+        raise
+
     report = {
         "schema": 1, "stage": stage, "phase": phase,
         "pending_actions": count,
         "build_ninja_sha256": graph_before,
         "args_gn_sha256": args_hash,
-        "measurement": "completed_autoninja_dry_run_action_rows",
+        "measurement": "explicit_gn_gen_then_autoninja_dry_run",
         "compile_started": False,
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"SANDIUM_PENDING_COMPILE_ACTIONS_{phase.upper()}={count}")
     print(f"SANDIUM_PENDING_COMPILE_GRAPH_SHA256={graph_before}")
-    print(f"SANDIUM_PENDING_COMPILE_MEASUREMENT=DRY_RUN_ONLY")
+    print("SANDIUM_PENDING_COMPILE_MEASUREMENT=DRY_RUN_ONLY")
+    print("SANDIUM_PENDING_WORK_GRAPH_STABLE=PASS")
     return report
 
 

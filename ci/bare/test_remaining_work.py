@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import importlib.util
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 HERE = __import__("pathlib").Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("sandium_remaining_work", HERE / "remaining_work.py")
@@ -58,6 +62,70 @@ rebuild manifest finished
     def test_mixed_denominators_fail_closed(self):
         with self.assertRaisesRegex(M.RemainingWorkError, "denominator changed"):
             M.parse_pending_actions("[1/2] compile a.o\n[1/3] compile b.o\n")
+
+
+    def _measure_fixture(self):
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        source = root / "src"
+        out = source / "out" / "android_Debug_arm64"
+        gn = source / "buildtools" / "linux64" / "gn"
+        gn.parent.mkdir(parents=True)
+        gn.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        gn.chmod(0o755)
+        out.mkdir(parents=True)
+        (out / "build.ninja").write_text("ninja graph\n", encoding="utf-8")
+        (out / "args.gn").write_text("use_siso = true\n", encoding="utf-8")
+        return tmp, source, out
+
+    def test_measure_runs_explicit_gn_generation_before_dry_run(self):
+        tmp, source, out = self._measure_fixture()
+        self.addCleanup(tmp.cleanup)
+        report_path = Path(tmp.name) / "report.json"
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(list(command))
+            if command[0].endswith("/gn"):
+                return subprocess.CompletedProcess(command, 0, "Generating ninja files...\n")
+            return subprocess.CompletedProcess(command, 0, "[1/2] compile object.o\n[2/2] link apk\n")
+
+        with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
+             mock.patch.object(M.subprocess, "run", side_effect=fake_run):
+            report = M.measure(source_root=source, output_dir=out, stage=1, phase="start",
+                               report_path=report_path, timeout_seconds=30)
+        self.assertEqual(report["pending_actions"], 2)
+        self.assertEqual(report["measurement"], "explicit_gn_gen_then_autoninja_dry_run")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][1:3], ["gen", "out/android_Debug_arm64"])
+        self.assertEqual(calls[1][1], "-n")
+        self.assertFalse(report["compile_started"])
+
+    def test_measure_fails_after_single_dry_run_if_siso_only_regenerates_manifest(self):
+        tmp, source, out = self._measure_fixture()
+        self.addCleanup(tmp.cleanup)
+        report_path = Path(tmp.name) / "report.json"
+        calls = []
+        regen_only = """schedule pending:1+ready:0
+../../buildtools/linux64/gn --root=../.. -q --regeneration gen .
+rebuild manifest finished
+ 0.08s Regenerating ninja files
+ 4.99s Build Succeeded: 0 steps - 0.00/s
+"""
+
+        def fake_run(command, **kwargs):
+            calls.append(list(command))
+            if command[0].endswith("/gn"):
+                return subprocess.CompletedProcess(command, 0, "Generating ninja files...\n")
+            return subprocess.CompletedProcess(command, 0, regen_only)
+
+        with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
+             mock.patch.object(M.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(M.RemainingWorkError, "no Ninja action rows"):
+                M.measure(source_root=source, output_dir=out, stage=1, phase="start",
+                          report_path=report_path, timeout_seconds=30)
+        self.assertEqual(len(calls), 2, "must not loop the same ineffective dry run")
+        self.assertFalse(report_path.exists(), "failed measurement must not produce a report")
 
 
 if __name__ == "__main__":

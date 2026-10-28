@@ -223,7 +223,8 @@ if [[ "$MODE" == "prepare-source" ]]; then
 fi
 # Set REAPI configuration without generating a fresh GN output tree first.
 # A compatible checkpoint contains build.ninja, its stamp, Siso state and objects;
-# those files are one snapshot and must be restored together.
+# those files are one snapshot and must be restored together. The pending-work
+# measurement explicitly runs GN gen after this snapshot is identity-validated.
 python3 "$CONTROL/ci/bare/configure_siso.py" --workspace "$ROOT" --write
 if [[ -s "$SDIR/.sisoenv" ]]; then
   printf '%s\n' 'ninja -re_cache_enable_write=true' > "$SDIR/.sisorc"
@@ -245,7 +246,7 @@ if [[ "$CHECKPOINT_QUALITY_RC" -eq 0 ]]; then
     --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
   RESTORED_OUTPUT_CHECKPOINT=true
   echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN"
-  echo "SANDIUM_GN_GENERATION_RUN=no"
+  echo "SANDIUM_GN_GENERATION_RUN=DEFERRED_TO_PENDING_WORK_MEASUREMENT"
   INVENTORY_STATUS="$(python3 - "$STATE_REPORT" <<'PY'
 import json,sys
 from pathlib import Path
@@ -300,17 +301,17 @@ python3 "$CONTROL/ci/bare/compiled_output_reuse_preflight.py" normalize --source
 python3 "$CONTROL/ci/bare/write_cache_identity.py"
 python3 "$CONTROL/ci/bare/build_identity.py" --mode record --root "$ROOT" --output "$ROOT/sandium-output"
 
-# Prime Siso's manifest before the timed compile window. A one-time GN/Ninja
-# regeneration after restoring a cached output tree is supported behavior; it
-# must not be mistaken for a failed build after 40+ minutes of useful work.
-# The preflight runs at most two no-op passes and fails early only if the graph
-# keeps regenerating or the source/toolchain/GN identity changes.
+# Validate checkpoint identity and graph files before any explicit GN work.
+# This helper is intentionally filesystem-only and preserves the restored
+# snapshot. The separate pending-work measurement performs GN gen and then
+# requires a parseable, graph-stable Siso dry run before compilation begins.
 python3 "$CONTROL/ci/bare/manifest_preflight.py" \
   --control "$CONTROL" --root "$ROOT" --source-root "$SRC" --output-dir "$OUT" \
   --stage "$STAGE" --log "$ROOT/stage-$STAGE-manifest-preflight.log" --timeout-seconds 180
 
-# First run the full-target no-build dry run. This may cause Siso/GN to
-# regenerate Ninja manifests, so it must precede the sampled reuse proof.
+# remaining_work.py explicitly refreshes GN manifests before the full-target
+# dry run. Its measured graph hash must match the sampled compiled-output reuse
+# proof below; an unmeasured regeneration-only dry run is a hard failure.
 START_WORK_REPORT="$ROOT/pending-work-$STAGE-start.json"
 python3 "$CONTROL/ci/bare/remaining_work.py" \
   --source-root "$SRC" --output-dir "$OUT" --stage "$STAGE" --phase start \
