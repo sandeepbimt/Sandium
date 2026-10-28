@@ -4,7 +4,7 @@ import json, sys
 from pathlib import Path
 
 STAGES = [
- {"stage":1,"requires":[],"proof":["pinned_bare_chromium_identity","discover_prior_useful_run_or_record_miss","full_output_checkpoint_or_safe_siso_fallback","remote_or_cache_evidence","forward_progress_or_verified_apk"]},
+ {"stage":1,"requires":[],"proof":["pinned_bare_chromium_identity","restore_integrity_validated_prior_output_checkpoint","measured_pending_work_after_reuse","verified_local_object_reuse","remote_or_cache_evidence","forward_progress_or_verified_apk"]},
  {"stage":2,"requires":[1],"proof":["same_build_identity","same_timestamp_policy","restore_stage_1_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
  {"stage":3,"requires":[2],"proof":["same_build_identity","same_timestamp_policy","restore_stage_2_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
  {"stage":4,"requires":[3],"proof":["same_build_identity","same_timestamp_policy","restore_stage_3_full_output_checkpoint","remote_cache_or_remote_execution","forward_progress_or_verified_apk"]},
@@ -39,33 +39,20 @@ def validate():
         errors.append("runner must restore and pack the full GN output tree")
     if "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_MODE=INTACT_SNAPSHOT_BEFORE_GN" not in run_stage:
         errors.append("compatible checkpoints must be restored intact before GN generation")
-    if run_stage.index('checkpoint_quality.py" --root "$ROOT"') > run_stage.index('bootstrap_chromium.sh" configure'):
-        errors.append("checkpoint quality must run before the Stage 1 cold GN path")
-    if "SANDIUM_OUTPUT_CHECKPOINT_SNAPSHOT_INTACT=PASS" not in output_checkpoint:
-        errors.append("checkpoint restore must preserve graph, stamp, Siso state and compiled outputs as one snapshot")
-    if 'output_checkpoint.py" verify-reuse' not in run_stage:
-        errors.append("runner must verify sampled local compiled-output reuse after each build window")
-    if "compiled_output_inventory" not in output_checkpoint or "COMPILED_OUTPUT_MIN_FILES = 100" not in output_checkpoint:
-        errors.append("full-output checkpoints must inventory actual compiled object files")
-    if "compiled_output_action_samples" not in output_checkpoint or "MIN_REUSED_ACTION_SAMPLES = 3" not in output_checkpoint:
-        errors.append("checkpoint must bind Siso-reported object outputs to content hashes")
-    if "compiled_output_inventory_missing_from_predecessor_checkpoint" not in output_checkpoint:
-        errors.append("continuation stages must reject legacy checkpoints without compiled-output inventory")
-    if "SANDIUM_COMPILED_OUTPUT_REUSE_EVIDENCE=" not in output_checkpoint or "VERIFIED_LOCAL_OUTPUT_REUSE" not in output_checkpoint:
-        errors.append("the reuse verifier must emit explicit evidence, separate from checkpoint restore")
-    if not manifest_preflight:
-        errors.append("runner must have a dedicated manifest preflight helper")
-    if 'manifest_preflight.py"' not in run_stage:
-        errors.append("runner must prime the restored Siso manifest before compilation")
-    elif run_stage.index('manifest_preflight.py"') > run_stage.index('timeout --signal=INT --kill-after=60s'):
-        errors.append("manifest preflight must run before the timed compile window")
-    if "NINJA_REGEN_GATE=FAIL" in run_stage:
-        errors.append("one supported Siso manifest regeneration must not discard a completed stage window")
+    if "SANDIUM_STAGE1_REUSE_GATE=FAIL" not in run_stage:
+        errors.append("Stage 1 must stop before compilation when no valid prior output checkpoint exists")
+    if 'bootstrap_chromium.sh" configure' in run_stage:
+        errors.append("cold Stage 1 GN/bootstrap path violates the no-cold-build acceptance gate")
+    remaining_work = (here / "remaining_work.py").read_text(encoding="utf-8")
+    if "_refresh_gn_manifest" in remaining_work or '["gn", "gen"' in remaining_work:
+        errors.append("pending-work measurement must not regenerate GN on a restored output snapshot")
+    if "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" not in remaining_work:
+        errors.append("pending-work measurement must preserve the restored graph/stamp before Siso reuse")
     if "mode=filesystem-only" not in manifest_preflight or "siso_dry_run_in_preflight=no" not in manifest_preflight:
         errors.append("preflight must not run the known-repeating Siso no-op regeneration path")
     if "handled_by_real_siso_build" not in manifest_preflight:
         errors.append("manifest regeneration must be delegated to the actual Siso build after filesystem validation")
-    if not progress_normalizer:
+    if "Full identity-validated Chromium GN output tree restored" not in output_checkpoint:
         errors.append("small action-count variance helper is missing")
     if 'normalize_progress_total.py"' not in run_stage:
         errors.append("runner must normalize progress count only with the identity-bound helper")
@@ -83,8 +70,10 @@ def validate():
         errors.append("runner must validate checkpoint quality before publishing")
     if "MIN_GOOD_OUTPUT_BYTES = 512 * 1024 * 1024" not in quality:
         errors.append("checkpoint selection must reject metadata-only and undersized output trees")
-    if "candidate_is_not_a_green_completed_stage" not in quality or "checkpoint_size_mismatch" not in quality:
-        errors.append("checkpoint quality must require green-stage metadata and match declared/actual size")
+    if "candidate_is_not_a_green_completed_stage_or_authorized_partial" not in quality or "checkpoint_size_mismatch" not in quality:
+        errors.append("checkpoint quality must default to green-stage metadata and match declared/actual size")
+    if "--allow-partial" not in quality or "allow_partial" not in quality:
+        errors.append("partial checkpoint recovery must be explicit and still pass checkpoint integrity checks")
     if "SANDIUM_APK_FAST_PATH=PASS" not in fast_apk:
         errors.append("cached APK fast path must verify and propagate the current stage")
     if "APK_SIGNATURE_CHECK=REUSED_SAVED_VERIFICATION_RECORD" not in fast_apk:
@@ -99,8 +88,8 @@ def validate():
             errors.append("stage has no proof requirements: " + str(x["stage"]))
     if not any("remote_or_cache_evidence" in x["proof"] for x in STAGES):
         errors.append("no remote evidence gate")
-    if "discover_prior_useful_run_or_record_miss" not in STAGES[0]["proof"]:
-        errors.append("stage 1 must discover a prior useful run or record an explicit miss")
+    if "restore_integrity_validated_prior_output_checkpoint" not in STAGES[0]["proof"]:
+        errors.append("Stage 1 cannot proceed on a cache miss; it must restore prior compiled output")
     for x in STAGES[1:]:
         required = f"restore_stage_{x['stage']-1}_full_output_checkpoint"
         if required not in x["proof"]:

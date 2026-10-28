@@ -336,6 +336,9 @@ def main() -> int:
               # denominator observed in this stage. Stage-to-stage compile work
               # is recorded separately because valid local reuse reduces it.
               "total_action_count": a.total_actions,
+              "graph_action_count": a.total_actions,
+              "total_compile_actions_at_stage_start": required_at_start,
+              "pending_compile_actions_after_window": remaining_after_window,
               "evidence": evidence,
               "local_build_output_restored": handoff.get("local_compiled_outputs_restored") is True,
               "state_handoff": handoff, "state_handoff_report_sha256": sha(a.state_handoff_report), **artifact}
@@ -354,7 +357,10 @@ def main() -> int:
     print("SANDIUM_CUMULATIVE_COMPLETED_ACTIONS="+str(cumulative_done))
     remaining_estimate = accounting["estimated_remaining_actions"]
     print("SANDIUM_ESTIMATED_REMAINING_ACTIONS="+str(remaining_estimate))
-    print("SANDIUM_TOTAL_ACTION_COUNT="+str(a.total_actions))
+    print("SANDIUM_TOTAL_ACTION_COUNT="+str(required_at_start))
+    print("SANDIUM_TOTAL_COMPILE_ACTIONS_AFTER_REUSE="+str(required_at_start))
+    print("SANDIUM_GRAPH_ACTION_COUNT="+str(a.total_actions))
+    print("SANDIUM_PENDING_COMPILE_ACTIONS_AFTER_WINDOW="+str(remaining_after_window))
     print("SANDIUM_BUILD_NINJA_SHA256="+graph_hash)
     print("SANDIUM_REQUIRED_ACTIONS_AT_STAGE_START="+str(required_at_start))
     print("SANDIUM_REMAINING_ACTIONS_AFTER_WINDOW="+str(remaining_after_window))

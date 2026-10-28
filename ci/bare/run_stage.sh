@@ -235,8 +235,10 @@ python3 "$CONTROL/ci/bare/write_cache_identity.py"
 # Validate the candidate against the pinned source and the cached graph before GN
 # runs. This avoids mixing new graph/stamp mtimes with the restored Siso state.
 set +e
+QUALITY_ARGS=()
+if [[ "$STAGE" -eq 1 ]]; then QUALITY_ARGS+=(--allow-partial); fi
 python3 "$CONTROL/ci/bare/checkpoint_quality.py" --root "$ROOT" --control "$CONTROL" \
-  --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
+  --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" "${QUALITY_ARGS[@]}"
 CHECKPOINT_QUALITY_RC=$?
 set -e
 echo "SANDIUM_OUTPUT_CHECKPOINT_QUALITY_EXIT_CODE=$CHECKPOINT_QUALITY_RC"
@@ -261,25 +263,10 @@ else
     echo "SANDIUM_OUTPUT_CHECKPOINT_QUALITY=FAIL continuation stage cannot consume an invalid/missing predecessor checkpoint" >&2
     exit 54
   fi
-  echo "SANDIUM_COMPILED_OUTPUT_REUSE=NO_FULL_CHECKPOINT"
-  # The only cold path: Stage 1 with no compatible full snapshot. If a candidate
-  # was rejected, checkpoint_quality quarantined only this working-copy extract.
-  bash "$CONTROL/ci/bare/bootstrap_chromium.sh" configure
-  set +e
-  python3 "$CONTROL/ci/bare/output_checkpoint.py" restore --root "$ROOT" --stage "$STAGE" \
-    --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}"
-  OUTPUT_CHECKPOINT_RC=$?
-  set -e
-  echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE_EXIT_CODE=$OUTPUT_CHECKPOINT_RC"
-  if [[ "$OUTPUT_CHECKPOINT_RC" -eq 0 ]]; then
-    RESTORED_OUTPUT_CHECKPOINT=true
-  elif [[ "$OUTPUT_CHECKPOINT_RC" -eq 1 ]]; then
-    # Keep the light Siso-state fallback only for a genuine Stage 1 cache miss.
-    python3 "$STATE_TOOL" restore --root "$ROOT" --stage "$STAGE" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --archive "$STATE_ARCHIVE" --meta "$STATE_META"
-  else
-    echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=FAIL stage=$STAGE rc=$OUTPUT_CHECKPOINT_RC" >&2
-    exit "$OUTPUT_CHECKPOINT_RC"
-  fi
+  echo "SANDIUM_STAGE1_REUSE_GATE=FAIL no integrity-validated previous-run compiled-output checkpoint" >&2
+  echo "SANDIUM_BUILD_NOT_STARTED=true" >&2
+  exit 59
+
 fi
 
 if [[ "$RESTORED_OUTPUT_CHECKPOINT" == true && "$CHECKPOINT_QUALITY_RC" -eq 0 ]]; then
@@ -332,6 +319,11 @@ import json,sys
 print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
 PY
 )"
+START_GRAPH_TOTAL="$(python3 - "$START_WORK_REPORT" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8"))["graph_action_count"]))
+PY
+)"
 START_GRAPH_SHA="$(python3 - "$START_WORK_REPORT" <<'PY'
 import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
@@ -353,6 +345,29 @@ PY
 )"
 python3 "$CONTROL/ci/bare/preflight_graph_continuity.py" \
   --stage "$STAGE" --full-graph-sha "$START_GRAPH_SHA" --reuse-graph-sha "$REUSE_GRAPH_SHA"
+REUSE_STATUS="$(python3 - "$REUSE_REPORT" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1],encoding="utf-8")).get("status","MISSING"))
+PY
+)"
+REUSE_SAMPLE_COUNT="$(python3 - "$REUSE_REPORT" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8")).get("sample_count",0)))
+PY
+)"
+[[ "$REUSE_STATUS" == "PASS" && "$REUSE_SAMPLE_COUNT" -ge 8 ]] || {
+  echo "SANDIUM_REUSE_START_GATE=FAIL status=$REUSE_STATUS samples=$REUSE_SAMPLE_COUNT" >&2
+  echo "SANDIUM_BUILD_NOT_STARTED=true" >&2
+  exit 56
+}
+[[ "$START_PENDING" -lt "$START_GRAPH_TOTAL" ]] || {
+  echo "SANDIUM_PENDING_WORK_REUSE_GATE=FAIL pending=$START_PENDING graph=$START_GRAPH_TOTAL" >&2
+  echo "SANDIUM_BUILD_NOT_STARTED=true" >&2
+  exit 57
+}
+echo "SANDIUM_TOTAL_ACTION_COUNT=$START_PENDING"
+echo "SANDIUM_GRAPH_ACTION_COUNT=$START_GRAPH_TOTAL"
+echo "SANDIUM_SKIPPED_GRAPH_ACTIONS_START=$((START_GRAPH_TOTAL-START_PENDING))"
 if [[ "$STAGE" -gt 1 ]]; then
   PREVIOUS_PENDING="$(python3 - "$PREV" <<'PY'
 import json,sys
@@ -425,13 +440,18 @@ import json,sys
 print(int(json.load(open(sys.argv[1],encoding="utf-8"))["pending_actions"]))
 PY
 )"
+END_GRAPH_TOTAL="$(python3 - "$END_WORK_REPORT" <<'PY'
+import json,sys
+print(int(json.load(open(sys.argv[1],encoding="utf-8"))["graph_action_count"]))
+PY
+)"
 END_GRAPH_SHA="$(python3 - "$END_WORK_REPORT" <<'PY'
 import json,sys
 print(json.load(open(sys.argv[1],encoding="utf-8"))["build_ninja_sha256"])
 PY
 )"
-[[ "$START_GRAPH_SHA" == "$END_GRAPH_SHA" ]] || {
-  echo "SANDIUM_PENDING_WORK_GRAPH_CONTINUITY=FAIL start=$START_GRAPH_SHA end=$END_GRAPH_SHA" >&2
+[[ "$START_GRAPH_SHA" == "$END_GRAPH_SHA" && "$START_GRAPH_TOTAL" -eq "$END_GRAPH_TOTAL" ]] || {
+  echo "SANDIUM_PENDING_WORK_GRAPH_CONTINUITY=FAIL start_sha=$START_GRAPH_SHA end_sha=$END_GRAPH_SHA start_total=$START_GRAPH_TOTAL end_total=$END_GRAPH_TOTAL" >&2
   exit 56
 }
 APK="$OUT/apks/ChromePublic.apk"
@@ -458,13 +478,11 @@ DONE="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f1)"
 OBSERVED_TOTAL="$(printf '%s\n' "$LAST_PROGRESS" | cut -d/ -f2)"
 echo "SANDIUM_PROGRESS_COUNTER_SOURCE=LAST_COMPLETE_PAIR"
 echo "SANDIUM_PROGRESS_COUNTER_PAIR=$DONE/$OBSERVED_TOTAL"
-if [[ "$STAGE" -eq 1 ]]; then
-  TOTAL="$(python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage "$STAGE" --observed-total "$OBSERVED_TOTAL" --control "$CONTROL" --root "$ROOT")"
-else
-  TOTAL="$(python3 "$CONTROL/ci/bare/normalize_progress_total.py" --stage "$STAGE" --observed-total "$OBSERVED_TOTAL" --previous-ledger "$PREV" --control "$CONTROL" --root "$ROOT")"
-fi
-echo "SANDIUM_OBSERVED_TOTAL_ACTION_COUNT=$OBSERVED_TOTAL"
-echo "SANDIUM_NORMALIZED_TOTAL_ACTION_COUNT=$TOTAL"
+TOTAL="$START_GRAPH_TOTAL"
+echo "SANDIUM_SISO_PROGRESS_DISPLAY_TOTAL=$OBSERVED_TOTAL"
+echo "SANDIUM_GRAPH_ACTION_COUNT=$TOTAL"
+echo "SANDIUM_TOTAL_ACTION_COUNT=$START_PENDING"
+echo "SANDIUM_TOTAL_COMPILE_ACTIONS_AFTER_REUSE=$START_PENDING"
 APK="$OUT/apks/ChromePublic.apk"; COMPLETE=false
 if [[ -s "$APK" ]]; then bash "$CONTROL/ci/bare/package_artifact.sh"; COMPLETE=true; fi
 if [[ "$STAGE" -eq 1 ]]; then

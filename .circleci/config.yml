@@ -193,10 +193,15 @@ jobs:
             - restore_cache:
                 name: Restore the best green validated compiled-output checkpoint, stage 5 first
                 keys:
+                  - sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-5-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-5-
+                  - sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-4-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-4-
+                  - sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-
+                  - sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-
+                  - sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-
                   # One-time migration fallback; only the known-good legacy Stage 1 key is eligible.
                   # Its old full-CI fingerprint is fixed here so orchestration edits do not orphan it.
@@ -300,7 +305,24 @@ jobs:
                     echo "SANDIUM_PARTIAL_CHECKPOINT_EXIT_CODE=$rc"
                     cat "$ROOT/stage-<< parameters.stage_index >>-partial-checkpoint.log" 2>/dev/null || true
                   fi
+                  if [[ -d "$ROOT/sandium-build-output-checkpoint" && ! -L "$ROOT/sandium-build-output-checkpoint" ]]; then
+                    python3 "$CONTROL/ci/bare/checkpoint_quality.py" \
+                      --root "$ROOT" --control "$CONTROL" \
+                      --stage "<< parameters.stage_index >>" \
+                      --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" \
+                      --allow-partial --produced
+                    rc=$?
+                    echo "SANDIUM_PARTIAL_CHECKPOINT_QUALITY_EXIT_CODE=$rc"
+                  else
+                    echo "SANDIUM_PARTIAL_CHECKPOINT_QUALITY=SKIP no safely packed checkpoint"
+                  fi
                   exit 0
+            - save_cache:
+                name: Save validated partial outputs so the next Stage 1 resumes instead of restarting
+                when: on_fail
+                key: sandium-output-partial-v1-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-<< parameters.stage_index >>-{{ .Environment.CIRCLE_WORKFLOW_ID }}-{{ .BuildNum }}
+                paths:
+                  - sandium-build-output-checkpoint
             - save_cache:
                 name: Save only a quality-validated green compiled-output checkpoint for reuse
                 when: on_success
