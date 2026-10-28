@@ -269,9 +269,9 @@ class OutputCheckpointTests(unittest.TestCase):
                 "remote_action_cache_reuse_proven": True,
                 "artifact_verified": False,
             }), encoding="utf-8")
-            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES), \\
-                 patch.object(M, "source_identity", return_value=IDENTITY):
-                self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
+                with patch.object(M, "source_identity", return_value=IDENTITY):
+                    self.assertEqual(M.command_pack(root, control, 1, "wf-1", ledger, partial=False), 0)
             metadata = M.read_json(root / M.CHECKPOINT_NAME / M.META_NAME)
             self.assertEqual(metadata["remaining_actions_after_window"], 0)
             self.assertEqual(metadata["required_actions_at_start"], 100)
