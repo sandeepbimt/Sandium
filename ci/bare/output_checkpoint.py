@@ -42,6 +42,10 @@ CONTROL_INPUTS = (
     "ci/siso/buildbuddy-credential-helper.py",
 )
 CRITICAL_ALWAYS = ("args.gn", "build.ninja")
+# Ninja's command and dependency histories must travel with the object files.
+# A checkpoint without these logs can make valid outputs appear dirty or leave
+# Siso unable to prove that a restored action is up to date.
+REQUIRED_NINJA_HISTORY = (".ninja_log", ".ninja_deps")
 SISO_STATE_NAMES = (".siso_fs_state", ".siso_fs_state.0")
 SISO_JOURNAL_STATE_NAMES = (".siso_fs_state.journal",)
 OPTIONAL_STATE_NAMES = (*SISO_JOURNAL_STATE_NAMES, ".ninja_log", ".ninja_deps")
@@ -197,6 +201,10 @@ def output_manifest(output: Path) -> dict[str, str]:
     if state_name is None:
         raise CheckpointError("No nonempty regular Siso filesystem state or recovery journal exists")
     hashes[state_name] = sha256_file(output / state_name)
+    for name in REQUIRED_NINJA_HISTORY:
+        path = output / name
+        require_regular_nonempty(path)
+        hashes[name] = sha256_file(path)
     for name in OPTIONAL_STATE_NAMES:
         path = output / name
         if name not in hashes and path.is_file() and not path.is_symlink() and path.stat().st_size:
