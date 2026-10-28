@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -119,7 +120,15 @@ def _refresh_gn_manifest(*, source_root: Path, output_dir: Path,
     if gn.is_symlink() or not gn.is_file():
         raise RemainingWorkError(f"GN executable is missing/unsafe: {gn}")
 
+    graph = output_dir / "build.ninja"
+    if not graph.is_file() or graph.is_symlink() or graph.stat().st_size == 0:
+        raise RemainingWorkError(f"GN output graph missing/unsafe before regeneration: {graph}")
+    if not args_gn.is_file() or args_gn.is_symlink() or args_gn.stat().st_size == 0:
+        raise RemainingWorkError(f"GN args missing/unsafe before regeneration: {args_gn}")
+    graph_before_hash = sha256_file(graph)
+    graph_before_mtime_ns = graph.stat().st_mtime_ns
     args_before = sha256_file(args_gn)
+    args_before_mtime_ns = args_gn.stat().st_mtime_ns
     try:
         output_arg = output_dir.relative_to(source_root).as_posix()
     except ValueError:
@@ -150,6 +159,19 @@ def _refresh_gn_manifest(*, source_root: Path, output_dir: Path,
     if args_after != args_before:
         raise RemainingWorkError("args.gn changed during GN manifest generation")
     graph_hash = sha256_file(graph)
+    if graph_hash == graph_before_hash:
+        # GN may rewrite an identical manifest while creating a missing stamp.
+        # Preserve the restored mtime so compiled objects are not made dirty just
+        # because this metadata repair ran.
+        os.utime(graph, ns=(graph.stat().st_atime_ns, graph_before_mtime_ns), follow_symlinks=False)
+        if graph.stat().st_mtime_ns != graph_before_mtime_ns:
+            raise RemainingWorkError("could not preserve restored build.ninja mtime during stamp recovery")
+        print("SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS")
+    if args_after == args_before:
+        os.utime(args_gn, ns=(args_gn.stat().st_atime_ns, args_before_mtime_ns), follow_symlinks=False)
+        if args_gn.stat().st_mtime_ns != args_before_mtime_ns:
+            raise RemainingWorkError("could not preserve restored args.gn mtime during stamp recovery")
+        print("SANDIUM_PENDING_WORK_GN_ARGS_MTIME_PRESERVED=PASS")
     print("SANDIUM_PENDING_WORK_GN_GEN=PASS")
     print(f"SANDIUM_PENDING_WORK_GN_GRAPH_SHA256={graph_hash}")
     print(f"SANDIUM_PENDING_WORK_ARGS_SHA256={args_after}")

@@ -41,7 +41,7 @@ CONTROL_INPUTS = (
     "ci/siso/buildbuddy_backend.star",
     "ci/siso/buildbuddy-credential-helper.py",
 )
-CRITICAL_ALWAYS = ("args.gn", "build.ninja")
+CRITICAL_ALWAYS = ("args.gn", "build.ninja", "build.ninja.stamp")
 # Ninja's command and dependency histories must travel with the object files.
 # A checkpoint without these logs can make valid outputs appear dirty or leave
 # Siso unable to prove that a restored action is up to date.
@@ -562,6 +562,12 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
             return miss("build_identity_digest_mismatch")
         verify_control_inputs(meta.get("control_inputs"), control)
         verify_manifest_files(checkpoint, meta.get("output_files"))
+        saved_output_files = meta.get("output_files")
+        if stage > 1 and (
+            not isinstance(saved_output_files, dict)
+            or "build.ninja.stamp" not in saved_output_files
+        ):
+            return miss("previous_stage_checkpoint_missing_generator_stamp_manifest")
         mtime_entries = meta.get("output_mtime_ns")
         if mtime_entries is None:
             # Older saved caches predate the nanosecond-mtime manifest. Do not

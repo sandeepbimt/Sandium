@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import os
 import subprocess
 import tempfile
 import unittest
@@ -184,6 +185,30 @@ noexec:0 local:0 remote:0 cache:0 skip:2
                 M.measure(source_root=source, output_dir=out, stage=1, phase="start",
                           report_path=report_path, timeout_seconds=30)
         self.assertFalse(report_path.exists())
+
+    def test_gn_refresh_preserves_restored_graph_and_args_mtimes_when_bytes_match(self):
+        tmp, source, out = self._measure_fixture()
+        self.addCleanup(tmp.cleanup)
+        graph = out / "build.ninja"
+        args = out / "args.gn"
+        graph_mtime = graph.stat().st_mtime_ns
+        args_mtime = args.stat().st_mtime_ns
+
+        def fake_run(command, **kwargs):
+            graph_stat = graph.stat()
+            args_stat = args.stat()
+            os.utime(graph, ns=(graph_stat.st_atime_ns, graph_mtime + 5_000_000_000))
+            os.utime(args, ns=(args_stat.st_atime_ns, args_mtime + 5_000_000_000))
+            return subprocess.CompletedProcess(command, 0, "GN generation complete\\n")
+
+        with mock.patch.object(M.subprocess, "run", side_effect=fake_run):
+            graph_hash, args_hash = M._refresh_gn_manifest(
+                source_root=source, output_dir=out, args_gn=args, timeout_seconds=30
+            )
+        self.assertEqual(graph_hash, M.sha256_file(graph))
+        self.assertEqual(args_hash, M.sha256_file(args))
+        self.assertEqual(graph.stat().st_mtime_ns, graph_mtime)
+        self.assertEqual(args.stat().st_mtime_ns, args_mtime)
 
     def test_measure_fails_if_siso_changes_the_restored_build_stamp(self):
         tmp, source, out = self._measure_fixture()

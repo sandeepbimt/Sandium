@@ -45,7 +45,9 @@ def make_output(path: Path, state_name: str = ".siso_fs_state") -> dict[str, str
     objects.mkdir(parents=True)
     for index in range(120):
         (objects / f"unit_{index:03d}.o").write_bytes((f"compiled-object-{index}\\n".encode() + b"x" * 12000))
-    return {name: M.sha256_file(path / name) for name in files}
+    result = {name: M.sha256_file(path / name) for name in files}
+    result["build.ninja.stamp"] = M.sha256_file(stamp)
+    return result
 
 
 def add_checkpoint_evidence(root: Path, output: Path) -> dict:
@@ -230,6 +232,66 @@ class OutputCheckpointTests(unittest.TestCase):
             self.assertIsNone(result)
             self.assertFalse(checkpoint.exists())
             self.assertTrue((root / "sandium-rejected-output-checkpoints").is_dir())
+
+    def test_new_checkpoint_requires_generator_stamp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "out"
+            make_output(output)
+            (output / "build.ninja.stamp").unlink()
+            with self.assertRaisesRegex(M.CheckpointError, "build.ninja.stamp"):
+                M.output_manifest(output)
+
+    def test_stage_one_can_migrate_legacy_checkpoint_without_generator_stamp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            checkpoint = root / M.CHECKPOINT_NAME
+            files = make_output(checkpoint)
+            (checkpoint / "build.ninja.stamp").unlink()
+            files.pop("build.ninja.stamp")
+            evidence = add_checkpoint_evidence(root, checkpoint)
+            (checkpoint / M.META_NAME).write_text(json.dumps({
+                "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
+                "output_relative_path": M.OUT_RELATIVE.as_posix(),
+                "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
+                "control_inputs": CONTROL_HASHES, "output_files": files,
+                **evidence,
+                "stage": 1, "workflow_id": "old-wf", "stage_record_valid": True,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
+                meta = M.validate_candidate(
+                    root, control, 1, "new-wf", pre_source=True, required=False,
+                    preserve_on_miss=True,
+                )
+            self.assertIsNotNone(meta)
+            self.assertNotIn("build.ninja.stamp", meta["output_mtime_ns"])
+            self.assertFalse((checkpoint / "build.ninja.stamp").exists())
+
+    def test_continuation_rejects_checkpoint_without_generator_stamp_in_saved_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            control = root / "control"
+            control.mkdir()
+            checkpoint = root / M.CHECKPOINT_NAME
+            files = make_output(checkpoint)
+            files.pop("build.ninja.stamp")
+            evidence = add_checkpoint_evidence(root, checkpoint)
+            (checkpoint / M.META_NAME).write_text(json.dumps({
+                "schema": M.SCHEMA, "checkpoint_name": M.CHECKPOINT_NAME,
+                "output_relative_path": M.OUT_RELATIVE.as_posix(),
+                "build_identity": IDENTITY, "build_identity_sha256": M.identity_digest(IDENTITY),
+                "control_inputs": CONTROL_HASHES, "output_files": files,
+                "output_mtime_ns": M.output_mtime_manifest(checkpoint),
+                **evidence,
+                "stage": 1, "workflow_id": "wf-1", "stage_record_valid": True,
+            }), encoding="utf-8")
+            with patch.object(M, "control_inputs", return_value=CONTROL_HASHES):
+                result = M.validate_candidate(
+                    root, control, 2, "wf-1", pre_source=True, required=False,
+                    preserve_on_miss=True,
+                )
+            self.assertIsNone(result)
 
     def test_output_requires_a_siso_state_file(self):
         with tempfile.TemporaryDirectory() as temp:
