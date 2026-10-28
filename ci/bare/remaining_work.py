@@ -160,11 +160,38 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
             report_path: Path, timeout_seconds: int) -> dict[str, Any]:
     graph, args_gn, stamp = (output_dir / "build.ninja", output_dir / "args.gn",
                              output_dir / "build.ninja.stamp")
-    for path in (graph, args_gn, stamp):
-        if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
-            raise RemainingWorkError(f"required restored build input missing/unsafe: {path}")
     if timeout_seconds <= 0:
         raise RemainingWorkError("timeout must be positive")
+    for path in (graph, args_gn):
+        if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
+            raise RemainingWorkError(f"required restored build input missing/unsafe: {path}")
+
+    # Older cached output snapshots can contain the exact pinned graph and
+    # compiled objects but predate build.ninja.stamp. Recreate only that GN
+    # metadata by generating the graph in place, and accept it only if GN leaves
+    # both the graph hash and args.gn identity byte-for-byte unchanged. The
+    # subsequent strict Siso dry run and leaf-object reuse proof remain required.
+    if not stamp.exists():
+        graph_before_repair = sha256_file(graph)
+        args_before_repair = sha256_file(args_gn)
+        print("SANDIUM_PENDING_WORK_STAMP_REPAIR=START_LEGACY_MISSING_STAMP")
+        repaired_graph_hash, repaired_args_hash = _refresh_gn_manifest(
+            source_root=source_root, output_dir=output_dir,
+            args_gn=args_gn, timeout_seconds=timeout_seconds,
+        )
+        if repaired_graph_hash != graph_before_repair or repaired_args_hash != args_before_repair:
+            raise RemainingWorkError(
+                "legacy missing-stamp recovery changed build.ninja or args.gn identity; "
+                "restored outputs are not eligible for reuse"
+            )
+        if not stamp.is_file() or stamp.is_symlink():
+            raise RemainingWorkError("GN did not create a safe build.ninja.stamp during legacy recovery")
+        print("SANDIUM_PENDING_WORK_STAMP_REPAIR=PASS_GRAPH_AND_ARGS_UNCHANGED")
+    if stamp.is_symlink() or not stamp.is_file() or stamp.stat().st_size == 0:
+        # The stamp is a GN-generated metadata file; empty is allowed only if it
+        # exists as a regular non-symlink file.
+        if stamp.is_symlink() or not stamp.is_file():
+            raise RemainingWorkError(f"required restored build input missing/unsafe: {stamp}")
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise RemainingWorkError("autoninja not found; cannot measure pending work safely")
