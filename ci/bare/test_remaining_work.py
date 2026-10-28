@@ -27,6 +27,15 @@ class RemainingWorkTests(unittest.TestCase):
     def test_explicit_no_work_is_zero(self):
         self.assertEqual(M.parse_pending_actions("ninja: no work to do.\n"), 0)
 
+    def test_no_work_marker_cannot_override_nonzero_siso_pending_summary(self):
+        output = """schedule pending:1+ready:0 (node:100 edge:100)
+1.00s Build Succeeded: 10 steps
+noexec:0 local:0 remote:0 cache:0 skip:90
+ninja: no work to do.
+"""
+        with self.assertRaisesRegex(M.RemainingWorkError, "contradictory dry-run output"):
+            M.parse_pending_actions(output)
+
     def test_parses_completed_siso_summary_without_subtracting_skip_twice(self):
         output = """schedule pending:99634+ready:9463 (node:591352 edge:109097)
 1m49.52s Build Succeeded: 56599 steps
