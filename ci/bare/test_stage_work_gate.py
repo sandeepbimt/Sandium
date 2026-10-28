@@ -109,6 +109,10 @@ class StageWorkGateTests(unittest.TestCase):
 
     def test_gate_reads_stage_two_count_from_predecessor_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "handoff.json"
+            report.write_text(json.dumps({
+                "local_compiled_outputs_restored": True,
+            }), encoding="utf-8")
             previous = Path(directory) / "stage-1.json"
             previous.write_text(json.dumps({
                 "remaining_actions_after_window": 52001,
@@ -116,7 +120,7 @@ class StageWorkGateTests(unittest.TestCase):
             }), encoding="utf-8")
             result = M.gate_from_files(
                 stage=2, pending=52001, graph_total=109040,
-                state_report_path=None, previous_ledger_path=previous,
+                state_report_path=report, previous_ledger_path=previous,
             )
             self.assertEqual(result["previous_remaining_actions"], 52001)
 
