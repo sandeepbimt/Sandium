@@ -200,6 +200,10 @@ jobs:
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-3-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-2-
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-1-
+                  # Previously observed reusable 1.8 GiB Stage 1 checkpoint (restored in CircleCI build #743 from job #674).
+                  # Keep this specific candidate ahead of the broad prefix, whose latest-match semantics can select a different archive.
+                  # Integrity, source, toolchain, GN/Siso, object hashes and actual reuse are still revalidated before compile.
+                  - sandium-output-good-v5-JTpNyIRYpPmms_rW8gpimT_lYvQYmDadADPhyEJDgyg=-stage-1-
                   # Cross-fingerprint green fallback; exact source/build identity is still validated.
                   - sandium-output-good-v5-
                   # Explicit known-good legacy Stage 1 cache also precedes failed-stage caches.
