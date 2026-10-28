@@ -240,7 +240,7 @@ class OutputCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(M.CheckpointError, "build.ninja.stamp"):
                 M.output_manifest(output)
 
-    def test_stage_one_can_migrate_legacy_checkpoint_without_generator_stamp(self):
+    def test_stage_one_rejects_legacy_checkpoint_without_generator_stamp_or_mtime_manifest(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             control = root / "control"
@@ -263,9 +263,8 @@ class OutputCheckpointTests(unittest.TestCase):
                     root, control, 1, "new-wf", pre_source=True, required=False,
                     preserve_on_miss=True,
                 )
-            self.assertIsNotNone(meta)
-            self.assertNotIn("build.ninja.stamp", meta["output_mtime_ns"])
-            self.assertFalse((checkpoint / "build.ninja.stamp").exists())
+            self.assertIsNone(meta)
+            self.assertTrue(checkpoint.is_dir(), "legacy candidate must be preserved for diagnosis")
 
     def test_continuation_rejects_checkpoint_without_generator_stamp_in_saved_manifest(self):
         with tempfile.TemporaryDirectory() as temp:
