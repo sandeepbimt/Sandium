@@ -142,7 +142,14 @@ jobs:
           assert "teardown:" in config and "circleci-agent step halt" in config
           fast_step = config.index("name: Reuse a verified APK before restoring the multi-gigabyte build output")
           large_restore = config.index("Restore the best green validated compiled-output checkpoint")
-          assert fast_step < large_restore, "APK fast-path check must precede large output restore"
+          checkpoint_diagnostic = config.index("Verify restored compiled-output checkpoint before source-cache work")
+          source_restore = config.index("Restore the pinned Chromium/Bare source and dependency cache")
+          assert fast_step < large_restore < checkpoint_diagnostic < source_restore, (
+              "checkpoint diagnostics must run after output-cache restore and before expensive source-cache restore"
+          )
+          assert "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=MISS_OR_WRONG_PATH" in config
+          assert "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=SYMLINK" in config
+          assert "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE" in config
           build_step = config.index("Build one bounded incremental window")
           good_output_save = config.index("Save only a quality-validated green compiled-output checkpoint for reuse")
           good_state_save = config.index("Save only successful stage metadata and state capsule for future selection")
