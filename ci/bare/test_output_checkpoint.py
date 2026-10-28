@@ -238,7 +238,7 @@ class OutputCheckpointTests(unittest.TestCase):
             make_output(output)
             # Keep Ninja's dependency/build logs in the snapshot too.
             for name in (".ninja_log", ".ninja_deps"):
-                (output / name).write_text("fixture state\\n", encoding="utf-8")
+                (output / name).write_text("fixture state\n", encoding="utf-8")
             add_checkpoint_evidence(root, output)
             ledger = root / "ledger.json"
             ledger.write_text(json.dumps({
