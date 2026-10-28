@@ -56,6 +56,7 @@ jobs:
             python3 ci/bare/cache_fingerprint.py --help >/dev/null
             python3 ci/bare/source_cache_fingerprint.py --help >/dev/null
             python3 ci/bare/test_remaining_work.py
+            python3 ci/bare/test_stage_work_gate.py
             python3 ci/bare/test_build_identity.py
             python3 ci/bare/test_stage_ledger.py
             python3 ci/bare/test_state_handoff.py

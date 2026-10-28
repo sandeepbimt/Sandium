@@ -45,6 +45,7 @@ python3 "$CONTROL/ci/bare/test_stage_ledger.py"
 python3 "$CONTROL/ci/bare/test_state_handoff.py"
 python3 "$CONTROL/ci/bare/test_output_checkpoint.py"
 python3 "$CONTROL/ci/bare/test_remaining_work.py"
+python3 "$CONTROL/ci/bare/test_stage_work_gate.py"
 python3 "$CONTROL/ci/bare/test_preflight_graph_continuity.py"
 python3 "$CONTROL/ci/bare/test_compiled_output_reuse_preflight.py"
 python3 "$CONTROL/ci/bare/test_fast_apk.py"
@@ -363,29 +364,13 @@ PY
   echo "SANDIUM_BUILD_NOT_STARTED=true" >&2
   exit 56
 }
-[[ "$START_PENDING" -lt "$START_GRAPH_TOTAL" ]] || {
-  echo "SANDIUM_PENDING_WORK_REUSE_GATE=FAIL pending=$START_PENDING graph=$START_GRAPH_TOTAL" >&2
-  echo "SANDIUM_BUILD_NOT_STARTED=true" >&2
-  exit 57
-}
+WORK_GATE_ARGS=(--stage "$STAGE" --pending "$START_PENDING" --graph-total "$START_GRAPH_TOTAL" --state-report "$STATE_REPORT")
+if [[ "$STAGE" -gt 1 ]]; then WORK_GATE_ARGS+=(--previous-ledger "$PREV"); fi
+python3 "$CONTROL/ci/bare/stage_work_gate.py" "${WORK_GATE_ARGS[@]}"
 echo "SANDIUM_TOTAL_ACTION_COUNT=$START_PENDING"
+echo "SANDIUM_TOTAL_COMPILE_ACTIONS_AFTER_REUSE=$START_PENDING"
 echo "SANDIUM_GRAPH_ACTION_COUNT=$START_GRAPH_TOTAL"
 echo "SANDIUM_SKIPPED_GRAPH_ACTIONS_START=$((START_GRAPH_TOTAL-START_PENDING))"
-if [[ "$STAGE" -gt 1 ]]; then
-  PREVIOUS_PENDING="$(python3 - "$PREV" <<'PY'
-import json,sys
-ledger=json.load(open(sys.argv[1],encoding="utf-8"))
-value=ledger.get("remaining_actions_after_window")
-if value is None:
-    raise SystemExit("previous stage lacks measured pending-work evidence; refusing unverified continuation")
-print(int(value))
-PY
-)"
-  [[ "$START_PENDING" -eq "$PREVIOUS_PENDING" ]] || {
-    echo "SANDIUM_PENDING_WORK_CONTINUITY=FAIL previous=$PREVIOUS_PENDING current=$START_PENDING" >&2
-    exit 55
-  }
-fi
 echo "SANDIUM_REQUIRED_ACTIONS_AT_STAGE_START=$START_PENDING"
 
 ELAPSED=$(( $(date +%s) - STAGE_START_TS )); REMAIN=$(( WALL - ELAPSED ))

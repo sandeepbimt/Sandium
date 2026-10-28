@@ -63,6 +63,7 @@ jobs:
           python3 ci/bare/test_state_handoff.py
           python3 ci/bare/test_output_checkpoint.py
           python3 ci/bare/test_remaining_work.py
+          python3 ci/bare/test_stage_work_gate.py
           python3 ci/bare/test_preflight_graph_continuity.py
           python3 ci/bare/test_compiled_output_reuse_preflight.py
           python3 ci/bare/test_fast_apk.py
@@ -214,6 +215,11 @@ jobs:
           assert "handled_by_real_siso_build" in manifest_preflight
           assert "subprocess.run(" not in manifest_preflight, "preflight must not spend minutes in repeated Siso dry runs"
           assert 'normalize_progress_total.py" --stage' not in runner, "pending and total graph counters must remain independent"
+          stage_work_gate = Path("ci/bare/stage_work_gate.py").read_text(encoding="utf-8")
+          assert "stage_work_gate.py" in runner, "compile must pass the measured-work acceptance gate before starting"
+          assert "SANDIUM_STAGE_WORK_GATE=PASS" in stage_work_gate
+          assert "source_remaining_actions_after_window" in stage_work_gate
+          assert "pending_compile count differs from saved" not in stage_work_gate
           remaining_work = Path("ci/bare/remaining_work.py").read_text(encoding="utf-8")
           assert "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" in remaining_work
           assert '"graph_action_count"' in remaining_work and '"pending_actions"' in remaining_work
