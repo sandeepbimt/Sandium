@@ -118,6 +118,11 @@ jobs:
           assert generic_good_fallback < config.index(legacy_output_key), (
               "broad fallback may select only a good v5 checkpoint and must precede the older v3 migration key"
           )
+          generic_partial_fallback = config.index("\n                  - sandium-output-partial-v1-\n")
+          assert generic_good_fallback < generic_partial_fallback < config.index(legacy_output_key), (
+              "interrupted-stage recovery must be attempted after green output caches and before the legacy migration key"
+          )
+          assert "Recovery fallback for a saved interrupted-stage snapshot" in config
           assert "strict checkpoint identity/control-file validation runs" in config
           for failed_stage in (2, 3, 4, 5):
               assert f"sandium-output-v3-McWgpQGHbvqEhFrJMdzVRrgSxHmI0HTzIzAXcMFauVo=-stage-{failed_stage}-" not in config
