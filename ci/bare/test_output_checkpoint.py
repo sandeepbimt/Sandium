@@ -62,6 +62,20 @@ def add_checkpoint_evidence(root: Path, output: Path) -> dict:
     }
 
 class OutputCheckpointTests(unittest.TestCase):
+    def test_optional_preflight_can_preserve_candidate_for_detailed_followup_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            checkpoint = root / M.CHECKPOINT_NAME
+            checkpoint.mkdir()
+            (checkpoint / "partial-payload.bin").write_bytes(b"keep for diagnosis")
+            result = M.validate_candidate(
+                root, root, 1, "workflow", pre_source=True, required=False,
+                preserve_on_miss=True,
+            )
+            self.assertIsNone(result)
+            self.assertTrue(checkpoint.is_dir())
+            self.assertTrue((checkpoint / "partial-payload.bin").is_file())
+
     def test_action_samples_only_include_predecessor_local_compilation(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
