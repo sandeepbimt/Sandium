@@ -227,7 +227,8 @@ jobs:
           assert 'report.get("local_compiled_outputs_restored") is not True' in stage_work_gate
           remaining_work = Path("ci/bare/remaining_work.py").read_text(encoding="utf-8")
           assert "SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS" in remaining_work
-          assert "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" in remaining_work
+          assert "SANDIUM_PENDING_WORK_GN_REFRESH=PASS_GRAPH_AND_ARGS_UNCHANGED" in remaining_work
+          assert "SANDIUM_PENDING_WORK_GN_REFRESH=START_BEFORE_SISO_MEASUREMENT" in remaining_work
           assert '"graph_action_count"' in remaining_work and '"pending_actions"' in remaining_work
           assert '["graph_action_count"]' in runner and '["pending_actions"]' in runner
           assert "epoch_946684800_regular_files_v1" in runner

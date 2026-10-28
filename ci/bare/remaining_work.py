@@ -188,32 +188,34 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
         if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
             raise RemainingWorkError(f"required restored build input missing/unsafe: {path}")
 
-    # Older cached output snapshots can contain the exact pinned graph and
-    # compiled objects but predate build.ninja.stamp. Recreate only that GN
-    # metadata by generating the graph in place, and accept it only if GN leaves
-    # both the graph hash and args.gn identity byte-for-byte unchanged. The
-    # subsequent strict Siso dry run and leaf-object reuse proof remain required.
+    # Siso can regenerate GN manifests even when build.ninja.stamp exists but
+    # is stale. In that state autoninja -n may report only the regeneration node
+    # (Build Succeeded: 0 steps), never reaching the requested APK target. Refresh
+    # GN once before measurement, require the graph and args bytes to remain
+    # identical, preserve their restored mtimes, and allow GN to refresh the stamp.
+    # If the graph identity changes, fail closed before any compile is started.
+    graph_before_repair = sha256_file(graph)
+    args_before_repair = sha256_file(args_gn)
     if not stamp.exists():
-        graph_before_repair = sha256_file(graph)
-        args_before_repair = sha256_file(args_gn)
         print("SANDIUM_PENDING_WORK_STAMP_REPAIR=START_LEGACY_MISSING_STAMP")
-        repaired_graph_hash, repaired_args_hash = _refresh_gn_manifest(
-            source_root=source_root, output_dir=output_dir,
-            args_gn=args_gn, timeout_seconds=timeout_seconds,
+    else:
+        print("SANDIUM_PENDING_WORK_GN_REFRESH=START_BEFORE_SISO_MEASUREMENT")
+    repaired_graph_hash, repaired_args_hash = _refresh_gn_manifest(
+        source_root=source_root, output_dir=output_dir,
+        args_gn=args_gn, timeout_seconds=timeout_seconds,
+    )
+    if repaired_graph_hash != graph_before_repair or repaired_args_hash != args_before_repair:
+        raise RemainingWorkError(
+            "pre-measurement GN refresh changed build.ninja or args.gn identity; "
+            "restored outputs are not eligible for reuse"
         )
-        if repaired_graph_hash != graph_before_repair or repaired_args_hash != args_before_repair:
-            raise RemainingWorkError(
-                "legacy missing-stamp recovery changed build.ninja or args.gn identity; "
-                "restored outputs are not eligible for reuse"
-            )
-        if not stamp.is_file() or stamp.is_symlink():
-            raise RemainingWorkError("GN did not create a safe build.ninja.stamp during legacy recovery")
-        print("SANDIUM_PENDING_WORK_STAMP_REPAIR=PASS_GRAPH_AND_ARGS_UNCHANGED")
-    if stamp.is_symlink() or not stamp.is_file() or stamp.stat().st_size == 0:
-        # The stamp is a GN-generated metadata file; empty is allowed only if it
-        # exists as a regular non-symlink file.
-        if stamp.is_symlink() or not stamp.is_file():
-            raise RemainingWorkError(f"required restored build input missing/unsafe: {stamp}")
+    if not stamp.is_file() or stamp.is_symlink():
+        raise RemainingWorkError("GN did not leave a safe build.ninja.stamp before Siso measurement")
+    if stamp.is_symlink() or not stamp.is_file():
+        raise RemainingWorkError(f"required restored build input missing/unsafe: {stamp}")
+    if not (output_dir / "build.ninja.stamp").is_file():
+        raise RemainingWorkError("build.ninja.stamp missing after GN refresh")
+    print("SANDIUM_PENDING_WORK_GN_REFRESH=PASS_GRAPH_AND_ARGS_UNCHANGED")
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise RemainingWorkError("autoninja not found; cannot measure pending work safely")
@@ -222,7 +224,7 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
     # generator stamp and can make restored objects appear dirty before Siso reuse.
     graph_before, args_before = sha256_file(graph), sha256_file(args_gn)
     stamp_before = (sha256_file(stamp), stamp.stat().st_size, stamp.stat().st_mtime_ns)
-    print("SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH")
+    print("SANDIUM_PENDING_WORK_GN_GEN=COMPLETED_BEFORE_MEASUREMENT")
     print(f"SANDIUM_PENDING_WORK_GN_GRAPH_SHA256={graph_before}")
     print(f"SANDIUM_PENDING_WORK_ARGS_SHA256={args_before}")
     print("SANDIUM_PENDING_WORK_STAMP_SHA256=" + stamp_before[0])

@@ -112,7 +112,7 @@ rebuild manifest finished
         (out / "args.gn").write_text("use_siso = true\n", encoding="utf-8")
         return tmp, source, out
 
-    def test_measure_uses_restored_graph_and_actual_siso_pending_count(self):
+    def test_measure_refreshes_gn_before_measuring_actual_siso_pending_count(self):
         tmp, source, out = self._measure_fixture()
         self.addCleanup(tmp.cleanup)
         report_path = Path(tmp.name) / "report.json"
@@ -124,6 +124,8 @@ noexec:0 local:0 remote:0 cache:0 skip:2
 
         def fake_run(command, **kwargs):
             calls.append(list(command))
+            if command[0].endswith("/gn"):
+                return subprocess.CompletedProcess(command, 0, "rebuild manifest finished\\n")
             return subprocess.CompletedProcess(command, 0, dry_run)
 
         with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
@@ -133,11 +135,43 @@ noexec:0 local:0 remote:0 cache:0 skip:2
         self.assertEqual(report["pending_actions"], 2)
         self.assertEqual(report["graph_action_count"], 4)
         self.assertEqual(report["measurement"], "restored_graph_autoninja_strict_remote_dry_run")
-        self.assertEqual(len(calls), 1, "measurement must not regenerate the restored GN graph")
-        self.assertIn("-strict_remote", calls[0])
-        self.assertIn("-n", calls[0])
-        self.assertIn("-j80", calls[0])
+        self.assertEqual(len(calls), 2, "GN must settle regeneration before the Siso measurement")
+        self.assertTrue(calls[0][0].endswith("/gn"))
+        self.assertIn("-strict_remote", calls[1])
+        self.assertIn("-n", calls[1])
+        self.assertIn("-j80", calls[1])
         self.assertFalse(report["compile_started"])
+
+    def test_measure_refreshes_existing_stale_stamp_before_siso_dry_run(self):
+        tmp, source, out = self._measure_fixture()
+        self.addCleanup(tmp.cleanup)
+        report_path = Path(tmp.name) / "report.json"
+        old_stamp_mtime = (out / "build.ninja.stamp").stat().st_mtime_ns
+        calls = []
+        dry_run = """schedule pending:2+ready:2 (node:10 edge:4)
+1.00s Build Succeeded: 2 steps
+noexec:0 local:0 remote:0 cache:0 skip:2
+"""
+
+        def fake_run(command, **kwargs):
+            calls.append(list(command))
+            if command[0].endswith("/gn"):
+                # Model GN settling a stale stamp without changing graph bytes.
+                stamp = out / "build.ninja.stamp"
+                stamp.write_bytes(b"")
+                os.utime(stamp, None)
+                return subprocess.CompletedProcess(command, 0, "rebuild manifest finished\\n")
+            return subprocess.CompletedProcess(command, 0, dry_run)
+
+        with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
+             mock.patch.object(M.subprocess, "run", side_effect=fake_run):
+            report = M.measure(source_root=source, output_dir=out, stage=1, phase="start",
+                               report_path=report_path, timeout_seconds=30)
+        self.assertEqual(report["pending_actions"], 2)
+        self.assertEqual(len(calls), 2)
+        self.assertGreaterEqual((out / "build.ninja.stamp").stat().st_mtime_ns, old_stamp_mtime)
+        self.assertEqual(M.sha256_file(out / "build.ninja"), report["build_ninja_sha256"])
+
 
     def test_missing_legacy_stamp_is_recreated_only_when_graph_and_args_are_identical(self):
         tmp, source, out = self._measure_fixture()
