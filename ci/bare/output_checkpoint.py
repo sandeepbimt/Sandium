@@ -529,7 +529,8 @@ def verify_manifest_files(output: Path, entries: Any) -> None:
             raise CheckpointError(f"Checkpoint file hash mismatch: {relative}")
 
 def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
-                       *, pre_source: bool, required: bool) -> dict[str, Any] | None:
+                       *, pre_source: bool, required: bool,
+                       preserve_on_miss: bool = False) -> dict[str, Any] | None:
     checkpoint = root / CHECKPOINT_NAME
     meta_path = checkpoint / META_NAME
 
@@ -540,7 +541,7 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
         # Quarantine only the restored working-copy candidate. CircleCI's remote
         # immutable cache remains untouched. This lets a later useful checkpoint
         # be saved under the same schema without overwriting the rejected directory.
-        if checkpoint.exists() or checkpoint.is_symlink():
+        if not preserve_on_miss and (checkpoint.exists() or checkpoint.is_symlink()):
             quarantine = root / "sandium-rejected-output-checkpoints"
             quarantine.mkdir(parents=True, exist_ok=True)
             target = quarantine / (checkpoint.name + f".stage-{stage}.rejected")
@@ -620,8 +621,10 @@ def validate_candidate(root: Path, control: Path, stage: int, workflow_id: str,
     except (CheckpointError, IdentityError, OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         return miss("validation_error:" + str(exc))
 
-def command_preflight(root: Path, control: Path, stage: int, workflow_id: str, required: bool) -> int:
-    meta = validate_candidate(root, control, stage, workflow_id, pre_source=True, required=required)
+def command_preflight(root: Path, control: Path, stage: int, workflow_id: str, required: bool,
+                      preserve_on_miss: bool = False) -> int:
+    meta = validate_candidate(root, control, stage, workflow_id, pre_source=True,
+                              required=required, preserve_on_miss=preserve_on_miss)
     if meta is None:
         return 1
     print("SANDIUM_OUTPUT_CHECKPOINT_PREFLIGHT=PASS")
@@ -874,11 +877,14 @@ def main() -> int:
     parser.add_argument("--metrics", type=Path, default=None)
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--required", action="store_true")
+    parser.add_argument("--preserve-on-miss", action="store_true",
+                        help="keep a rejected cache candidate in place for the later source-aware validator")
     args = parser.parse_args()
     root = args.root.resolve()
     control = control_root()
     if args.mode == "preflight":
-        return command_preflight(root, control, args.stage, args.workflow_id, args.required)
+        return command_preflight(root, control, args.stage, args.workflow_id, args.required,
+                                 args.preserve_on_miss)
     if args.mode == "restore":
         return command_restore(root, control, args.stage, args.workflow_id, args.required)
     if args.mode == "verify-reuse":
