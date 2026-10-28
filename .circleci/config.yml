@@ -238,6 +238,53 @@ jobs:
                 name: Restore full compiled outputs from this workflow's Stage 4
                 keys:
                   - sandium-output-good-v5-{{ checksum "sandium-control/.sandium-output-cache-fingerprint.txt" }}-stage-4-{{ .Environment.CIRCLE_WORKFLOW_ID }}-
+      - run:
+          name: Verify restored compiled-output checkpoint before source-cache work
+          command: |
+            set -euo pipefail
+            ROOT="$HOME/project"
+            CHECKPOINT="$ROOT/sandium-build-output-checkpoint"
+            META="$CHECKPOINT/.sandium-output-checkpoint.meta.json"
+            echo "SANDIUM_OUTPUT_CHECKPOINT_DIAGNOSTIC_STAGE=<< parameters.stage_index >>"
+            echo "SANDIUM_OUTPUT_CHECKPOINT_DIAGNOSTIC_WORKFLOW=${CIRCLE_WORKFLOW_ID:-unknown}"
+            echo "SANDIUM_OUTPUT_CHECKPOINT_DIAGNOSTIC_ROOT=$ROOT"
+            echo "SANDIUM_OUTPUT_CHECKPOINT_DIAGNOSTIC_FINGERPRINT_FILE=$ROOT/sandium-control/.sandium-output-cache-fingerprint.txt"
+            if [[ -s "$ROOT/sandium-control/.sandium-output-cache-fingerprint.txt" ]]; then
+              sha256sum "$ROOT/sandium-control/.sandium-output-cache-fingerprint.txt"
+              sed -n '1,3p' "$ROOT/sandium-control/.sandium-output-cache-fingerprint.txt"
+            else
+              echo "SANDIUM_OUTPUT_CHECKPOINT_FINGERPRINT_FILE=ABSENT"
+            fi
+            if [[ -L "$CHECKPOINT" ]]; then
+              echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=SYMLINK"
+              ls -ld "$CHECKPOINT" || true
+              exit 59
+            elif [[ ! -e "$CHECKPOINT" ]]; then
+              echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=MISSING"
+              echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=MISS_OR_WRONG_PATH"
+              ls -ld "$ROOT" || true
+              find "$ROOT" -maxdepth 1 -mindepth 1 -name '*checkpoint*' -printf '%y %p\\n' 2>/dev/null || true
+              exit 59
+            elif [[ ! -d "$CHECKPOINT" ]]; then
+              echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=NOT_DIRECTORY"
+              stat "$CHECKPOINT" || true
+              exit 59
+            fi
+            echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=DIRECTORY"
+            ls -ld "$CHECKPOINT"
+            find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\\n' | head -n 30
+            if [[ ! -f "$META" || -L "$META" ]]; then
+              echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE"
+              exit 59
+            fi
+            echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=FOUND"
+            stat -c 'metadata_bytes=%s metadata_mtime=%y' "$META"
+            if [[ "<< parameters.stage_index >>" == "1" ]]; then
+              python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage 1 --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --preserve-on-miss
+            else
+              python3 "$ROOT/sandium-control/ci/bare/output_checkpoint.py" preflight --root "$ROOT" --stage "<< parameters.stage_index >>" --workflow-id "${CIRCLE_WORKFLOW_ID:-unknown}" --required
+            fi
+            echo "SANDIUM_OUTPUT_CHECKPOINT_EARLY_PREFLIGHT=PASS"
       - restore_cache:
           name: Restore the pinned Chromium/Bare source and dependency cache
           keys:
