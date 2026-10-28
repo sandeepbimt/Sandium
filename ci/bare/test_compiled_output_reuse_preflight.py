@@ -126,34 +126,29 @@ class Tests(unittest.TestCase):
             with patch.object(M.shutil,"which",return_value="/toolchain/autoninja"),patch.object(M.subprocess,"run",side_effect=touch_stamp):
                 with self.assertRaisesRegex(M.ReusePreflightError,"build.ninja.stamp changed"):
                     M.verify_restored_output_reuse(root=root,source_root=source,stage=2,report_path=report,epoch=946684800)
-    def test_cold_stage_skip_emits_actual_graph_hash_in_structured_report(self):
+    def test_stage_one_without_restored_outputs_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "src"
-            write_inputs(source)
-            output = root / M.OUTPUT_RELATIVE
-            output.mkdir(parents=True)
-            graph = output / "build.ninja"
-            graph.write_text("cold stable graph", encoding="utf-8")
-            (output / "build.ninja.stamp").write_text("stamp", encoding="utf-8")
-            (output / "args.gn").write_text("use_siso=true", encoding="utf-8")
-            handoff = root / "sandium-state-handoff-report.json"
-            handoff.write_text(json.dumps({
-                "local_compiled_outputs_restored": False,
-                "compiled_output_action_samples": [],
-            }), encoding="utf-8")
-            result_path = root / "reuse-preflight-1.json"
-            completed = subprocess.run([
-                sys.executable, str(Path(M.__file__)),
-                "verify-reuse", "--root", str(root), "--source-root", str(source),
-                "--stage", "1", "--report", str(handoff), "--result-report", str(result_path),
-                "--epoch", "946684800",
-            ], text=True, capture_output=True, check=False)
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            result = json.loads(result_path.read_text(encoding="utf-8"))
-            self.assertEqual(result["status"], "SKIP_NO_RESTORED_OUTPUTS")
-            self.assertEqual(result["build_ninja_sha256"], M.sha256_file(graph))
-            self.assertIn("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=SKIP_NO_RESTORED_OUTPUTS", completed.stdout)
+            root = Path(tmp); source, out, report = fixture(root)
+            report.unlink()
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
+                 patch.object(M.subprocess, "run") as run:
+                with self.assertRaisesRegex(M.ReusePreflightError, "No validated restored-output handoff"):
+                    M.verify_restored_output_reuse(root=root, source_root=source, stage=1,
+                                                   report_path=report, epoch=946684800)
+            run.assert_not_called()
+
+    def test_stage_one_without_verified_object_samples_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source, out, report = fixture(root)
+            report.write_text(json.dumps({
+                "local_compiled_outputs_restored": False, "compiled_output_action_samples": []
+            }))
+            with patch.object(M.shutil, "which", return_value="/toolchain/autoninja"), \
+                 patch.object(M.subprocess, "run") as run:
+                with self.assertRaisesRegex(M.ReusePreflightError, "no verified leaf-object samples"):
+                    M.verify_restored_output_reuse(root=root, source_root=source, stage=1,
+                                                   report_path=report, epoch=946684800)
+            run.assert_not_called()
 
     def test_stage_runner_uses_structured_result_not_driver_log(self):
         runner = Path(M.__file__).with_name("run_stage.sh").read_text(encoding="utf-8")

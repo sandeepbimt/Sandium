@@ -65,6 +65,7 @@ def validate_candidate(
     workflow_id: str,
     min_output_bytes: int = MIN_GOOD_OUTPUT_BYTES,
     produced: bool = False,
+    allow_partial: bool = False,
 ) -> dict[str, Any]:
     if min_output_bytes < 1:
         raise CheckpointQualityError("minimum_output_bytes_must_be_positive")
@@ -77,8 +78,17 @@ def validate_candidate(
         raise CheckpointQualityError("checkpoint_name_mismatch")
     if meta.get("output_relative_path") != OC.OUT_RELATIVE.as_posix():
         raise CheckpointQualityError("output_relative_path_mismatch")
-    if meta.get("checkpoint_kind") != "completed-stage" or meta.get("stage_record_valid") is not True:
-        raise CheckpointQualityError("candidate_is_not_a_green_completed_stage")
+    kind = meta.get("checkpoint_kind")
+    record_valid = meta.get("stage_record_valid") is True
+    completed = kind == "completed-stage" and record_valid
+    partial_allowed = (
+        allow_partial and kind == "partial-stage" and record_valid is False
+        and (produced or stage == 1)
+    )
+    if not completed and not partial_allowed:
+        raise CheckpointQualityError(
+            "candidate_is_not_a_green_completed_stage_or_authorized_partial"
+        )
     try:
         source_stage = int(meta.get("stage", 0))
         declared_bytes = int(meta.get("output_bytes", 0))
@@ -195,7 +205,7 @@ def validate_candidate(
         "checkpoint_kind": str(meta.get("checkpoint_kind")),
         "output_bytes": measured_bytes,
         "build_identity_sha256": str(meta.get("build_identity_sha256")),
-        "stage_record_valid": True,
+        "stage_record_valid": record_valid,
         "compiled_output_inventory_status": inventory_status,
         "compiled_object_file_count": object_count,
         "compiled_object_file_bytes": object_bytes,
@@ -223,6 +233,8 @@ def main() -> int:
     parser.add_argument("--min-output-bytes", type=int, default=MIN_GOOD_OUTPUT_BYTES)
     parser.add_argument("--produced", action="store_true",
                         help="validate the just-created current-stage checkpoint instead of a restore candidate")
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="allow an integrity-checked partial checkpoint for Stage 1 recovery or producer validation")
     args = parser.parse_args()
     root = args.root.resolve()
     control = args.control.resolve() if args.control else OC.control_root()
@@ -234,9 +246,12 @@ def main() -> int:
             workflow_id=args.workflow_id,
             min_output_bytes=args.min_output_bytes,
             produced=args.produced,
+            allow_partial=args.allow_partial,
         )
         print("SANDIUM_OUTPUT_CHECKPOINT_QUALITY=PASS")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_SOURCE_STAGE={result['source_stage']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_KIND={result['checkpoint_kind']}")
+        print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_STAGE_RECORD_VALID={str(result['stage_record_valid']).lower()}")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_BYTES={result['output_bytes']}")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_QUALITY_BUILD_IDENTITY_SHA256={result['build_identity_sha256']}")
         print(f"SANDIUM_OUTPUT_CHECKPOINT_COMPILED_INVENTORY={result['compiled_output_inventory_status']}")

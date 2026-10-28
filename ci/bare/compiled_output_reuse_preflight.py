@@ -113,15 +113,10 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
     graph_before = generator_output_signature(graph)
     stamp_before = generator_output_signature(stamp)
 
-    # A cold Stage 1 legitimately has no prior-output evidence. Still report the
-    # real current graph hash so the shell never infers it from console logs.
     if not report_path.is_file() or report_path.is_symlink():
-        if stage > 1:
-            raise ReusePreflightError("Continuation stage lacks a state-handoff report before the build window")
-        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=SKIP_NO_RESTORED_OUTPUTS")
-        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_before[0])
-        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0,
-                "build_ninja_sha256": graph_before[0], "build_ninja_mtime_ns": graph_before[2]}
+        raise ReusePreflightError(
+            "No validated restored-output handoff; full compile was not started"
+        )
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -130,12 +125,9 @@ def verify_restored_output_reuse(*, root: Path, source_root: Path, stage: int,
         raise ReusePreflightError("State-handoff report must be a JSON object")
     targets = safe_sample_paths(report, output)
     if not targets:
-        if stage > 1:
-            raise ReusePreflightError("Continuation stage has no restored compiled-output checkpoint to reuse")
-        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT=SKIP_NO_RESTORED_OUTPUTS")
-        print("SANDIUM_LOCAL_OUTPUT_REUSE_PREFLIGHT_BUILD_NINJA_SHA256=" + graph_before[0])
-        return {"status": "SKIP_NO_RESTORED_OUTPUTS", "sample_count": 0,
-                "build_ninja_sha256": graph_before[0], "build_ninja_mtime_ns": graph_before[2]}
+        raise ReusePreflightError(
+            "Restored-output handoff has no verified leaf-object samples; full compile was not started"
+        )
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise ReusePreflightError("autoninja not found on PATH for compiled-output reuse preflight")

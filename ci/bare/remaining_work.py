@@ -16,6 +16,7 @@ PAIR = re.compile(r"^\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]\s+\S", re.M)
 NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
 SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps(?:\s+-\s+[\d.]+/s)?\s*$", re.M)
 SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
+SISO_EDGE = re.compile(r"\bedge:(\d+)\b", re.I)
 
 
 class RemainingWorkError(RuntimeError):
@@ -30,24 +31,48 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def parse_siso_summary(output: str) -> dict[str, int] | None:
+    """Parse Siso's independent pending, skipped and full-graph counters."""
+    summaries = [int(n) for n in SISO_SUCCESS.findall(output)]
+    skips = [int(n) for n in SISO_SKIP.findall(output)]
+    if not summaries and not skips:
+        return None
+    if len(summaries) != 1 or len(skips) != 1:
+        raise RemainingWorkError(
+            "Siso dry-run requires exactly one completed Build Succeeded summary "
+            "and one explicit skip counter"
+        )
+    pending, skipped = summaries[0], skips[0]
+    if pending < 0 or skipped < 0:
+        raise RemainingWorkError(f"negative Siso dry-run counters: steps={pending}, skip={skipped}")
+    graph_total = pending + skipped
+    edges = [int(n) for n in SISO_EDGE.findall(output)]
+    if edges and edges[-1] != graph_total:
+        raise RemainingWorkError(
+            "Siso dry-run graph accounting mismatch: "
+            f"steps={pending} skip={skipped} sum={graph_total} last_graph_edge_count={edges[-1]}"
+        )
+    if pending == 0 and not (graph_total > 0 and edges and edges[-1] == graph_total):
+        raise RemainingWorkError(
+            "zero Siso steps without an explicit no-work result and reconciled graph"
+        )
+    return {
+        "pending_actions": pending,
+        "siso_pending_steps": pending,
+        "siso_skipped_actions": skipped,
+        "graph_action_count": graph_total,
+    }
+
+
 def parse_pending_actions(output: str) -> int:
-    """Count pending actions from supported Ninja rows or Siso's completed summary."""
+    """Count actual pending work; summary has priority over noisy progress rows."""
+    if NO_WORK.search(output):
+        return 0
+    summary = parse_siso_summary(output)
+    if summary is not None:
+        return summary["pending_actions"]
     pairs = [(int(a), int(b)) for a, b in PAIR.findall(output)]
     if not pairs:
-        if NO_WORK.search(output):
-            return 0
-        # Siso's -n output can print commands and finish with aggregate counters
-        # instead of Ninja [done/total] rows. Accept only a completed summary
-        # plus its explicit skip counter; never infer zero from silence.
-        summaries = [int(n) for n in SISO_SUCCESS.findall(output)]
-        skipped = [int(n) for n in SISO_SKIP.findall(output)]
-        if len(summaries) == 1 and len(skipped) == 1:
-            steps, skip_count = summaries[0], skipped[0]
-            if steps <= 0 or skip_count > steps:
-                raise RemainingWorkError(
-                    f"invalid Siso dry-run counters: steps={steps}, skip={skip_count}"
-                )
-            return steps - skip_count
         raise RemainingWorkError(
             "dry-run output has no Ninja action rows, explicit no-work result, "
             "or unambiguous completed Siso summary/skip counters"
@@ -58,8 +83,6 @@ def parse_pending_actions(output: str) -> int:
     total = next(iter(totals))
     if total <= 0 or any(done <= 0 or done > total for done, _ in pairs):
         raise RemainingWorkError("dry-run emitted invalid action progress rows")
-    # Count emitted command rows, not the denominator: Siso's denominator can
-    # describe the whole graph while this dry run emits only dirty actions.
     return len(pairs)
 
 
@@ -129,25 +152,27 @@ def _refresh_gn_manifest(*, source_root: Path, output_dir: Path,
 
 def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
             report_path: Path, timeout_seconds: int) -> dict[str, Any]:
-    graph = output_dir / "build.ninja"
-    args_gn = output_dir / "args.gn"
-    for path in (graph, args_gn):
+    graph, args_gn, stamp = (output_dir / "build.ninja", output_dir / "args.gn",
+                             output_dir / "build.ninja.stamp")
+    for path in (graph, args_gn, stamp):
         if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
-            raise RemainingWorkError(f"required generated build input missing/unsafe: {path}")
+            raise RemainingWorkError(f"required restored build input missing/unsafe: {path}")
     if timeout_seconds <= 0:
         raise RemainingWorkError("timeout must be positive")
     autoninja = shutil.which("autoninja")
     if not autoninja:
         raise RemainingWorkError("autoninja not found; cannot measure pending work safely")
 
-    # Do not let autoninja -n handle GN regeneration: Siso can repeatedly
-    # schedule just the regeneration node and report "Build Succeeded: 0 steps".
-    # GN gen does not compile targets. Measure only after it returns successfully.
-    graph_before, args_hash = _refresh_gn_manifest(
-        source_root=source_root, output_dir=output_dir, args_gn=args_gn,
-        timeout_seconds=timeout_seconds,
-    )
-    command = [autoninja, "-n", "-C", str(output_dir), "chrome_public_apk"]
+    # Do not run GN generation over a restored output snapshot: it changes the
+    # generator stamp and can make restored objects appear dirty before Siso reuse.
+    graph_before, args_before = sha256_file(graph), sha256_file(args_gn)
+    stamp_before = (sha256_file(stamp), stamp.stat().st_size, stamp.stat().st_mtime_ns)
+    print("SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH")
+    print(f"SANDIUM_PENDING_WORK_GN_GRAPH_SHA256={graph_before}")
+    print(f"SANDIUM_PENDING_WORK_ARGS_SHA256={args_before}")
+    print("SANDIUM_PENDING_WORK_STAMP_SHA256=" + stamp_before[0])
+
+    command = [autoninja, "-strict_remote", "-n", "-C", str(output_dir), "-j80", "chrome_public_apk"]
     try:
         run = subprocess.run(command, cwd=source_root, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, errors="replace",
@@ -161,24 +186,21 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
     print(f"SANDIUM_PENDING_WORK_DRY_RUN_EXIT={run.returncode}")
     print(f"SANDIUM_PENDING_WORK_DRY_RUN_OUTPUT_LINES={len(output.splitlines())}")
     if run.returncode != 0:
-        raise RemainingWorkError(
-            f"no-build dry run failed with exit {run.returncode}; tail: {_tail(output)}"
-        )
+        raise RemainingWorkError(f"no-build dry run failed with exit {run.returncode}; tail: {_tail(output)}")
 
-    # Siso must not alter the graph while measuring it. If it regenerates again,
-    # fail with a concrete diagnostic instead of retrying the same operation or
-    # interpreting a zero-step summary as proof that no compilation remains.
-    graph_after = sha256_file(graph)
-    args_after = sha256_file(args_gn)
-    if graph_after != graph_before or args_after != args_hash:
-        print("SANDIUM_PENDING_WORK_GRAPH_CHANGED_DURING_DRY_RUN=true")
+    graph_after, args_after = sha256_file(graph), sha256_file(args_gn)
+    stamp_after = (sha256_file(stamp), stamp.stat().st_size, stamp.stat().st_mtime_ns)
+    if graph_after != graph_before or args_after != args_before or stamp_after != stamp_before:
         raise RemainingWorkError(
-            "GN/Ninja graph or args changed during pending-work measurement; "
+            "restored build.ninja, args.gn, or build.ninja.stamp changed during dry run; "
+            "Siso attempted manifest regeneration, so compilation must not start: "
             f"before_graph={graph_before} after_graph={graph_after} "
-            f"before_args={args_hash} after_args={args_after}; tail: {_tail(output)}"
+            f"before_args={args_before} after_args={args_after} "
+            f"before_stamp={stamp_before} after_stamp={stamp_after}; tail: {_tail(output)}"
         )
     try:
         count = parse_pending_actions(output)
+        summary = parse_siso_summary(output)
     except RemainingWorkError as exc:
         print(f"SANDIUM_PENDING_WORK_DRY_RUN_PARSE_ERROR={exc}")
         print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_BEGIN")
@@ -192,17 +214,43 @@ def measure(*, source_root: Path, output_dir: Path, stage: int, phase: str,
         print("SANDIUM_PENDING_WORK_DRY_RUN_SAMPLE_END")
         raise
 
+    if summary is not None:
+        graph_total, skipped = summary["graph_action_count"], summary["siso_skipped_actions"]
+        policy = "SISO_STEPS_ALREADY_EXCLUDES_SKIP"
+    elif NO_WORK.search(output):
+        edges = [int(n) for n in SISO_EDGE.findall(output)]
+        if not edges or edges[-1] <= 0:
+            raise RemainingWorkError("explicit no-work output lacks graph-edge count; continuity cannot be verified")
+        graph_total, skipped, policy = edges[-1], edges[-1], "EXPLICIT_NO_WORK_ALL_GRAPH_NODES_UP_TO_DATE"
+    else:
+        pairs = [(int(a), int(b)) for a, b in PAIR.findall(output)]
+        totals = {total for _, total in pairs}
+        if len(totals) != 1:
+            raise RemainingWorkError("plain Ninja dry-run has no stable graph denominator")
+        graph_total, skipped, policy = next(iter(totals)), 0, "NINJA_PENDING_ROWS_VERSUS_GRAPH_TOTAL"
+
+    if graph_total <= 0 or count > graph_total:
+        raise RemainingWorkError(f"invalid measured pending/graph totals: pending={count}, graph_total={graph_total}")
     report = {
         "schema": 1, "stage": stage, "phase": phase,
         "pending_actions": count,
+        "siso_pending_steps": summary["siso_pending_steps"] if summary else None,
+        "siso_skipped_actions": skipped,
+        "graph_action_count": graph_total,
+        "pending_count_policy": policy,
         "build_ninja_sha256": graph_before,
-        "args_gn_sha256": args_hash,
-        "measurement": "explicit_gn_gen_then_autoninja_dry_run",
+        "args_gn_sha256": args_before,
+        "build_ninja_stamp_sha256": stamp_before[0],
+        "measurement": "restored_graph_autoninja_strict_remote_dry_run",
         "compile_started": False,
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"SANDIUM_PENDING_COMPILE_ACTIONS_{phase.upper()}={count}")
+    print(f"SANDIUM_TOTAL_ACTION_COUNT={count}")
+    print(f"SANDIUM_GRAPH_ACTION_COUNT_{phase.upper()}={graph_total}")
+    print(f"SANDIUM_SKIPPED_GRAPH_ACTIONS_{phase.upper()}={skipped}")
+    print(f"SANDIUM_PENDING_COMPILE_COUNTING_POLICY={policy}")
     print(f"SANDIUM_PENDING_COMPILE_GRAPH_SHA256={graph_before}")
     print("SANDIUM_PENDING_COMPILE_MEASUREMENT=DRY_RUN_ONLY")
     print("SANDIUM_PENDING_WORK_GRAPH_STABLE=PASS")

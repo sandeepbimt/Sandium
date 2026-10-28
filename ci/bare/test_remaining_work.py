@@ -27,20 +27,43 @@ class RemainingWorkTests(unittest.TestCase):
     def test_explicit_no_work_is_zero(self):
         self.assertEqual(M.parse_pending_actions("ninja: no work to do.\n"), 0)
 
-    def test_parses_completed_siso_dry_run_summary(self):
-        output = """1m49.52s Build Succeeded: 56599 steps
+    def test_parses_completed_siso_summary_without_subtracting_skip_twice(self):
+        output = """schedule pending:99634+ready:9463 (node:591352 edge:109097)
+1m49.52s Build Succeeded: 56599 steps
 noexec:0 local:0 remote:0 cache:0 skip:52498
   cache-write:0(err:0) fallback:0 retry:0
 """
-        self.assertEqual(M.parse_pending_actions(output), 4101)
+        self.assertEqual(M.parse_pending_actions(output), 56599)
+        self.assertEqual(M.parse_siso_summary(output)["graph_action_count"], 109097)
+
+    def test_observed_failure_summary_is_pending_work_not_steps_minus_skip(self):
+        output = """schedule pending:99634+ready:9463 (node:591352 edge:109097)
+1m20.07s Build Succeeded: 14989 steps - 187.20/s
+noexec:0 local:0 remote:0 cache:0 skip:94108
+"""
+        self.assertEqual(M.parse_pending_actions(output), 14989)
+        self.assertEqual(M.parse_siso_summary(output)["siso_skipped_actions"], 94108)
+        self.assertEqual(M.parse_siso_summary(output)["graph_action_count"], 109097)
 
     def test_siso_summary_requires_both_counters(self):
         with self.assertRaisesRegex(M.RemainingWorkError, "unambiguous completed Siso"):
             M.parse_pending_actions("1m49.52s Build Succeeded: 56599 steps\n")
 
-    def test_siso_counters_cannot_skip_more_than_total(self):
-        output = "1m49.52s Build Succeeded: 100 steps\nnoexec:0 local:0 remote:0 cache:0 skip:101\n"
-        with self.assertRaisesRegex(M.RemainingWorkError, "invalid Siso dry-run counters"):
+    def test_siso_summary_must_reconcile_with_graph_edge_count(self):
+        output = """schedule pending:1+ready:0 (node:100 edge:110)
+1.00s Build Succeeded: 10 steps
+noexec:0 local:0 remote:0 cache:0 skip:90
+"""
+        with self.assertRaisesRegex(M.RemainingWorkError, "graph accounting mismatch"):
+            M.parse_pending_actions(output)
+
+    def test_zero_step_regeneration_only_summary_fails_closed(self):
+        output = """schedule pending:1+ready:0 (node:100 edge:2)
+../../buildtools/linux64/gn --root=../.. -q --regeneration gen .
+4.99s Build Succeeded: 0 steps - 0.00/s
+noexec:0 local:0 remote:0 cache:0 skip:0
+"""
+        with self.assertRaisesRegex(M.RemainingWorkError, "graph accounting mismatch|zero Siso steps"):
             M.parse_pending_actions(output)
 
     def test_missing_measurement_fails_closed(self):
@@ -75,57 +98,56 @@ rebuild manifest finished
         gn.chmod(0o755)
         out.mkdir(parents=True)
         (out / "build.ninja").write_text("ninja graph\n", encoding="utf-8")
+        (out / "build.ninja.stamp").write_text("stable stamp\n", encoding="utf-8")
         (out / "args.gn").write_text("use_siso = true\n", encoding="utf-8")
         return tmp, source, out
 
-    def test_measure_runs_explicit_gn_generation_before_dry_run(self):
+    def test_measure_uses_restored_graph_and_actual_siso_pending_count(self):
         tmp, source, out = self._measure_fixture()
         self.addCleanup(tmp.cleanup)
         report_path = Path(tmp.name) / "report.json"
         calls = []
+        dry_run = """schedule pending:2+ready:2 (node:10 edge:4)
+1.00s Build Succeeded: 2 steps
+noexec:0 local:0 remote:0 cache:0 skip:2
+"""
 
         def fake_run(command, **kwargs):
             calls.append(list(command))
-            if command[0].endswith("/gn"):
-                return subprocess.CompletedProcess(command, 0, "Generating ninja files...\n")
-            return subprocess.CompletedProcess(command, 0, "[1/2] compile object.o\n[2/2] link apk\n")
+            return subprocess.CompletedProcess(command, 0, dry_run)
 
         with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
              mock.patch.object(M.subprocess, "run", side_effect=fake_run):
             report = M.measure(source_root=source, output_dir=out, stage=1, phase="start",
                                report_path=report_path, timeout_seconds=30)
         self.assertEqual(report["pending_actions"], 2)
-        self.assertEqual(report["measurement"], "explicit_gn_gen_then_autoninja_dry_run")
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][1:3], ["gen", "out/android_Debug_arm64"])
-        self.assertEqual(calls[1][1], "-n")
+        self.assertEqual(report["graph_action_count"], 4)
+        self.assertEqual(report["measurement"], "restored_graph_autoninja_strict_remote_dry_run")
+        self.assertEqual(len(calls), 1, "measurement must not regenerate the restored GN graph")
+        self.assertIn("-strict_remote", calls[0])
+        self.assertIn("-n", calls[0])
+        self.assertIn("-j80", calls[0])
         self.assertFalse(report["compile_started"])
 
-    def test_measure_fails_after_single_dry_run_if_siso_only_regenerates_manifest(self):
+    def test_measure_fails_if_siso_changes_the_restored_build_stamp(self):
         tmp, source, out = self._measure_fixture()
         self.addCleanup(tmp.cleanup)
         report_path = Path(tmp.name) / "report.json"
-        calls = []
-        regen_only = """schedule pending:1+ready:0
-../../buildtools/linux64/gn --root=../.. -q --regeneration gen .
-rebuild manifest finished
- 0.08s Regenerating ninja files
- 4.99s Build Succeeded: 0 steps - 0.00/s
-"""
 
         def fake_run(command, **kwargs):
-            calls.append(list(command))
-            if command[0].endswith("/gn"):
-                return subprocess.CompletedProcess(command, 0, "Generating ninja files...\n")
-            return subprocess.CompletedProcess(command, 0, regen_only)
+            (out / "build.ninja.stamp").write_text("unexpected regeneration\n", encoding="utf-8")
+            return subprocess.CompletedProcess(
+                command, 0,
+                "schedule pending:1+ready:0 (node:10 edge:10)\n"
+                "1.00s Build Succeeded: 1 steps\nnoexec:0 local:0 remote:0 cache:0 skip:9\n"
+            )
 
         with mock.patch.object(M.shutil, "which", side_effect=lambda name: "/fake/autoninja" if name == "autoninja" else None), \
              mock.patch.object(M.subprocess, "run", side_effect=fake_run):
-            with self.assertRaisesRegex(M.RemainingWorkError, "no Ninja action rows"):
+            with self.assertRaisesRegex(M.RemainingWorkError, "restored build.ninja, args.gn, or build.ninja.stamp changed"):
                 M.measure(source_root=source, output_dir=out, stage=1, phase="start",
                           report_path=report_path, timeout_seconds=30)
-        self.assertEqual(len(calls), 2, "must not loop the same ineffective dry run")
-        self.assertFalse(report_path.exists(), "failed measurement must not produce a report")
+        self.assertFalse(report_path.exists())
 
 
 if __name__ == "__main__":

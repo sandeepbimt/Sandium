@@ -88,12 +88,14 @@ class CheckpointQualityTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def validate(self, stage=2, workflow="current-workflow", min_bytes=100):
+    def validate(self, stage=2, workflow="current-workflow", min_bytes=100,
+                 allow_partial=False, produced=False):
         with patch.object(M.OC, "control_inputs", return_value=CONTROL_HASHES), \
              patch.object(M, "source_identity", return_value=IDENTITY):
             return M.validate_candidate(
                 root=self.root, control=self.control, stage=stage,
                 workflow_id=workflow, min_output_bytes=min_bytes,
+                allow_partial=allow_partial, produced=produced,
             )
 
     def test_accepts_substantial_completed_predecessor_with_matching_identity(self):
@@ -152,8 +154,29 @@ class CheckpointQualityTests(unittest.TestCase):
     def test_rejects_failed_or_partial_stage_checkpoint(self):
         make_candidate(self.root, stage=1, workflow="current-workflow",
                        kind="partial-stage", record_valid=False, min_payload=200)
-        with self.assertRaisesRegex(M.CheckpointQualityError, "not_a_green_completed_stage"):
+        with self.assertRaisesRegex(M.CheckpointQualityError, "green_completed_stage_or_authorized_partial"):
             self.validate()
+
+    def test_accepts_integrity_checked_partial_for_stage_one_recovery(self):
+        make_candidate(self.root, stage=2, workflow="old-workflow", kind="partial-stage",
+                       record_valid=False, min_payload=200)
+        result = self.validate(stage=1, workflow="new-workflow", allow_partial=True)
+        self.assertEqual(result["checkpoint_kind"], "partial-stage")
+        self.assertFalse(result["stage_record_valid"])
+        self.assertGreaterEqual(result["compiled_output_action_sample_count"], M.OC.MIN_ACTION_OUTPUT_SAMPLES)
+
+    def test_producer_can_validate_its_own_integrity_checked_partial(self):
+        make_candidate(self.root, stage=2, workflow="current-workflow", kind="partial-stage",
+                       record_valid=False, min_payload=200)
+        result = self.validate(stage=2, workflow="current-workflow", allow_partial=True, produced=True)
+        self.assertEqual(result["checkpoint_kind"], "partial-stage")
+        self.assertFalse(result["stage_record_valid"])
+
+    def test_partial_checkpoint_is_never_a_continuation_input(self):
+        make_candidate(self.root, stage=1, workflow="current-workflow", kind="partial-stage",
+                       record_valid=False, min_payload=200)
+        with self.assertRaisesRegex(M.CheckpointQualityError, "green_completed_stage_or_authorized_partial"):
+            self.validate(stage=2, workflow="current-workflow", allow_partial=True)
 
     def test_rejects_wrong_predecessor_stage(self):
         make_candidate(self.root, stage=1, workflow="current-workflow", min_payload=200)
