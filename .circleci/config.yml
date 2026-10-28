@@ -266,7 +266,7 @@ jobs:
               echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=MISSING"
               echo "SANDIUM_OUTPUT_CHECKPOINT_RESTORE=MISS_OR_WRONG_PATH"
               ls -ld "$ROOT" || true
-              find "$ROOT" -maxdepth 1 -mindepth 1 -name '*checkpoint*' -printf '%y %p\\n' 2>/dev/null || true
+              find "$ROOT" -maxdepth 1 -mindepth 1 -name '*checkpoint*' -printf '%y %p\n' 2>/dev/null || true
               exit 59
             elif [[ ! -d "$CHECKPOINT" ]]; then
               echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=NOT_DIRECTORY"
@@ -275,7 +275,7 @@ jobs:
             fi
             echo "SANDIUM_OUTPUT_CHECKPOINT_PATH_KIND=DIRECTORY"
             ls -ld "$CHECKPOINT"
-            find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\\n' | head -n 30
+            find "$CHECKPOINT" -maxdepth 1 -mindepth 1 -printf '%y %f %s bytes\n' | head -n 30
             if [[ ! -f "$META" || -L "$META" ]]; then
               echo "SANDIUM_OUTPUT_CHECKPOINT_METADATA=ABSENT_OR_UNSAFE"
               exit 59
