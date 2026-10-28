@@ -59,13 +59,15 @@ noexec:0 local:0 remote:0 cache:0 skip:94108
         with self.assertRaisesRegex(M.RemainingWorkError, "unambiguous completed Siso"):
             M.parse_pending_actions("1m49.52s Build Succeeded: 56599 steps\n")
 
-    def test_siso_summary_must_reconcile_with_graph_edge_count(self):
-        output = """schedule pending:1+ready:0 (node:100 edge:110)
+    def test_transient_scheduler_edge_is_not_mistaken_for_completed_graph_total(self):
+        output = """schedule pending:1+ready:0 (node:100 edge:2)
 1.00s Build Succeeded: 10 steps
 noexec:0 local:0 remote:0 cache:0 skip:90
 """
-        with self.assertRaisesRegex(M.RemainingWorkError, "graph accounting mismatch"):
-            M.parse_pending_actions(output)
+        self.assertEqual(M.parse_pending_actions(output), 10)
+        summary = M.parse_siso_summary(output)
+        self.assertEqual(summary["graph_action_count"], 100)
+        self.assertEqual(summary["scheduler_edge_snapshot"], 2)
 
     def test_zero_step_regeneration_only_summary_fails_closed(self):
         output = """schedule pending:1+ready:0 (node:100 edge:2)
