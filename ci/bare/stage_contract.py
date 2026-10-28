@@ -42,8 +42,23 @@ def validate():
     if 'bootstrap_chromium.sh" configure' in run_stage:
         errors.append("cold Stage 1 GN/bootstrap path violates the no-cold-build acceptance gate")
     remaining_work = (here / "remaining_work.py").read_text(encoding="utf-8")
-    if "SANDIUM_PENDING_WORK_GN_GEN=SKIPPED_RESTORED_GRAPH" not in remaining_work:
-        errors.append("pending-work measurement must preserve the restored graph/stamp before Siso reuse")
+    # A restored snapshot can carry a stale/missing GN generator stamp. In that
+    # state the observed Siso dry-run schedules only GN regeneration and reports
+    # zero compile steps. Refresh GN once before measuring, but only accept it if
+    # the graph/args bytes remain identical, their mtimes are preserved, and the
+    # regenerated stamp is then stable throughout the Siso dry-run.
+    if "SANDIUM_PENDING_WORK_GN_GEN=COMPLETED_BEFORE_MEASUREMENT" not in remaining_work:
+        errors.append("pending-work measurement must settle GN regeneration before the Siso dry run")
+    if "SANDIUM_PENDING_WORK_GN_REFRESH=PASS_GRAPH_AND_ARGS_UNCHANGED" not in remaining_work:
+        errors.append("GN refresh must prove the restored build graph and args are byte-identical")
+    if "SANDIUM_PENDING_WORK_GN_GRAPH_MTIME_PRESERVED=PASS" not in remaining_work:
+        errors.append("GN refresh must preserve build.ninja mtime when graph bytes are unchanged")
+    if "SANDIUM_PENDING_WORK_GN_ARGS_MTIME_PRESERVED=PASS" not in remaining_work:
+        errors.append("GN refresh must preserve args.gn mtime when args bytes are unchanged")
+    if "stamp_after != stamp_before" not in remaining_work:
+        errors.append("Siso dry-run must prove the regenerated GN stamp stayed unchanged")
+    if "restored build.ninja, args.gn, or build.ninja.stamp changed during dry run" not in remaining_work:
+        errors.append("Siso dry-run must fail closed if it regenerates the restored graph/stamp")
     if '"graph_action_count"' not in remaining_work:
         errors.append("pending-work report must expose the independently measured full graph action count")
     if '"pending_actions"' not in remaining_work:
