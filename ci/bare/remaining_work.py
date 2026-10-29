@@ -18,6 +18,7 @@ NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
 SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps(?:\s+-\s+[\d.]+/s)?\s*$", re.M)
 SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
 SISO_SCHEDULE_EDGE = re.compile(r"schedule\s+pending:\d+\+ready:\d+\s+\(node:\d+\s+edge:(\d+)\)", re.I)
+SISO_BUILD_START = re.compile(r"^\s*build start:\s*Ready\s+(\d+)\s+Pending\s+(\d+)\s*$", re.M | re.I)
 
 
 class RemainingWorkError(RuntimeError):
@@ -54,6 +55,23 @@ def parse_siso_summary(output: str) -> dict[str, int] | None:
     # Treat Build Succeeded steps + explicit skip as the completed accounting;
     # never compare it to that transient scheduler edge counter.
     schedule_edges = [int(n) for n in SISO_SCHEDULE_EDGE.findall(output)]
+    # Manifest regeneration can leave trailing scheduler snapshots such as
+    # edge:8; these are not the full target graph. When Siso provides its
+    # completed build-start counters, reconcile their Ready+Pending total with
+    # the independent completed steps+skip accounting instead.
+    build_starts = [
+        (int(ready), int(queued))
+        for ready, queued in SISO_BUILD_START.findall(output)
+    ]
+    if build_starts:
+        ready, queued = build_starts[-1]
+        measured_graph_total = ready + queued
+        if measured_graph_total != graph_total:
+            raise RemainingWorkError(
+                "Siso dry-run graph accounting mismatch: "
+                f"steps={pending} skip={skipped} sum={graph_total} "
+                f"last_build_start_total={measured_graph_total}"
+            )
     if pending == 0 and not (graph_total > 0 and NO_WORK.search(output)):
         raise RemainingWorkError(
             "zero Siso steps without an explicit no-work result and nonzero skipped graph"
