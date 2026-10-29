@@ -46,6 +46,26 @@ noexec:0 local:0 remote:0 cache:0 skip:52498
         self.assertEqual(M.parse_pending_actions(output), 56599)
         self.assertEqual(M.parse_siso_summary(output)["graph_action_count"], 109097)
 
+    def test_ignores_intermediate_manifest_edges_when_final_build_start_reconciles(self):
+        # Observed live Siso output emits edge:2/edge:8 while regenerating
+        # manifests, then reports the real full graph in the final build-start
+        # line. The completed summary agrees with Ready+Pending, not edge:8.
+        output = """schedule pending:1+ready:0 (node:145581 edge:2)
+build start: Ready 1 Pending 1
+rebuild manifest finished
+schedule pending:1+ready:0 (node:591352 edge:2)
+build start: Ready 1 Pending 1
+rebuild manifest finished
+schedule pending:1+ready:0 (node:591352 edge:8)
+build start: Ready 9463 Pending 99634
+1m45.01s Build Succeeded: 56599 steps - 538.98/s
+noexec:0 local:0 remote:0 cache:0 skip:52498
+"""
+        self.assertEqual(M.parse_pending_actions(output), 56599)
+        summary = M.parse_siso_summary(output)
+        self.assertEqual(summary["graph_action_count"], 109097)
+        self.assertEqual(summary["siso_skipped_actions"], 52498)
+
     def test_observed_failure_summary_is_pending_work_not_steps_minus_skip(self):
         output = """schedule pending:99634+ready:9463 (node:591352 edge:109097)
 1m20.07s Build Succeeded: 14989 steps - 187.20/s
