@@ -18,6 +18,7 @@ NO_WORK = re.compile(r"(?:ninja: no work to do\.|no work to do)", re.I)
 SISO_SUCCESS = re.compile(r"^\s*\d+(?:m\d+(?:\.\d+)?s|\.\d+s)\s+Build Succeeded: (\d+) steps(?:\s+-\s+[\d.]+/s)?\s*$", re.M)
 SISO_SKIP = re.compile(r"^\s*noexec:\d+ local:\d+ remote:\d+ cache:\d+ skip:(\d+)\s*$", re.M)
 SISO_EDGE = re.compile(r"\bedge:(\d+)\b", re.I)
+SISO_BUILD_START = re.compile(r"^\s*build start:\s*Ready\s+(\d+)\s+Pending\s+(\d+)\s*$", re.M | re.I)
 
 
 class RemainingWorkError(RuntimeError):
@@ -48,13 +49,38 @@ def parse_siso_summary(output: str) -> dict[str, int] | None:
     if pending < 0 or skipped < 0:
         raise RemainingWorkError(f"negative Siso dry-run counters: steps={pending}, skip={skipped}")
     graph_total = pending + skipped
+
+    # Siso can emit several small "schedule pending ... edge:N" counters while
+    # regenerating its manifest. The final one can describe only the manifest
+    # regeneration subgraph (for example edge:8), not the full requested target
+    # graph. Prefer the final full "build start: Ready R Pending P" record when
+    # available: R+P must reconcile with Build Succeeded steps + skip. Older
+    # output formats that lack that record may reconcile against a matching edge
+    # counter instead.
     edges = [int(n) for n in SISO_EDGE.findall(output)]
-    if edges and edges[-1] != graph_total:
-        raise RemainingWorkError(
-            "Siso dry-run graph accounting mismatch: "
-            f"steps={pending} skip={skipped} sum={graph_total} last_graph_edge_count={edges[-1]}"
-        )
-    if pending == 0 and not (graph_total > 0 and edges and edges[-1] == graph_total):
+    build_starts = [
+        (int(ready), int(queued))
+        for ready, queued in SISO_BUILD_START.findall(output)
+    ]
+    graph_from_build_start = sum(build_starts[-1]) if build_starts else None
+    if graph_from_build_start is not None:
+        if graph_from_build_start != graph_total:
+            raise RemainingWorkError(
+                "Siso dry-run graph accounting mismatch: "
+                f"steps={pending} skip={skipped} sum={graph_total} "
+                f"last_build_start_total={graph_from_build_start}"
+            )
+        graph_reconciled = True
+    else:
+        graph_reconciled = graph_total in edges
+        if edges and not graph_reconciled:
+            raise RemainingWorkError(
+                "Siso dry-run graph accounting mismatch: "
+                f"steps={pending} skip={skipped} sum={graph_total} "
+                f"observed_edge_counts={edges[-10:]}"
+            )
+
+    if pending == 0 and not (graph_total > 0 and graph_reconciled):
         raise RemainingWorkError(
             "zero Siso steps without an explicit no-work result and reconciled graph"
         )
